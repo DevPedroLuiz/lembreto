@@ -530,7 +530,7 @@ export default function App() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
             <div>
               <h2 className="text-3xl font-bold mb-1">
-                {activeTab === 'dashboard' ? `Olá, ${currentUser.name.split(' ')[0]} 👋` : 'Suas Atividades'}
+                {activeTab === 'dashboard' ? `Olá, ${currentUser.name.split(' ')[0]}` : 'Suas Atividades'}
               </h2>
               <p className="text-slate-500 dark:text-slate-400">
                 {activeTab === 'dashboard' ? 'Aqui está o panorama do seu dia.' : 'Gerencie e organize suas prioridades.'}
@@ -568,7 +568,7 @@ export default function App() {
                       {pendingTasks.length === 0 && (
                         <div className="py-16 text-center opacity-60">
                           <CheckCircle2 size={40} className="mx-auto mb-4 text-emerald-500" />
-                          <p className="font-medium">Nenhuma pendência! 🎉</p>
+                          <p className="font-medium">Nenhuma pendência.</p>
                         </div>
                       )}
                     </div>
