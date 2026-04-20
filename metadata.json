@@ -1,5 +1,5 @@
 {
-  "name": "TaskMaster",
+  "name": "Lembreto",
   "description": "Sistema de gerenciamento de tarefas com notificações e dashboard.",
   "requestFramePermissions": ["notifications"],
   "majorCapabilities": []
