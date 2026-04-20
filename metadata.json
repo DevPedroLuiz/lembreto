@@ -1,0 +1,6 @@
+{
+  "name": "TaskMaster",
+  "description": "Sistema de gerenciamento de tarefas com notificações e dashboard.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": []
+}
