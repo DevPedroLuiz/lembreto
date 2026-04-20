@@ -383,7 +383,7 @@ export default function App() {
             <div className="w-16 h-16 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4 text-white shadow-lg shadow-blue-500/20">
               <Target size={32} />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">TaskMaster</h1>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lembreto</h1>
             <p className="text-slate-500 mt-2 text-sm">
               {isRecovering ? 'Recuperar senha' : isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
             </p>
@@ -467,7 +467,7 @@ export default function App() {
           <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-sky-400 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
             <Target size={22} />
           </div>
-          <h1 className="font-bold text-xl tracking-tight">TaskMaster</h1>
+          <h1 className="font-bold text-xl tracking-tight">Lembreto</h1>
         </div>
 
         <nav className="flex-1 space-y-2">
@@ -514,7 +514,7 @@ export default function App() {
         <header className="md:hidden flex items-center justify-between p-4 border-b border-slate-200/60 dark:border-white/5 bg-white/70 dark:bg-[#0a0f1e]/80 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-2">
             <Target size={22} className="text-blue-500" />
-            <h1 className="font-bold text-lg">TaskMaster</h1>
+            <h1 className="font-bold text-lg">Lembreto</h1>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowSettings(true)} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-colors">
