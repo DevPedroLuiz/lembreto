@@ -1,0 +1,11 @@
+{
+  "tasks": [],
+  "users": [
+    {
+      "id": "b900a5a1-c00b-4f7a-aaba-471ac9bea941",
+      "name": "Pedro Luiz",
+      "email": "pedroluiz1600@gmail.com",
+      "password": "123"
+    }
+  ]
+}
