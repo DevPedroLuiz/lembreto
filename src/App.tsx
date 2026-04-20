@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import {
   CheckCircle2, Circle, Clock, Plus, Trash2, Bell, Search, Moon, Sun,
   LayoutDashboard, ListTodo, CalendarDays, Target, Sparkles,
   BellRing, LogOut, Mail, Lock, User as UserIcon, X, Tag,
@@ -22,7 +22,6 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  password: string;
   avatar?: string | null;
 }
 
@@ -40,41 +39,57 @@ export interface Task {
 
 const CATEGORIES = ["Geral", "Trabalho", "Pessoal", "Estudos"];
 
-// ─── Local Storage Helpers ───────────────────────────────────────────────────
+// ── Session / Config (localStorage apenas para preferências locais) ────────────
 const LS = {
-  getUsers: (): User[] => {
-    try { return JSON.parse(localStorage.getItem('tm_users') || '[]'); } catch { return []; }
-  },
-  saveUsers: (users: User[]) => localStorage.setItem('tm_users', JSON.stringify(users)),
-
-  getTasks: (): Task[] => {
-    try { return JSON.parse(localStorage.getItem('tm_tasks') || '[]'); } catch { return []; }
-  },
-  saveTasks: (tasks: Task[]) => localStorage.setItem('tm_tasks', JSON.stringify(tasks)),
-
   getSession: (): { user: User; token: string } | null => {
-    try {
-      const raw = localStorage.getItem('tm_session');
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
+    try { const r = localStorage.getItem('tm_session'); return r ? JSON.parse(r) : null; } catch { return null; }
   },
   saveSession: (user: User, token: string) =>
     localStorage.setItem('tm_session', JSON.stringify({ user, token })),
   clearSession: () => localStorage.removeItem('tm_session'),
-
-  getConfig: () => {
-    try { return JSON.parse(localStorage.getItem('tm_config') || '{}'); } catch { return {}; }
-  },
+  getConfig: () => { try { return JSON.parse(localStorage.getItem('tm_config') || '{}'); } catch { return {}; } },
   saveConfig: (cfg: object) => localStorage.setItem('tm_config', JSON.stringify(cfg)),
 };
 
-function uuid() {
-  return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
+// ── API Helpers ────────────────────────────────────────────────────────────────
+const buildHeaders = (token?: string): Record<string, string> => ({
+  'Content-Type': 'application/json',
+  ...(token ? { 'x-user-id': token } : {}),
+});
+
+async function apiPost(path: string, body: object, token?: string) {
+  const res = await fetch(path, { method: 'POST', headers: buildHeaders(token), body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
+  return data;
 }
 
-// ─── App ─────────────────────────────────────────────────────────────────────
+async function apiPut(path: string, body: object, token: string) {
+  const res = await fetch(path, { method: 'PUT', headers: buildHeaders(token), body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
+  return data;
+}
+
+async function apiGet(path: string, token: string) {
+  const res = await fetch(path, { headers: buildHeaders(token) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
+  return data;
+}
+
+async function apiDelete(path: string, token: string) {
+  const res = await fetch(path, { method: 'DELETE', headers: buildHeaders(token) });
+  if (res.status !== 204 && !res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || 'Erro ao deletar');
+  }
+}
+
+// ── App ────────────────────────────────────────────────────────────────────────
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [darkMode, setDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks'>('dashboard');
@@ -98,6 +113,7 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState('');
 
   // Settings
@@ -114,32 +130,21 @@ export default function App() {
   const [formCategory, setFormCategory] = useState<string>('Geral');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  // ── Bootstrap ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Restore session
     const session = LS.getSession();
-    if (session) {
-      // Refresh user from storage (may have been updated)
-      const users = LS.getUsers();
-      const fresh = users.find(u => u.id === session.user.id);
-      if (fresh) {
-        setCurrentUser(fresh);
-        setTasks(LS.getTasks().filter(t => t.userId === fresh.id));
-      } else {
-        LS.clearSession();
-      }
+    if (session?.token && session?.user) {
+      setCurrentUser(session.user);
+      setToken(session.token);
     }
 
-    // Config
     const cfg = LS.getConfig() as any;
     if (cfg.sound !== undefined) setConfigSound(cfg.sound);
     if (cfg.confirmDelete !== undefined) setConfigConfirmDelete(cfg.confirmDelete);
     if (cfg.showCompleted !== undefined) setConfigShowCompleted(cfg.showCompleted);
 
-    // Dark mode preference
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) setDarkMode(true);
 
-    // Notifications
     if ('Notification' in window) {
       setNotifPerm(Notification.permission);
       if (Notification.permission === 'default') {
@@ -149,11 +154,19 @@ export default function App() {
     }
   }, []);
 
+  // Carrega tarefas quando token estiver disponível
+  useEffect(() => {
+    if (!token) return;
+    apiGet('/api/tasks', token)
+      .then(data => { if (Array.isArray(data)) setTasks(data); })
+      .catch(() => setTasks([]));
+  }, [token]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   const showToast = useCallback((title: string, message: string) => {
     setToastMsg({ title, message });
     setTimeout(() => setToastMsg(null), 4000);
@@ -190,54 +203,56 @@ export default function App() {
     LS.saveConfig(next);
   };
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
-  const handleAuth = (e: React.FormEvent) => {
+  // ── Auth ──────────────────────────────────────────────────────────────────────
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    const users = LS.getUsers();
+    setAuthLoading(true);
 
-    if (isLogin) {
-      const user = users.find(u => u.email === authEmail && u.password === authPassword);
-      if (!user) { setAuthError('Email ou senha incorretos.'); return; }
-      setCurrentUser(user);
-      setTasks(LS.getTasks().filter(t => t.userId === user.id));
-      LS.saveSession(user, user.id);
-      notify('Bem-vindo de volta!', `Olá, ${user.name}!`);
-    } else {
-      if (!authName.trim()) { setAuthError('Informe seu nome.'); return; }
-      if (authPassword.length < 3) { setAuthError('A senha precisa ter ao menos 3 caracteres.'); return; }
-      if (users.find(u => u.email === authEmail)) { setAuthError('Este email já está em uso.'); return; }
-      const newUser: User = { id: uuid(), name: authName.trim(), email: authEmail, password: authPassword, avatar: null };
-      LS.saveUsers([...users, newUser]);
-      setCurrentUser(newUser);
-      setTasks([]);
-      LS.saveSession(newUser, newUser.id);
-      notify('Conta criada!', `Bem-vindo, ${newUser.name}!`);
+    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    const payload = isLogin
+      ? { email: authEmail, password: authPassword }
+      : { name: authName.trim(), email: authEmail, password: authPassword };
+
+    try {
+      const data = await apiPost(endpoint, payload);
+      setCurrentUser(data.user);
+      setToken(data.token);
+      LS.saveSession(data.user, data.token);
+      setAuthName(''); setAuthEmail(''); setAuthPassword('');
+      notify('Bem-vindo!', `Olá, ${data.user.name}!`);
+    } catch (err: any) {
+      setAuthError(err.message || 'Falha na comunicação com o servidor.');
+    } finally {
+      setAuthLoading(false);
     }
-
-    setAuthName(''); setAuthEmail(''); setAuthPassword('');
   };
 
-  const handleRecover = (e: React.FormEvent) => {
+  const handleRecover = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    const users = LS.getUsers();
-    const user = users.find(u => u.email === recoverEmail);
-    if (!user) { setAuthError('Email não encontrado.'); return; }
-    // Show password hint (local-only demo behavior)
-    notify('Recuperação', `Sua senha é: ${user.password}`);
-    setIsRecovering(false);
-    setRecoverEmail('');
+    setAuthLoading(true);
+    try {
+      const data = await apiPost('/api/auth/recover', { email: recoverEmail });
+      notify('Recuperação', data.message);
+      setIsRecovering(false);
+      setRecoverEmail('');
+    } catch (err: any) {
+      setAuthError(err.message || 'Erro ao recuperar senha.');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleLogout = () => {
     LS.clearSession();
     setCurrentUser(null);
+    setToken(null);
     setTasks([]);
     setActiveTab('dashboard');
   };
 
-  // ── Profile ────────────────────────────────────────────────────────────────
+  // ── Profile ──────────────────────────────────────────────────────────────────
   const openProfile = () => {
     setProfName(currentUser?.name || '');
     setProfEmail(currentUser?.email || '');
@@ -254,70 +269,56 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const handleUpdateProfile = (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
-    const users = LS.getUsers();
-
-    // Check email uniqueness
-    if (profEmail !== currentUser.email && users.find(u => u.email === profEmail)) {
-      notify('Erro', 'Este email já está em uso.'); return;
+    if (!token) return;
+    try {
+      const data = await apiPut('/api/auth/profile', {
+        name: profName,
+        email: profEmail,
+        password: profPassword || undefined,
+        avatar: profAvatar,
+      }, token);
+      setCurrentUser(data.user);
+      LS.saveSession(data.user, token);
+      notify('Perfil atualizado!', 'Suas informações foram salvas.');
+      setShowProfileForm(false);
+    } catch (err: any) {
+      notify('Erro', err.message || 'Falha ao atualizar perfil.');
     }
-
-    const updated: User = {
-      ...currentUser,
-      name: profName.trim() || currentUser.name,
-      email: profEmail || currentUser.email,
-      password: profPassword || currentUser.password,
-      avatar: profAvatar,
-    };
-
-    LS.saveUsers(users.map(u => u.id === updated.id ? updated : u));
-    LS.saveSession(updated, updated.id);
-    setCurrentUser(updated);
-    notify('Perfil atualizado!', 'Suas informações foram salvas.');
-    setShowProfileForm(false);
   };
 
-  // ── Tasks ──────────────────────────────────────────────────────────────────
-  const handleSubmitTask = (e: React.FormEvent) => {
+  // ── Tasks ─────────────────────────────────────────────────────────────────────
+  const handleSubmitTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim() || !formDate || !currentUser) return;
+    if (!formTitle.trim() || !formDate || !token) return;
 
     if (isPast(new Date(formDate)) && !isToday(new Date(formDate))) {
       notify('Atenção', 'A data estipulada já passou.');
     }
 
-    const allTasks = LS.getTasks();
+    const taskData = {
+      title: formTitle,
+      description: formDesc,
+      dueDate: new Date(formDate).toISOString(),
+      priority: formPriority,
+      category: formCategory,
+    };
 
-    if (editingTaskId) {
-      const updated = allTasks.map(t =>
-        t.id === editingTaskId
-          ? { ...t, title: formTitle, description: formDesc, dueDate: new Date(formDate).toISOString(), priority: formPriority, category: formCategory }
-          : t
-      );
-      LS.saveTasks(updated);
-      setTasks(updated.filter(t => t.userId === currentUser.id));
-      notify('Atualizada!', 'Sua tarefa foi modificada.');
-    } else {
-      const newTask: Task = {
-        id: uuid(),
-        userId: currentUser.id,
-        title: formTitle,
-        description: formDesc,
-        dueDate: new Date(formDate).toISOString(),
-        priority: formPriority,
-        category: formCategory,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      };
-      const updated = [...allTasks, newTask];
-      LS.saveTasks(updated);
-      setTasks(updated.filter(t => t.userId === currentUser.id));
-      notify('Tarefa criada!', `"${newTask.title}" foi adicionada.`);
+    try {
+      if (editingTaskId) {
+        const updated = await apiPut(`/api/tasks/${editingTaskId}`, taskData, token);
+        setTasks(prev => prev.map(t => t.id === editingTaskId ? updated : t));
+        notify('Atualizada!', 'Sua tarefa foi modificada.');
+      } else {
+        const created = await apiPost('/api/tasks', taskData, token);
+        setTasks(prev => [...prev, created]);
+        notify('Tarefa criada!', `"${created.title}" foi adicionada.`);
+      }
+      resetForm();
+    } catch (err: any) {
+      notify('Erro', err.message || 'Falha ao salvar tarefa.');
     }
-
-    resetForm();
   };
 
   const resetForm = () => {
@@ -338,29 +339,35 @@ export default function App() {
     setShowTaskForm(true);
   };
 
-  const toggleTaskStatus = (task: Task) => {
+  const toggleTaskStatus = async (task: Task) => {
+    if (!token) return;
     const newStatus: Status = task.status === 'pending' ? 'completed' : 'pending';
-    const allTasks = LS.getTasks();
-    const updated = allTasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t);
-    LS.saveTasks(updated);
-    setTasks(updated.filter(t => t.userId === currentUser!.id));
-    if (newStatus === 'completed') {
-      playSuccessSound();
-      notify('Parabéns!', `"${task.title}" concluída!`);
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    try {
+      await apiPut(`/api/tasks/${task.id}`, { status: newStatus }, token);
+      if (newStatus === 'completed') {
+        playSuccessSound();
+        notify('Parabéns!', `"${task.title}" concluída!`);
+      }
+    } catch {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: task.status } : t));
     }
   };
 
-  const deleteTask = (id: string, e: React.MouseEvent) => {
+  const deleteTask = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!token) return;
     if (configConfirmDelete && !window.confirm('Deseja excluir esta tarefa permanentemente?')) return;
-    const allTasks = LS.getTasks();
-    const updated = allTasks.filter(t => t.id !== id);
-    LS.saveTasks(updated);
-    setTasks(updated.filter(t => t.userId === currentUser!.id));
-    showToast('Removida', 'A tarefa foi deletada.');
+    setTasks(prev => prev.filter(t => t.id !== id));
+    try {
+      await apiDelete(`/api/tasks/${id}`, token);
+      showToast('Removida', 'A tarefa foi deletada.');
+    } catch (err: any) {
+      notify('Erro', err.message || 'Falha ao deletar.');
+    }
   };
 
-  // ── Derived Data ───────────────────────────────────────────────────────────
+  // ── Derived Data ──────────────────────────────────────────────────────────────
   const pendingTasks = tasks.filter(t => t.status === 'pending');
   const completedTasks = tasks.filter(t => t.status === 'completed');
   const filteredTasks = pendingTasks.filter(t => {
@@ -374,7 +381,7 @@ export default function App() {
   const todayCount = pendingTasks.filter(t => { try { return isToday(parseISO(t.dueDate)); } catch { return false; } }).length;
   const overdueCount = pendingTasks.filter(t => { try { return isPast(parseISO(t.dueDate)) && !isToday(parseISO(t.dueDate)); } catch { return false; } }).length;
 
-  // ── Auth Screen ─────────────────────────────────────────────────────────────
+  // ── Auth Screen ───────────────────────────────────────────────────────────────
   if (!currentUser) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-[#040814]">
@@ -399,14 +406,13 @@ export default function App() {
                   className="w-full bg-slate-50 dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm" />
               </div>
               {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95">
-                Recuperar Senha
+              <button type="submit" disabled={authLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95">
+                {authLoading ? 'Enviando...' : 'Recuperar Senha'}
               </button>
               <p className="text-center text-sm">
                 <button type="button" onClick={() => { setIsRecovering(false); setAuthError(''); }}
-                  className="text-blue-600 font-semibold hover:underline">
-                  Voltar ao login
-                </button>
+                  className="text-blue-600 font-semibold hover:underline">Voltar ao login</button>
               </p>
             </form>
           ) : (
@@ -434,14 +440,13 @@ export default function App() {
               {isLogin && (
                 <div className="text-right">
                   <button type="button" onClick={() => { setIsRecovering(true); setAuthError(''); }}
-                    className="text-blue-600 text-sm font-semibold hover:underline">
-                    Esqueceu a senha?
-                  </button>
+                    className="text-blue-600 text-sm font-semibold hover:underline">Esqueceu a senha?</button>
                 </div>
               )}
               {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
-                {isLogin ? 'Entrar' : 'Criar Conta'}
+              <button type="submit" disabled={authLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
+                {authLoading ? 'Aguarde...' : isLogin ? 'Entrar' : 'Criar Conta'}
               </button>
               <p className="text-center text-slate-500 text-sm">
                 {isLogin ? 'Não tem uma conta?' : 'Já possui uma conta?'}{' '}
@@ -457,7 +462,7 @@ export default function App() {
     );
   }
 
-  // ── Main App ───────────────────────────────────────────────────────────────
+  // ── Main App ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen w-full bg-slate-50 dark:bg-[#02040a] text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
 
@@ -640,7 +645,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* ── Task Drawer ───────────────────────────────────────────────────── */}
+      {/* ── Task Drawer ──────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showTaskForm && (
           <>
@@ -712,7 +717,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ── Profile Drawer ────────────────────────────────────────────────── */}
+      {/* ── Profile Drawer ─────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showProfileForm && (
           <>
@@ -778,7 +783,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ── Settings Drawer ───────────────────────────────────────────────── */}
+      {/* ── Settings Drawer ─────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showSettings && (
           <>
@@ -866,7 +871,7 @@ export default function App() {
   );
 }
 
-// ─── Sub-Components ───────────────────────────────────────────────────────────
+// ── Sub-Components ─────────────────────────────────────────────────────────────
 
 function SidebarItem({ active, onClick, icon, label, badge }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; badge?: number }) {
   return (
