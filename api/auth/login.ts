@@ -2,10 +2,31 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
 import { signToken } from '../../lib/jwt.js';
+import { checkRateLimit, clearRateLimit } from '../_rate_limit.js';
+
+function getIP(req: VercelRequest): string {
+  return (
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ??
+    (req.socket as any)?.remoteAddress ??
+    'unknown'
+  );
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST')
     return res.status(405).json({ error: 'Método não permitido' });
+
+  const ip = getIP(req);
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  const rl = await checkRateLimit(ip, 'login');
+  if (!rl.allowed) {
+    const minutes = Math.ceil(rl.retryAfterSeconds! / 60);
+    return res.status(429).json({
+      error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
+      retryAfterSeconds: rl.retryAfterSeconds,
+    });
+  }
 
   const { email, password } = req.body ?? {};
   if (!email || !password)
@@ -28,7 +49,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!passwordMatch)
       return res.status(401).json({ error: 'Email ou senha incorretos' });
 
-    // Gera JWT assinado — nunca devolve o hash ao cliente
+    // Login bem-sucedido: limpa o histórico de tentativas deste IP
+    await clearRateLimit(ip, 'login');
+
     const { password_hash: _, ...safeUser } = user;
     const token = signToken({ sub: safeUser.id, email: safeUser.email });
 

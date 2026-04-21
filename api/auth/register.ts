@@ -2,17 +2,38 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
 import { signToken } from '../../lib/jwt.js';
+import { checkRateLimit } from '../_rate_limit.js';
+
+function getIP(req: VercelRequest): string {
+  return (
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ??
+    (req.socket as any)?.remoteAddress ??
+    'unknown'
+  );
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST')
     return res.status(405).json({ error: 'Método não permitido' });
+
+  const ip = getIP(req);
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  const rl = await checkRateLimit(ip, 'register');
+  if (!rl.allowed) {
+    const minutes = Math.ceil(rl.retryAfterSeconds! / 60);
+    return res.status(429).json({
+      error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
+      retryAfterSeconds: rl.retryAfterSeconds,
+    });
+  }
 
   const { name, email, password } = req.body ?? {};
   if (!name || !email || !password)
     return res.status(400).json({ error: 'Preencha todos os campos' });
 
   if (password.length < 6)
-    return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres' });
+    return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
 
   try {
     const existing = await sql`
@@ -21,16 +42,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (existing.length > 0)
       return res.status(400).json({ error: 'Este email já está em uso' });
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     const rows = await sql`
       INSERT INTO users (name, email, password)
-      VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${passwordHash})
+      VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${hashedPassword})
       RETURNING id, name, email, avatar
     `;
-    const user = rows[0];
-
-    // Gera JWT assinado — payload contém apenas id e email, nunca a senha
+    const user  = rows[0];
     const token = signToken({ sub: user.id, email: user.email });
 
     return res.status(201).json({ user, token });
