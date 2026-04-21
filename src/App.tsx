@@ -232,6 +232,7 @@ export default function App() {
   // Auth
   const [isLogin, setIsLogin] = useState(true);
   const [isRecovering, setIsRecovering] = useState(false);
+  const [recoverSuccess, setRecoverSuccess] = useState(false);
   const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -355,9 +356,11 @@ export default function App() {
     setAuthLoading(true);
     try {
       const data = await apiPost('/api/auth/recover', { email: recoverEmail });
-      notify('Recuperação', data.message);
-      setIsRecovering(false);
-      setRecoverEmail('');
+      setRecoverSuccess(true);
+      // Em dev, se o Resend não tiver domínio verificado, o link vem na resposta
+      if (data._devResetLink) {
+        console.warn('[dev] Link de reset:', data._devResetLink);
+      }
     } catch (err: any) {
       setAuthError(err.message || 'Erro ao recuperar senha.');
     } finally {
@@ -519,29 +522,66 @@ export default function App() {
             </div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lembreto</h1>
             <p className="text-slate-500 mt-2 text-sm">
-              {isRecovering ? 'Recuperar senha' : isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
+              {isRecovering
+                ? recoverSuccess ? 'E-mail enviado!' : 'Recuperar senha'
+                : isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
             </p>
           </div>
 
           {isRecovering ? (
-            <form onSubmit={handleRecover} className="space-y-4">
-              <p className="text-sm text-slate-500 text-center">Informe seu email para recuperar sua senha.</p>
-              <div className="relative">
-                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input required type="email" placeholder="Seu email" value={recoverEmail}
-                  onChange={e => setRecoverEmail(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm" />
-              </div>
-              {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
-              <button type="submit" disabled={authLoading}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95">
-                {authLoading ? 'Enviando...' : 'Recuperar Senha'}
-              </button>
-              <p className="text-center text-sm">
-                <button type="button" onClick={() => { setIsRecovering(false); setAuthError(''); }}
-                  className="text-blue-600 font-semibold hover:underline">Voltar ao login</button>
-              </p>
-            </form>
+            <div>
+              {recoverSuccess ? (
+                /* ── Tela de confirmação ── */
+                <div className="space-y-6 text-center">
+                  <div className="flex justify-center">
+                    <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-500/10 rounded-full flex items-center justify-center">
+                      <Mail size={28} className="text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-800 dark:text-slate-100 mb-2">Verifique seu e-mail</h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
+                      Se <span className="font-semibold text-slate-700 dark:text-slate-200">{recoverEmail}</span> estiver cadastrado, você receberá um link de redefinição em breve.
+                    </p>
+                    <p className="text-slate-400 text-xs mt-3">Não recebeu? Verifique a pasta de spam ou tente novamente.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setIsRecovering(false); setRecoverSuccess(false); setRecoverEmail(''); setAuthError(''); }}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95"
+                  >
+                    Voltar ao Login
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRecoverSuccess(false); setAuthError(''); }}
+                    className="w-full text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm font-medium transition-colors"
+                  >
+                    Tentar com outro e-mail
+                  </button>
+                </div>
+              ) : (
+                /* ── Formulário de recuperação ── */
+                <form onSubmit={handleRecover} className="space-y-4">
+                  <p className="text-sm text-slate-500 text-center">Informe seu email para recuperar sua senha.</p>
+                  <div className="relative">
+                    <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input required type="email" placeholder="Seu email" value={recoverEmail}
+                      onChange={e => setRecoverEmail(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm" />
+                  </div>
+                  {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
+                  <button type="submit" disabled={authLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95">
+                    {authLoading ? 'Enviando...' : 'Recuperar Senha'}
+                  </button>
+                  <p className="text-center text-sm">
+                    <button type="button" onClick={() => { setIsRecovering(false); setAuthError(''); }}
+                      className="text-blue-600 font-semibold hover:underline">Voltar ao login</button>
+                  </p>
+                </form>
+              )}
+            </div>
           ) : (
             <form onSubmit={handleAuth} className="space-y-4">
               {!isLogin && (

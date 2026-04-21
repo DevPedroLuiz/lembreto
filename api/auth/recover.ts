@@ -100,7 +100,7 @@ async function sendRecoveryEmail(to: string, name: string, resetLink: string): P
     },
     body: JSON.stringify({
       // Troque pelo seu domínio verificado no Resend, ex: "Lembreto <noreply@seudominio.com>"
-      from: 'Lembreto <onboarding@resend.dev>',
+      from: 'Lembreto <noreply@lembreto.com>',
       to: [to],
       subject: '🔐 Redefinição de senha — Lembreto',
       html,
