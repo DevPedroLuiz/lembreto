@@ -39,12 +39,7 @@ export interface Task {
 
 const CATEGORIES = ["Geral", "Trabalho", "Pessoal", "Estudos"];
 
-// ── localStorage — armazena APENAS dados não-sensíveis ────────────────────────
-// O JWT NUNCA é persistido. Ele vive exclusivamente em memória (useState).
-// Consequência intencional: ao recarregar a página o usuário precisa fazer login
-// novamente. Isso é a troca de segurança contra ataques XSS via localStorage.
 const LS = {
-  // Salva apenas os dados de exibição do usuário — sem token
   saveUser: (user: User) =>
     localStorage.setItem('tm_user', JSON.stringify(user)),
   loadUser: (): User | null => {
@@ -60,8 +55,6 @@ const LS = {
   saveConfig: (cfg: object) => localStorage.setItem('tm_config', JSON.stringify(cfg)),
 };
 
-// ── API Helpers ───────────────────────────────────────────────────────────────
-// Token vai no header Authorization: Bearer <jwt> — nunca em query string ou body
 const buildHeaders = (token?: string): Record<string, string> => ({
   'Content-Type': 'application/json',
   ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -107,8 +100,116 @@ async function apiDelete(path: string, token: string) {
   }
 }
 
+// ── Reset Password Screen ─────────────────────────────────────────────────────
+function ResetPasswordScreen() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token') || '';
+
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) { setError('A senha deve ter no mínimo 6 caracteres.'); return; }
+    if (password !== confirm) { setError('As senhas não coincidem.'); return; }
+    setLoading(true);
+    try {
+      await apiPost('/api/auth/reset-password', { token, password });
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao redefinir senha.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-[#040814]">
+      <div className="max-w-md w-full bg-white dark:bg-[#0a122a] rounded-3xl p-8 shadow-2xl border border-slate-200 dark:border-white/10">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4 text-white shadow-lg shadow-blue-500/20">
+            <Lock size={32} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lembreto</h1>
+          <p className="text-slate-500 mt-2 text-sm">
+            {success ? 'Senha redefinida!' : 'Crie uma nova senha'}
+          </p>
+        </div>
+
+        {success ? (
+          <div className="space-y-4 text-center">
+            <div className="flex justify-center">
+              <CheckCircle2 size={48} className="text-emerald-500" />
+            </div>
+            <p className="text-slate-600 dark:text-slate-300 text-sm">
+              Sua senha foi redefinida com sucesso. Você já pode fazer login.
+            </p>
+            <a href="/"
+              className="block w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95 text-center">
+              Ir para o Login
+            </a>
+          </div>
+        ) : !token ? (
+          <div className="text-center space-y-4">
+            <p className="text-rose-500 font-medium text-sm">Link inválido ou expirado.</p>
+            <a href="/" className="block w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95 text-center">
+              Voltar ao Login
+            </a>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative">
+              <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                required
+                type="password"
+                placeholder="Nova senha (mín. 6 caracteres)"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+              />
+            </div>
+            <div className="relative">
+              <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                required
+                type="password"
+                placeholder="Confirmar nova senha"
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+              />
+            </div>
+            {error && <p className="text-rose-500 text-sm text-center font-medium">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95"
+            >
+              {loading ? 'Salvando...' : 'Redefinir Senha'}
+            </button>
+            <p className="text-center text-sm">
+              <a href="/" className="text-blue-600 font-semibold hover:underline">Voltar ao login</a>
+            </p>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
+  // Renderiza a tela de reset se estiver na rota /reset-password
+  if (window.location.pathname === '/reset-password') {
+    return <ResetPasswordScreen />;
+  }
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   // token vive APENAS em memória — nunca em localStorage/sessionStorage/cookie
   const [token, setToken] = useState<string | null>(null);
@@ -154,13 +255,8 @@ export default function App() {
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Recupera apenas os dados de exibição do usuário (sem token)
-    // O token não existe mais após reload — o usuário precisará fazer login
     const savedUser = LS.loadUser();
     if (savedUser) {
-      // Exibe os dados do usuário salvo enquanto não há token
-      // O app mostrará a tela de login pois token === null
-      // Pré-preenche o e-mail para agilizar o re-login
       setAuthEmail(savedUser.email);
     }
 
@@ -180,7 +276,6 @@ export default function App() {
     }
   }, []);
 
-  // Carrega tarefas quando token estiver disponível
   useEffect(() => {
     if (!token) return;
     apiGet('/api/tasks', token)
@@ -242,14 +337,9 @@ export default function App() {
 
     try {
       const data = await apiPost(endpoint, payload);
-
-      // Token fica apenas em memória — nunca vai ao localStorage
       setToken(data.token);
       setCurrentUser(data.user);
-
-      // Persiste apenas os dados de exibição (nome, e-mail, avatar)
       LS.saveUser(data.user);
-
       setAuthName(''); setAuthEmail(''); setAuthPassword('');
       notify('Bem-vindo!', `Olá, ${data.user.name}!`);
     } catch (err: any) {
@@ -275,20 +365,16 @@ export default function App() {
     }
   };
 
-  // Logout: invalida o token no servidor, depois limpa memória e localStorage
   const handleLogout = async () => {
     if (token) {
-      // Fire-and-forget — não bloqueia o logout local
-      // O token expira em 7 dias de qualquer forma
       fetch('/api/auth/logout', {
         method: 'POST',
         headers: buildHeaders(token),
-      }).catch(() => { /* ignora falha de rede */ });
+      }).catch(() => { });
     }
-
     LS.clearUser();
     setCurrentUser(null);
-    setToken(null);       // destrói o JWT da memória
+    setToken(null);
     setTasks([]);
     setActiveTab('dashboard');
   };
@@ -321,7 +407,6 @@ export default function App() {
         avatar: profAvatar,
       }, token);
       setCurrentUser(data.user);
-      // Atualiza os dados de exibição no localStorage (sem token)
       LS.saveUser(data.user);
       notify('Perfil atualizado!', 'Suas informações foram salvas.');
       setShowProfileForm(false);
@@ -424,7 +509,6 @@ export default function App() {
   const overdueCount = pendingTasks.filter(t => { try { return isPast(parseISO(t.dueDate)) && !isToday(parseISO(t.dueDate)); } catch { return false; } }).length;
 
   // ── Auth Screen ───────────────────────────────────────────────────────────
-  // Mostra login se não há token em memória (mesmo que haja dados de usuário salvos)
   if (!currentUser || !token) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-[#040814]">
