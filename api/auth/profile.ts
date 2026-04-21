@@ -1,19 +1,28 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
+import { extractBearerToken, verifyToken } from '../../lib/jwt.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'PUT')
     return res.status(405).json({ error: 'Método não permitido' });
 
-  const userId = req.headers['x-user-id'] as string;
-  if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+  // Valida o JWT no header Authorization
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token) return res.status(401).json({ error: 'Não autorizado' });
+
+  let userId: string;
+  try {
+    const payload = verifyToken(token);
+    userId = payload.sub;
+  } catch {
+    return res.status(401).json({ error: 'Token inválido ou expirado' });
+  }
 
   const { name, email, password, avatar } = req.body ?? {};
 
-  if (password !== undefined && password !== '' && password.length < 6) {
+  if (password !== undefined && password !== '' && password.length < 6)
     return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres' });
-  }
 
   try {
     if (email) {

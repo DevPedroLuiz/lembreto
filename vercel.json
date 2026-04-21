@@ -5,6 +5,7 @@
   "rewrites": [
     { "source": "/api/auth/register", "destination": "/api/auth/register" },
     { "source": "/api/auth/login",    "destination": "/api/auth/login"    },
+    { "source": "/api/auth/logout",   "destination": "/api/auth/logout"   },
     { "source": "/api/auth/recover",  "destination": "/api/auth/recover"  },
     { "source": "/api/auth/profile",  "destination": "/api/auth/profile"  },
     { "source": "/api/tasks/:id",     "destination": "/api/tasks/[id]"    },

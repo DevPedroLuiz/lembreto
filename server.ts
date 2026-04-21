@@ -8,11 +8,11 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { neon } from '@neondatabase/serverless';
+import { signToken, verifyToken, extractBearerToken } from './lib/jwt.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-// ── Database ──────────────────────────────────────────────────────────────────
 if (!process.env.DATABASE_URL) {
   throw new Error(
     '❌ DATABASE_URL não definida.\n' +
@@ -26,12 +26,32 @@ console.log('✅ DATABASE_URL carregada com sucesso.');
 
 // ── Auth Middleware ───────────────────────────────────────────────────────────
 const authMiddleware = async (req: any, res: any, next: any) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token) return res.status(401).json({ error: 'Não autorizado' });
+
+  let userId: string;
+  let tokenIat: number;
+  try {
+    const payload = verifyToken(token);
+    userId = payload.sub;
+    tokenIat = payload.iat ?? 0;
+  } catch {
+    return res.status(401).json({ error: 'Token inválido ou expirado' });
+  }
 
   try {
+    // Verifica blacklist (tokens invalidados via logout)
+    const blacklisted = await sql`
+      SELECT 1 FROM token_blacklist
+      WHERE token_jti = ${userId + '_' + tokenIat}
+        AND expires_at > NOW()
+    `;
+    if (blacklisted.length > 0)
+      return res.status(401).json({ error: 'Sessão encerrada. Faça login novamente.' });
+
     const rows = await sql`SELECT id, name, email, avatar FROM users WHERE id = ${userId}`;
     if (rows.length === 0) return res.status(401).json({ error: 'Usuário não encontrado' });
+
     req.user = rows[0];
     next();
   } catch (e: any) {
@@ -49,27 +69,20 @@ async function startServer() {
 
   // ── Auth Routes ──────────────────────────────────────────────────────────────
 
-  // Registro
   app.post('/api/auth/register', async (req, res) => {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password)
       return res.status(400).json({ error: 'Preencha todos os campos' });
-    }
-
-    if (password.length < 6) {
+    if (password.length < 6)
       return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres' });
-    }
 
     try {
       const existing = await sql`SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}`;
-      if (existing.length > 0) {
+      if (existing.length > 0)
         return res.status(400).json({ error: 'Este email já está em uso' });
-      }
 
-      // Gera o hash da senha com custo 12
       const passwordHash = await bcrypt.hash(password, 12);
-
       const rows = await sql`
         INSERT INTO users (name, email, password)
         VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${passwordHash})
@@ -77,57 +90,67 @@ async function startServer() {
       `;
       const user = rows[0];
       console.log('[register] Novo usuário criado:', user.email);
-      return res.status(201).json({ user, token: user.id });
+
+      const token = signToken({ sub: user.id, email: user.email });
+      return res.status(201).json({ user, token });
     } catch (e: any) {
       console.error('[register]', e.message);
       return res.status(500).json({ error: `Erro ao criar usuário: ${e.message}` });
     }
   });
 
-  // Login
   app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ error: 'Preencha todos os campos' });
-    }
 
     try {
-      // Busca incluindo o hash para comparação
       const rows = await sql`
         SELECT id, name, email, avatar, password AS password_hash
-        FROM users
-        WHERE email = ${email.trim().toLowerCase()}
+        FROM users WHERE email = ${email.trim().toLowerCase()}
       `;
 
-      // Resposta genérica (evita user enumeration)
-      if (rows.length === 0) {
+      if (rows.length === 0)
         return res.status(401).json({ error: 'Email ou senha incorretos' });
-      }
 
       const user = rows[0];
       const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-      if (!passwordMatch) {
+      if (!passwordMatch)
         return res.status(401).json({ error: 'Email ou senha incorretos' });
-      }
 
-      // Remove o hash antes de retornar ao cliente
       const { password_hash: _, ...safeUser } = user;
-      return res.json({ user: safeUser, token: safeUser.id });
+      const token = signToken({ sub: safeUser.id, email: safeUser.email });
+      return res.json({ user: safeUser, token });
     } catch (e: any) {
       console.error('[login]', e.message);
       return res.status(500).json({ error: `Erro interno: ${e.message}` });
     }
   });
 
-  // Recuperação de senha (simulada)
+  app.post('/api/auth/logout', async (req, res) => {
+    const token = extractBearerToken(req.headers.authorization);
+    if (!token) return res.json({ message: 'Logout realizado com sucesso' });
+
+    try {
+      const payload = verifyToken(token);
+      const jti = payload.sub + '_' + (payload.iat ?? 0);
+      await sql`
+        INSERT INTO token_blacklist (token_jti, user_id, expires_at)
+        VALUES (${jti}, ${payload.sub}, to_timestamp(${payload.exp ?? 0}))
+        ON CONFLICT (token_jti) DO NOTHING
+      `;
+    } catch {
+      // Token já expirado — logout silencioso
+    }
+    return res.json({ message: 'Logout realizado com sucesso' });
+  });
+
   app.post('/api/auth/recover', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Informe o email' });
 
     try {
-      // Sempre retorna a mesma resposta (evita user enumeration)
       await sql`SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}`;
       return res.json({ message: 'Se este email estiver cadastrado, você receberá um link em breve.' });
     } catch (e: any) {
@@ -136,40 +159,34 @@ async function startServer() {
     }
   });
 
-  // Atualizar perfil
   app.put('/api/auth/profile', authMiddleware, async (req: any, res: any) => {
     const { name, email, password, avatar } = req.body;
     const userId = req.user.id as string;
 
-    if (password !== undefined && password !== '' && password.length < 6) {
+    if (password !== undefined && password !== '' && password.length < 6)
       return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres' });
-    }
 
     try {
       if (email && email.trim().toLowerCase() !== req.user.email) {
         const conflict = await sql`
           SELECT id FROM users WHERE email = ${email.trim().toLowerCase()} AND id != ${userId}
         `;
-        if (conflict.length > 0) {
+        if (conflict.length > 0)
           return res.status(400).json({ error: 'Este email já está em uso' });
-        }
       }
 
       const current = await sql`SELECT name, email, password, avatar FROM users WHERE id = ${userId}`;
       if (current.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
 
       const cur = current[0];
-
-      // Só gera novo hash se uma nova senha foi fornecida
       let newPasswordHash = cur.password;
-      if (password && password.trim()) {
+      if (password && password.trim())
         newPasswordHash = await bcrypt.hash(password.trim(), 12);
-      }
 
       const rows = await sql`
         UPDATE users
-        SET name     = ${(name  && name.trim())                          || cur.name},
-            email    = ${(email && email.trim().toLowerCase())           || cur.email},
+        SET name     = ${(name  && name.trim())                || cur.name},
+            email    = ${(email && email.trim().toLowerCase()) || cur.email},
             password = ${newPasswordHash},
             avatar   = ${avatar !== undefined ? avatar : cur.avatar}
         WHERE id = ${userId}
@@ -184,22 +201,13 @@ async function startServer() {
 
   // ── Task Routes ───────────────────────────────────────────────────────────────
 
-  // Listar tarefas
   app.get('/api/tasks', authMiddleware, async (req: any, res: any) => {
     try {
       const rows = await sql`
-        SELECT
-          id,
-          user_id     AS "userId",
-          title,
-          description,
-          due_date    AS "dueDate",
-          priority,
-          category,
-          status,
-          created_at  AS "createdAt"
-        FROM tasks
-        WHERE user_id = ${req.user.id}
+        SELECT id, user_id AS "userId", title, description,
+               due_date AS "dueDate", priority, category, status,
+               created_at AS "createdAt"
+        FROM tasks WHERE user_id = ${req.user.id}
         ORDER BY created_at DESC
       `;
       return res.json(rows);
@@ -209,32 +217,18 @@ async function startServer() {
     }
   });
 
-  // Criar tarefa
   app.post('/api/tasks', authMiddleware, async (req: any, res: any) => {
     const { title, description, dueDate, priority, category } = req.body;
-    if (!title || !title.trim()) return res.status(400).json({ error: 'Título obrigatório' });
+    if (!title?.trim()) return res.status(400).json({ error: 'Título obrigatório' });
 
     try {
       const rows = await sql`
         INSERT INTO tasks (user_id, title, description, due_date, priority, category)
-        VALUES (
-          ${req.user.id},
-          ${title.trim()},
-          ${description || ''},
-          ${dueDate || null},
-          ${priority  || 'medium'},
-          ${category  || 'Geral'}
-        )
-        RETURNING
-          id,
-          user_id     AS "userId",
-          title,
-          description,
-          due_date    AS "dueDate",
-          priority,
-          category,
-          status,
-          created_at  AS "createdAt"
+        VALUES (${req.user.id}, ${title.trim()}, ${description || ''},
+                ${dueDate || null}, ${priority || 'medium'}, ${category || 'Geral'})
+        RETURNING id, user_id AS "userId", title, description,
+                  due_date AS "dueDate", priority, category, status,
+                  created_at AS "createdAt"
       `;
       return res.status(201).json(rows[0]);
     } catch (e: any) {
@@ -243,7 +237,6 @@ async function startServer() {
     }
   });
 
-  // Atualizar tarefa
   app.put('/api/tasks/:id', authMiddleware, async (req: any, res: any) => {
     const { id } = req.params;
     const { title, description, dueDate, priority, category, status } = req.body;
@@ -265,16 +258,9 @@ async function startServer() {
           category    = ${category    !== undefined ? category       : cur.category},
           status      = ${status      !== undefined ? status         : cur.status}
         WHERE id = ${id} AND user_id = ${req.user.id}
-        RETURNING
-          id,
-          user_id     AS "userId",
-          title,
-          description,
-          due_date    AS "dueDate",
-          priority,
-          category,
-          status,
-          created_at  AS "createdAt"
+        RETURNING id, user_id AS "userId", title, description,
+                  due_date AS "dueDate", priority, category, status,
+                  created_at AS "createdAt"
       `;
       return res.json(rows[0]);
     } catch (e: any) {
@@ -283,10 +269,8 @@ async function startServer() {
     }
   });
 
-  // Deletar tarefa
   app.delete('/api/tasks/:id', authMiddleware, async (req: any, res: any) => {
     const { id } = req.params;
-
     try {
       await sql`DELETE FROM tasks WHERE id = ${id} AND user_id = ${req.user.id}`;
       return res.status(204).send();
