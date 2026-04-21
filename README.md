@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png" />
+![teste]([github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png](https://github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png))
 
 # 📝 Lembreto
 
