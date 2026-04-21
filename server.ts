@@ -1,3 +1,7 @@
+import { config } from 'dotenv';
+config({ path: '.env.local' });
+
+
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
