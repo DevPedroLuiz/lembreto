@@ -1,5 +1,17 @@
 {
-  "tasks": [],
+  "tasks": [
+    {
+      "id": "3ab4b9fb-9152-4ded-b78a-9da7eab99589",
+      "userId": "b900a5a1-c00b-4f7a-aaba-471ac9bea941",
+      "title": "Lá ele ",
+      "description": "Perigo noturno!!!!!!!!!!!!!!!!!",
+      "dueDate": "2026-04-21T00:15:00.000Z",
+      "priority": "high",
+      "category": "Trabalho",
+      "status": "completed",
+      "createdAt": "2026-04-21T00:10:47.446Z"
+    }
+  ],
   "users": [
     {
       "id": "b900a5a1-c00b-4f7a-aaba-471ac9bea941",
