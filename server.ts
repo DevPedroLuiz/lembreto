@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 config({ path: '.env.local' });
 
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -56,15 +57,22 @@ async function startServer() {
       return res.status(400).json({ error: 'Preencha todos os campos' });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres' });
+    }
+
     try {
       const existing = await sql`SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}`;
       if (existing.length > 0) {
         return res.status(400).json({ error: 'Este email já está em uso' });
       }
 
+      // Gera o hash da senha com custo 12
+      const passwordHash = await bcrypt.hash(password, 12);
+
       const rows = await sql`
         INSERT INTO users (name, email, password)
-        VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${password})
+        VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${passwordHash})
         RETURNING id, name, email, avatar
       `;
       const user = rows[0];
@@ -85,15 +93,28 @@ async function startServer() {
     }
 
     try {
+      // Busca incluindo o hash para comparação
       const rows = await sql`
-        SELECT id, name, email, avatar
+        SELECT id, name, email, avatar, password AS password_hash
         FROM users
-        WHERE email = ${email.trim().toLowerCase()} AND password = ${password}
+        WHERE email = ${email.trim().toLowerCase()}
       `;
+
+      // Resposta genérica (evita user enumeration)
       if (rows.length === 0) {
         return res.status(401).json({ error: 'Email ou senha incorretos' });
       }
-      return res.json({ user: rows[0], token: rows[0].id });
+
+      const user = rows[0];
+      const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+      if (!passwordMatch) {
+        return res.status(401).json({ error: 'Email ou senha incorretos' });
+      }
+
+      // Remove o hash antes de retornar ao cliente
+      const { password_hash: _, ...safeUser } = user;
+      return res.json({ user: safeUser, token: safeUser.id });
     } catch (e: any) {
       console.error('[login]', e.message);
       return res.status(500).json({ error: `Erro interno: ${e.message}` });
@@ -106,9 +127,9 @@ async function startServer() {
     if (!email) return res.status(400).json({ error: 'Informe o email' });
 
     try {
-      const rows = await sql`SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}`;
-      if (rows.length === 0) return res.status(404).json({ error: 'Email não encontrado' });
-      return res.json({ message: 'Um link de recuperação foi enviado para seu email.' });
+      // Sempre retorna a mesma resposta (evita user enumeration)
+      await sql`SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}`;
+      return res.json({ message: 'Se este email estiver cadastrado, você receberá um link em breve.' });
     } catch (e: any) {
       console.error('[recover]', e.message);
       return res.status(500).json({ error: `Erro interno: ${e.message}` });
@@ -120,6 +141,10 @@ async function startServer() {
     const { name, email, password, avatar } = req.body;
     const userId = req.user.id as string;
 
+    if (password !== undefined && password !== '' && password.length < 6) {
+      return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres' });
+    }
+
     try {
       if (email && email.trim().toLowerCase() !== req.user.email) {
         const conflict = await sql`
@@ -130,19 +155,23 @@ async function startServer() {
         }
       }
 
-      // Busca dados atuais para usar como fallback nos campos não enviados
       const current = await sql`SELECT name, email, password, avatar FROM users WHERE id = ${userId}`;
       if (current.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
 
       const cur = current[0];
-      const newName     = (name     && name.trim())                          || cur.name;
-      const newEmail    = (email    && email.trim().toLowerCase())           || cur.email;
-      const newPassword = (password && password.trim())                      || cur.password;
-      const newAvatar   = avatar !== undefined ? avatar : cur.avatar;
+
+      // Só gera novo hash se uma nova senha foi fornecida
+      let newPasswordHash = cur.password;
+      if (password && password.trim()) {
+        newPasswordHash = await bcrypt.hash(password.trim(), 12);
+      }
 
       const rows = await sql`
         UPDATE users
-        SET name = ${newName}, email = ${newEmail}, password = ${newPassword}, avatar = ${newAvatar}
+        SET name     = ${(name  && name.trim())                          || cur.name},
+            email    = ${(email && email.trim().toLowerCase())           || cur.email},
+            password = ${newPasswordHash},
+            avatar   = ${avatar !== undefined ? avatar : cur.avatar}
         WHERE id = ${userId}
         RETURNING id, name, email, avatar
       `;
@@ -281,7 +310,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor rodando em https://lembreto.vercel.app:${PORT}`);
+    console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
   });
 }
 

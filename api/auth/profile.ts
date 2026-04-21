@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -9,6 +10,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!userId) return res.status(401).json({ error: 'Não autorizado' });
 
   const { name, email, password, avatar } = req.body ?? {};
+
+  if (password !== undefined && password !== '' && password.length < 6) {
+    return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres' });
+  }
 
   try {
     if (email) {
@@ -27,11 +32,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
 
     const cur = current[0];
+
+    // Só gera novo hash se uma nova senha foi fornecida
+    let newPasswordHash = cur.password;
+    if (password && password.trim()) {
+      newPasswordHash = await bcrypt.hash(password.trim(), 12);
+    }
+
     const rows = await sql`
       UPDATE users SET
         name     = ${(name     && name.trim())               || cur.name},
         email    = ${(email    && email.trim().toLowerCase()) || cur.email},
-        password = ${(password && password.trim())            || cur.password},
+        password = ${newPasswordHash},
         avatar   = ${avatar !== undefined ? avatar : cur.avatar}
       WHERE id = ${userId}
       RETURNING id, name, email, avatar
