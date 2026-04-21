@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  CheckCircle2, Circle, Clock, Plus, Trash2, Bell, Search, Moon, Sun,
+  CheckCircle2, Circle, Clock, Plus, Trash2, Bell, Search, Moon,
   LayoutDashboard, ListTodo, CalendarDays, Target, Sparkles,
   BellRing, LogOut, Mail, Lock, User as UserIcon, X, Tag,
   ChevronRight, ArrowRight, Settings, Volume2, ShieldAlert, Camera
@@ -39,33 +39,51 @@ export interface Task {
 
 const CATEGORIES = ["Geral", "Trabalho", "Pessoal", "Estudos"];
 
-// ── Session / Config (localStorage apenas para preferências locais) ────────────
+// ── localStorage — armazena APENAS dados não-sensíveis ────────────────────────
+// O JWT NUNCA é persistido. Ele vive exclusivamente em memória (useState).
+// Consequência intencional: ao recarregar a página o usuário precisa fazer login
+// novamente. Isso é a troca de segurança contra ataques XSS via localStorage.
 const LS = {
-  getSession: (): { user: User; token: string } | null => {
-    try { const r = localStorage.getItem('tm_session'); return r ? JSON.parse(r) : null; } catch { return null; }
+  // Salva apenas os dados de exibição do usuário — sem token
+  saveUser: (user: User) =>
+    localStorage.setItem('tm_user', JSON.stringify(user)),
+  loadUser: (): User | null => {
+    try {
+      const r = localStorage.getItem('tm_user');
+      return r ? JSON.parse(r) : null;
+    } catch { return null; }
   },
-  saveSession: (user: User, token: string) =>
-    localStorage.setItem('tm_session', JSON.stringify({ user, token })),
-  clearSession: () => localStorage.removeItem('tm_session'),
-  getConfig: () => { try { return JSON.parse(localStorage.getItem('tm_config') || '{}'); } catch { return {}; } },
+  clearUser: () => localStorage.removeItem('tm_user'),
+  getConfig: () => {
+    try { return JSON.parse(localStorage.getItem('tm_config') || '{}'); } catch { return {}; }
+  },
   saveConfig: (cfg: object) => localStorage.setItem('tm_config', JSON.stringify(cfg)),
 };
 
-// ── API Helpers ────────────────────────────────────────────────────────────────
+// ── API Helpers ───────────────────────────────────────────────────────────────
+// Token vai no header Authorization: Bearer <jwt> — nunca em query string ou body
 const buildHeaders = (token?: string): Record<string, string> => ({
   'Content-Type': 'application/json',
-  ...(token ? { 'x-user-id': token } : {}),
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
 });
 
 async function apiPost(path: string, body: object, token?: string) {
-  const res = await fetch(path, { method: 'POST', headers: buildHeaders(token), body: JSON.stringify(body) });
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: buildHeaders(token),
+    body: JSON.stringify(body),
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
   return data;
 }
 
 async function apiPut(path: string, body: object, token: string) {
-  const res = await fetch(path, { method: 'PUT', headers: buildHeaders(token), body: JSON.stringify(body) });
+  const res = await fetch(path, {
+    method: 'PUT',
+    headers: buildHeaders(token),
+    body: JSON.stringify(body),
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
   return data;
@@ -79,16 +97,20 @@ async function apiGet(path: string, token: string) {
 }
 
 async function apiDelete(path: string, token: string) {
-  const res = await fetch(path, { method: 'DELETE', headers: buildHeaders(token) });
+  const res = await fetch(path, {
+    method: 'DELETE',
+    headers: buildHeaders(token),
+  });
   if (res.status !== 204 && !res.ok) {
     const d = await res.json().catch(() => ({}));
     throw new Error(d.error || 'Erro ao deletar');
   }
 }
 
-// ── App ────────────────────────────────────────────────────────────────────────
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // token vive APENAS em memória — nunca em localStorage/sessionStorage/cookie
   const [token, setToken] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [darkMode, setDarkMode] = useState(false);
@@ -130,12 +152,16 @@ export default function App() {
   const [formCategory, setFormCategory] = useState<string>('Geral');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  // ── Bootstrap ────────────────────────────────────────────────────────────────
+  // ── Bootstrap ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const session = LS.getSession();
-    if (session?.token && session?.user) {
-      setCurrentUser(session.user);
-      setToken(session.token);
+    // Recupera apenas os dados de exibição do usuário (sem token)
+    // O token não existe mais após reload — o usuário precisará fazer login
+    const savedUser = LS.loadUser();
+    if (savedUser) {
+      // Exibe os dados do usuário salvo enquanto não há token
+      // O app mostrará a tela de login pois token === null
+      // Pré-preenche o e-mail para agilizar o re-login
+      setAuthEmail(savedUser.email);
     }
 
     const cfg = LS.getConfig() as any;
@@ -166,7 +192,7 @@ export default function App() {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const showToast = useCallback((title: string, message: string) => {
     setToastMsg({ title, message });
     setTimeout(() => setToastMsg(null), 4000);
@@ -203,7 +229,7 @@ export default function App() {
     LS.saveConfig(next);
   };
 
-  // ── Auth ──────────────────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -216,9 +242,14 @@ export default function App() {
 
     try {
       const data = await apiPost(endpoint, payload);
-      setCurrentUser(data.user);
+
+      // Token fica apenas em memória — nunca vai ao localStorage
       setToken(data.token);
-      LS.saveSession(data.user, data.token);
+      setCurrentUser(data.user);
+
+      // Persiste apenas os dados de exibição (nome, e-mail, avatar)
+      LS.saveUser(data.user);
+
       setAuthName(''); setAuthEmail(''); setAuthPassword('');
       notify('Bem-vindo!', `Olá, ${data.user.name}!`);
     } catch (err: any) {
@@ -244,15 +275,25 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    LS.clearSession();
+  // Logout: invalida o token no servidor, depois limpa memória e localStorage
+  const handleLogout = async () => {
+    if (token) {
+      // Fire-and-forget — não bloqueia o logout local
+      // O token expira em 7 dias de qualquer forma
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: buildHeaders(token),
+      }).catch(() => { /* ignora falha de rede */ });
+    }
+
+    LS.clearUser();
     setCurrentUser(null);
-    setToken(null);
+    setToken(null);       // destrói o JWT da memória
     setTasks([]);
     setActiveTab('dashboard');
   };
 
-  // ── Profile ──────────────────────────────────────────────────────────────────
+  // ── Profile ───────────────────────────────────────────────────────────────
   const openProfile = () => {
     setProfName(currentUser?.name || '');
     setProfEmail(currentUser?.email || '');
@@ -280,7 +321,8 @@ export default function App() {
         avatar: profAvatar,
       }, token);
       setCurrentUser(data.user);
-      LS.saveSession(data.user, token);
+      // Atualiza os dados de exibição no localStorage (sem token)
+      LS.saveUser(data.user);
       notify('Perfil atualizado!', 'Suas informações foram salvas.');
       setShowProfileForm(false);
     } catch (err: any) {
@@ -288,7 +330,7 @@ export default function App() {
     }
   };
 
-  // ── Tasks ─────────────────────────────────────────────────────────────────────
+  // ── Tasks ─────────────────────────────────────────────────────────────────
   const handleSubmitTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle.trim() || !formDate || !token) return;
@@ -367,7 +409,7 @@ export default function App() {
     }
   };
 
-  // ── Derived Data ──────────────────────────────────────────────────────────────
+  // ── Derived Data ──────────────────────────────────────────────────────────
   const pendingTasks = tasks.filter(t => t.status === 'pending');
   const completedTasks = tasks.filter(t => t.status === 'completed');
   const filteredTasks = pendingTasks.filter(t => {
@@ -381,8 +423,9 @@ export default function App() {
   const todayCount = pendingTasks.filter(t => { try { return isToday(parseISO(t.dueDate)); } catch { return false; } }).length;
   const overdueCount = pendingTasks.filter(t => { try { return isPast(parseISO(t.dueDate)) && !isToday(parseISO(t.dueDate)); } catch { return false; } }).length;
 
-  // ── Auth Screen ───────────────────────────────────────────────────────────────
-  if (!currentUser) {
+  // ── Auth Screen ───────────────────────────────────────────────────────────
+  // Mostra login se não há token em memória (mesmo que haja dados de usuário salvos)
+  if (!currentUser || !token) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-[#040814]">
         <div className="max-w-md w-full bg-white dark:bg-[#0a122a] rounded-3xl p-8 shadow-2xl border border-slate-200 dark:border-white/10">
@@ -462,7 +505,7 @@ export default function App() {
     );
   }
 
-  // ── Main App ──────────────────────────────────────────────────────────────────
+  // ── Main App ──────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen w-full bg-slate-50 dark:bg-[#02040a] text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
 
@@ -645,7 +688,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* ── Task Drawer ──────────────────────────────────────────────────────── */}
+      {/* ── Task Drawer ────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showTaskForm && (
           <>
@@ -660,7 +703,6 @@ export default function App() {
                   <X size={20} />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-6">
                 <form id="task-form" onSubmit={handleSubmitTask} className="space-y-6">
                   <div>
@@ -669,7 +711,6 @@ export default function App() {
                       onChange={e => setFormTitle(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-[#0a0f1e] border border-slate-200 dark:border-white/5 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium" />
                   </div>
-
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prazo</label>
                     <div className="relative">
@@ -679,7 +720,6 @@ export default function App() {
                         style={{ colorScheme: darkMode ? 'dark' : 'light' }} />
                     </div>
                   </div>
-
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prioridade</label>
@@ -698,7 +738,6 @@ export default function App() {
                       </select>
                     </div>
                   </div>
-
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Detalhes (Opcional)</label>
                     <textarea placeholder="Notas, links..." value={formDesc} onChange={e => setFormDesc(e.target.value)}
@@ -706,7 +745,6 @@ export default function App() {
                   </div>
                 </form>
               </div>
-
               <div className="p-6 border-t border-slate-100 dark:border-white/5 shrink-0">
                 <button form="task-form" type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
                   {editingTaskId ? 'Salvar Alterações' : 'Adicionar Tarefa'}
@@ -717,7 +755,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ── Profile Drawer ─────────────────────────────────────────────────── */}
+      {/* ── Profile Drawer ──────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showProfileForm && (
           <>
@@ -732,7 +770,6 @@ export default function App() {
                   <X size={20} />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-6">
                 <form id="profile-form" onSubmit={handleUpdateProfile} className="space-y-6">
                   <div className="flex justify-center">
@@ -750,7 +787,6 @@ export default function App() {
                       </label>
                     </div>
                   </div>
-
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nome</label>
                     <input required type="text" value={profName} onChange={e => setProfName(e.target.value)}
@@ -768,7 +804,6 @@ export default function App() {
                   </div>
                 </form>
               </div>
-
               <div className="p-6 border-t border-slate-100 dark:border-white/5 shrink-0 space-y-3">
                 <button form="profile-form" type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
                   Salvar Perfil
@@ -798,7 +833,6 @@ export default function App() {
                   <X size={20} />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-6 space-y-8">
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><Moon size={14} /> Aparência</h3>
@@ -807,7 +841,6 @@ export default function App() {
                     <Toggle active={darkMode} onClick={() => setDarkMode(!darkMode)} />
                   </div>
                 </div>
-
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><LayoutDashboard size={14} /> Comportamento</h3>
                   <div className="space-y-2">
@@ -826,7 +859,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
               <div className="p-6 border-t border-slate-100 dark:border-white/5 shrink-0">
                 <p className="text-xs text-center text-slate-400">Configurações salvas no navegador.</p>
               </div>
@@ -927,7 +959,7 @@ function MetricCard({ title, value, icon, error }: { title: string; value: numbe
 
 function TaskItem({ task, onToggle, onDelete, onEdit, compact, isCompletedSection }: {
   task: Task; onToggle: (t: Task) => void; onDelete: (id: string, e: React.MouseEvent) => void;
-  onEdit: (t: Task) => void; compact?: boolean; isCompletedSection?: boolean; showCompleted?: boolean;
+  onEdit: (t: Task) => void; compact?: boolean; isCompletedSection?: boolean;
 }) {
   const safeDate = () => { try { return parseISO(task.dueDate); } catch { return new Date(); } };
   const date = safeDate();
@@ -955,12 +987,10 @@ function TaskItem({ task, onToggle, onDelete, onEdit, compact, isCompletedSectio
         isCompleted ? "bg-slate-50 dark:bg-white/[0.01] border-transparent" : "bg-white dark:bg-[#0a0f1e] border-slate-200 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10 hover:shadow-xl hover:shadow-slate-200/40 dark:hover:shadow-black/40 cursor-pointer"
       )}
       onClick={() => { if (!isCompleted) onEdit(task); }}>
-
       <button onClick={e => { e.stopPropagation(); onToggle(task); }}
         className={cn("mt-0.5 shrink-0 transition-colors", isCompleted ? "text-emerald-500" : "text-slate-300 hover:text-blue-500 dark:text-slate-600 dark:hover:text-blue-400")}>
         {isCompleted ? <CheckCircle2 size={24} /> : <Circle size={24} />}
       </button>
-
       <div className="flex-1 min-w-0">
         <h3 className={cn("font-semibold text-base truncate mb-1", isCompleted ? "line-through text-slate-400" : "text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
           {task.title}
@@ -980,106 +1010,9 @@ function TaskItem({ task, onToggle, onDelete, onEdit, compact, isCompletedSectio
           </span>
         </div>
       </div>
-
       <button onClick={e => onDelete(task.id, e)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-rose-500 bg-slate-50 dark:bg-white/5 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all absolute right-4 top-4">
         <Trash2 size={16} />
       </button>
     </motion.div>
   );
-  // ─────────────────────────────────────────────────────────────────────────────
-// SUBSTITUIR em src/App.tsx
-// As seções abaixo substituem: LS, buildHeaders, apiPost/apiPut/apiGet/apiDelete
-// e handleLogout. O restante do App.tsx permanece igual.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Session helpers (localStorage apenas para dados não-sensíveis) ────────────
-// ANTES: token era o UUID do usuário — qualquer pessoa com o UUID podia se autenticar
-// AGORA: token é um JWT assinado com JWT_SECRET, expira em 7 dias, inválido sem a chave
-const LS = {
-  getSession: (): { user: User; token: string } | null => {
-    try {
-      const r = localStorage.getItem('tm_session');
-      return r ? JSON.parse(r) : null;
-    } catch { return null; }
-  },
-  saveSession: (user: User, token: string) =>
-    localStorage.setItem('tm_session', JSON.stringify({ user, token })),
-  clearSession: () => localStorage.removeItem('tm_session'),
-  getConfig: () => {
-    try { return JSON.parse(localStorage.getItem('tm_config') || '{}'); } catch { return {}; }
-  },
-  saveConfig: (cfg: object) => localStorage.setItem('tm_config', JSON.stringify(cfg)),
-};
-
-// ── API Helpers ────────────────────────────────────────────────────────────────
-// Header mudou de 'x-user-id: <uuid>' para 'Authorization: Bearer <jwt>'
-const buildHeaders = (token?: string): Record<string, string> => ({
-  'Content-Type': 'application/json',
-  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-});
-
-async function apiPost(path: string, body: object, token?: string) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: buildHeaders(token),
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
-  return data;
-}
-
-async function apiPut(path: string, body: object, token: string) {
-  const res = await fetch(path, {
-    method: 'PUT',
-    headers: buildHeaders(token),
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
-  return data;
-}
-
-async function apiGet(path: string, token: string) {
-  const res = await fetch(path, { headers: buildHeaders(token) });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
-  return data;
-}
-
-async function apiDelete(path: string, token: string) {
-  const res = await fetch(path, {
-    method: 'DELETE',
-    headers: buildHeaders(token),
-  });
-  if (res.status !== 204 && !res.ok) {
-    const d = await res.json().catch(() => ({}));
-    throw new Error(d.error || 'Erro ao deletar');
-  }
-}
-
-// ── Logout ─────────────────────────────────────────────────────────────────────
-// ANTES: apenas limpava o localStorage
-// AGORA: invalida o JWT no servidor (blacklist) e depois limpa o localStorage
-// Substitua a função handleLogout existente por esta:
-const handleLogout = async () => {
-  if (token) {
-    // Invalida o token no servidor — fire-and-forget, não bloqueia o logout local
-    fetch('/api/auth/logout', {
-      method: 'POST',
-      headers: buildHeaders(token),
-    }).catch(() => {/* ignora falha de rede — o token expira em 7 dias de qualquer forma */});
-  }
-
-  LS.clearSession();
-  setCurrentUser(null);
-  setToken(null);
-  setTasks([]);
-  setActiveTab('dashboard');
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ADICIONAR em vercel.json — nova rota de logout:
-//   { "source": "/api/auth/logout", "destination": "/api/auth/logout" }
-// ─────────────────────────────────────────────────────────────────────────────
 }

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from '../_db.js';
+import { extractBearerToken, verifyToken } from '../../lib/jwt.js';
 
 async function getAuthUser(userId: string) {
   const rows = await sql`SELECT id FROM users WHERE id = ${userId}`;
@@ -7,8 +8,17 @@ async function getAuthUser(userId: string) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const userId = req.headers['x-user-id'] as string;
-  if (!userId) return res.status(401).json({ error: 'Não autorizado' });
+  // Valida o JWT no header Authorization: Bearer <token>
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token) return res.status(401).json({ error: 'Não autorizado' });
+
+  let userId: string;
+  try {
+    const payload = verifyToken(token);
+    userId = payload.sub;
+  } catch {
+    return res.status(401).json({ error: 'Token inválido ou expirado' });
+  }
 
   const user = await getAuthUser(userId);
   if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
