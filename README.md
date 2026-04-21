@@ -1,6 +1,6 @@
 <div align="center">
 
-![teste]([github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png](https://github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png))
+![teste](https://placehold.co/600x400)
 
 # 📝 Lembreto
 
