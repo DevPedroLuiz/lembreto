@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://lembreto.vercel.app/favicon.ico" width="64" height="64" alt="Lembreto Logo" />
+![teste](https://github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png)
 
 # 📝 Lembreto
 
