@@ -520,6 +520,20 @@ function MetricCard({
   );
 }
 
+// ── Loading Screen (exibida enquanto a sessão é restaurada) ──────────────────
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#040814]">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 animate-pulse">
+          <Target size={32} />
+        </div>
+        <p className="text-slate-500 text-sm font-medium">Carregando sessão...</p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   if (window.location.pathname === '/reset-password') {
@@ -748,6 +762,10 @@ export default function App() {
   }).length;
 
   // ── Not logged in ───────────────────────────────────────────────────────────
+  if (auth.restoring) {
+    return <LoadingScreen />;
+  }
+
   if (!auth.currentUser || !auth.token) {
     return (
       <AuthScreen

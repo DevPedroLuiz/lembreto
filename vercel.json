@@ -6,6 +6,7 @@
     { "source": "/api/auth/register",       "destination": "/api/auth/register"       },
     { "source": "/api/auth/login",          "destination": "/api/auth/login"          },
     { "source": "/api/auth/logout",         "destination": "/api/auth/logout"         },
+    { "source": "/api/auth/me",             "destination": "/api/auth/me"             },
     { "source": "/api/auth/recover",        "destination": "/api/auth/recover"        },
     { "source": "/api/auth/reset-password", "destination": "/api/auth/reset-password" },
     { "source": "/api/auth/profile",        "destination": "/api/auth/profile"        },
