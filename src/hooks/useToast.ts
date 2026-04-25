@@ -1,6 +1,3 @@
-// src/hooks/useToast.ts
-// Lightweight in-app toast + browser notification helper
-
 import { useState, useCallback } from 'react';
 
 export interface ToastMessage {
@@ -10,7 +7,10 @@ export interface ToastMessage {
 
 export function useToast() {
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
-  const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return 'denied';
+    return Notification.permission;
+  });
 
   const showToast = useCallback((title: string, message: string) => {
     setToastMsg({ title, message });
@@ -19,7 +19,9 @@ export function useToast() {
 
   const notify = useCallback(
     (title: string, body: string) => {
-      if (notifPerm === 'granted') new Notification(title, { body });
+      if (notifPerm === 'granted' && 'Notification' in window) {
+        new Notification(title, { body });
+      }
       showToast(title, body);
     },
     [notifPerm, showToast]

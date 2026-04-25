@@ -54,6 +54,7 @@ export function Sidebar({
           onClick={() => setActiveTab('dashboard')}
           icon={<LayoutDashboard size={20} />}
           label="Dashboard"
+          testId="sidebar-dashboard"
         />
         <SidebarItem
           active={activeTab === 'tasks'}
@@ -61,6 +62,7 @@ export function Sidebar({
           icon={<ListTodo size={20} />}
           label="Minhas Tarefas"
           badge={pendingTasks.length}
+          testId="sidebar-tasks"
         />
 
         <div className="pt-8 pb-3 px-3">
@@ -90,12 +92,14 @@ export function Sidebar({
       <div className="mt-auto pt-6 space-y-4">
         <div
           onClick={onOpenProfile}
+          data-testid="sidebar-profile-button"
           className="bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 cursor-pointer transition-colors rounded-2xl p-4 flex items-center gap-3"
         >
           {currentUser.avatar ? (
             <img
               src={currentUser.avatar}
               alt="Avatar"
+              data-testid="sidebar-profile-avatar"
               className="w-10 h-10 rounded-full object-cover"
             />
           ) : (
@@ -104,11 +108,12 @@ export function Sidebar({
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{currentUser.name}</p>
-            <p className="text-[10px] text-slate-500 truncate">{currentUser.email}</p>
+            <p data-testid="sidebar-profile-name" className="text-sm font-semibold truncate">{currentUser.name}</p>
+            <p data-testid="sidebar-profile-email" className="text-[10px] text-slate-500 truncate">{currentUser.email}</p>
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); onLogout(); }}
+            data-testid="sidebar-logout"
             className="text-slate-400 hover:text-rose-500 transition-colors shrink-0"
             title="Sair"
           >

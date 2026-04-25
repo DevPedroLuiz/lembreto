@@ -1,161 +1,154 @@
-<div align="center">
+# Lembreto
 
-![teste](https://github.com/DevPedroLuiz/lembreto/blob/main/img-lembreto.png)
+Sistema de gerenciamento de tarefas com dashboard, autenticacao, recuperacao de senha e API serverless.
 
-# 📝 Lembreto
+## Stack
 
-**Sistema moderno de gerenciamento de tarefas com dashboard inteligente.**
+- Frontend: React 19 + TypeScript + Vite
+- Estilo: Tailwind CSS v4 + Motion
+- API: Vercel Functions + servidor Express para desenvolvimento local
+- Banco: Neon Postgres
+- Autenticacao: JWT + cookie HttpOnly para restauracao de sessao
 
-[![Deploy](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel)](https://lembreto.vercel.app)
-[![Database](https://img.shields.io/badge/Database-Neon%20Postgres-00e5a0?logo=postgresql)](https://neon.tech)
-[![React](https://img.shields.io/badge/React-19-61dafb?logo=react)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript)](https://www.typescriptlang.org)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
+## Funcionalidades
 
-[🌐 Acessar App](https://lembreto.vercel.app) · [🐛 Reportar Bug](https://github.com/DevPedroLuiz/lembreto/issues) · [💡 Sugerir Feature](https://github.com/DevPedroLuiz/lembreto/issues)
+- Dashboard com metricas do dia
+- CRUD completo de tarefas
+- Perfil com avatar
+- Login, cadastro, logout e restauracao de sessao
+- Recuperacao e redefinicao de senha
+- Rate limit em login e cadastro
+- Blacklist de token no logout
 
-</div>
+## Variaveis de ambiente
 
----
+Crie `.env.local` na raiz:
 
-## ✨ Funcionalidades
-
-- **Dashboard** com visão geral do dia: total, feitas, vencendo hoje e atrasadas
-- **Criação e edição** de tarefas com título, descrição, data, prioridade e categoria
-- **Filtro por categorias**: Geral, Trabalho, Pessoal, Estudos
-- **Controle de status**: pendente / concluída
-- **Progresso visual** com contador de metas
-- **Autenticação** com registro, login e recuperação de senha
-- **Perfil de usuário** com suporte a avatar
-- **Tema escuro** nativo com design responsivo
-- **Notificações** via browser
-
----
-
-## 🛠️ Stack
-
-| Camada | Tecnologia |
-|---|---|
-| Frontend | React 19 + TypeScript + Vite |
-| Estilização | Tailwind CSS v4 + Framer Motion |
-| Backend | Vercel Serverless Functions (Node.js) |
-| Banco de dados | Neon Postgres (serverless) |
-| IA | Google Gemini API |
-| Deploy | Vercel |
-
----
-
-## 🚀 Rodando Localmente
-
-### Pré-requisitos
-
-- Node.js 18+
-- Uma conta no [Neon Tech](https://neon.tech) com um banco criado
-- (Opcional) Uma chave da [Gemini API](https://aistudio.google.com)
-
-### 1. Clone o repositório
-
-```bash
-git clone https://github.com/DevPedroLuiz/lembreto.git
-cd lembreto
+```env
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+JWT_SECRET=uma_chave_longa_e_aleatoria_com_pelo_menos_32_caracteres
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+APP_URL=http://localhost:3001
 ```
 
-### 2. Instale as dependências
+Notas:
+
+- `JWT_SECRET` e obrigatoria em desenvolvimento e producao.
+- `RESEND_API_KEY` e necessaria para envio real do email de recuperacao.
+- `APP_URL` deve apontar para a URL publica do app em producao.
+
+## Setup local
+
+1. Instale dependencias:
 
 ```bash
 npm install
 ```
 
-### 3. Configure as variáveis de ambiente
+2. Rode o schema e as migrations SQL no banco:
 
-Crie o arquivo `.env.local` na raiz do projeto:
+- `schema.sql`
+- `migrate_jwt.sql`
+- `migrate_recovery.sql`
+- `migrate_passwords.sql` quando fizer a migracao de senhas legadas
 
-```env
-DATABASE_URL=postgresql://user:senha@host/dbname?sslmode=require
-GEMINI_API_KEY=sua_chave_aqui
-```
-
-> 💡 A `DATABASE_URL` você encontra no painel do Neon Tech em **Connection string**.
-
-### 4. Crie as tabelas no banco
-
-Execute o conteúdo do arquivo [`schema.sql`](./schema.sql) no seu banco Neon (via painel SQL Editor ou qualquer client PostgreSQL).
-
-### 5. Inicie o servidor
+3. Inicie o servidor local:
 
 ```bash
 npm run dev
 ```
 
-Acesse: [http://localhost:3000](http://localhost:3000)
+Por padrao o servidor local atual sobe em `http://localhost:3001`.
 
----
+## Scripts
 
-## 📁 Estrutura do Projeto
-
-```
-lembreto/
-├── api/                        # Serverless Functions (Vercel)
-│   ├── _db.ts                  # Conexão com o banco (Neon)
-│   ├── auth/
-│   │   ├── register.ts         # POST /api/auth/register
-│   │   ├── login.ts            # POST /api/auth/login
-│   │   ├── recover.ts          # POST /api/auth/recover
-│   │   └── profile.ts          # PUT  /api/auth/profile
-│   └── tasks/
-│       ├── index.ts            # GET/POST /api/tasks
-│       └── [id].ts             # PUT/DELETE /api/tasks/:id
-├── src/                        # Frontend React
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── index.css
-├── schema.sql                  # Schema do banco de dados
-├── server.ts                   # Servidor Express (apenas dev local)
-├── vercel.json                 # Configuração do deploy
-├── vite.config.ts
-└── package.json
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run test
+npm run test:e2e
+npm run cleanup:db
 ```
 
----
+## Testes
 
-## 🌐 Deploy na Vercel
+A suite cobre os pontos mais sensiveis da base:
 
-### Variáveis de ambiente necessárias
+- helpers de autenticacao
+- cookies e protecao de origem
+- validacao de avatar
+- schemas de auth e tarefas
+- fluxos E2E de cadastro, tarefas, perfil, reset de senha e sessao expirada
 
-Configure as seguintes variáveis no painel **Vercel → Settings → Environment Variables**:
+Rode com:
 
-| Variável | Descrição |
-|---|---|
-| `DATABASE_URL` | Connection string do Neon Postgres |
-| `GEMINI_API_KEY` | Chave da API do Google Gemini (opcional) |
+```bash
+npm run test
+npm run test:e2e
+```
 
-### Deploy automático
+## CI
 
-O deploy é feito automaticamente a cada push na branch `main`. O Vercel:
+O repositório agora inclui pipeline em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) para rodar:
 
-1. Executa `vite build` para gerar o frontend estático
-2. Detecta a pasta `/api` e converte cada arquivo em uma Serverless Function
-3. Serve o frontend e roteia `/api/*` para as funções
+- `npm run lint`
+- `npm run build`
+- `npm run test`
+- `npm run test:e2e`
 
----
+Para o workflow funcionar no GitHub Actions, configure estes secrets no repositório:
 
-## 🗄️ Banco de Dados
+- `DATABASE_URL`
+- `JWT_SECRET`
 
-O schema completo está em [`schema.sql`](./schema.sql). As tabelas são:
+## Deploy
 
-**`users`** — usuários da aplicação  
-**`tasks`** — tarefas vinculadas a cada usuário
+O deploy protegido fica em [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+Ele publica em producao apenas quando o workflow `CI` termina com sucesso na branch `main`, ou manualmente via `workflow_dispatch`.
 
----
+Secrets necessarios para deploy na Vercel:
 
-## 📄 Licença
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
 
-Este projeto está sob a licença [MIT](./LICENSE).
+Se quiser uma camada extra de seguranca, configure o ambiente `production` no GitHub com aprovacao obrigatoria antes do deploy.
 
----
+## Operacao
 
-<div align="center">
+### Limpeza periodica do banco
 
-Feito com 💙 por [Pedro Luiz](https://github.com/DevPedroLuiz)
+As tabelas abaixo precisam de limpeza periodica:
 
-</div>
+- `token_blacklist`
+- `auth_rate_limit`
+- `password_reset_tokens`
+
+Use:
+
+```bash
+npm run cleanup:db
+```
+
+Em producao, o ideal e agendar esse script com cron.
+
+### Seguranca aplicada
+
+- validacao de payload com schemas compartilhados
+- limite de tamanho e formato para avatar
+- checagem de origem em rotas de sessao baseadas em cookie
+- invalidacao de token no logout
+- rotacao de token ao trocar email ou senha
+- eventos de sessao expirada no cliente
+
+## Estrutura
+
+```text
+api/                 Funcoes serverless
+lib/                 Helpers compartilhados de auth, schemas e seguranca
+scripts/             Scripts operacionais
+e2e/                 Testes end-to-end com Playwright
+src/                 Frontend React
+server.ts            Servidor local de desenvolvimento
+```

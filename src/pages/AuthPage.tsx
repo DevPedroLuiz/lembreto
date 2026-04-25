@@ -104,6 +104,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 <input
                   required
                   type="email"
+                  data-testid="recover-email-input"
                   placeholder="Seu email"
                   value={recoverEmail}
                   onChange={(e) => setRecoverEmail(e.target.value)}
@@ -113,6 +114,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
               <button
                 type="submit"
+                data-testid="recover-submit-button"
                 disabled={authLoading}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95"
               >
@@ -121,6 +123,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <p className="text-center text-sm">
                 <button
                   type="button"
+                  data-testid="recover-back-button"
                   onClick={() => { setIsRecovering(false); setAuthError(''); }}
                   className="text-blue-600 font-semibold hover:underline"
                 >
@@ -138,6 +141,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 <input
                   required
                   type="text"
+                  data-testid="register-name-input"
                   placeholder="Seu nome completo"
                   value={authName}
                   onChange={(e) => setAuthName(e.target.value)}
@@ -150,6 +154,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <input
                 required
                 type="email"
+                data-testid="auth-email-input"
                 placeholder="Email"
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
@@ -161,6 +166,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <input
                 required
                 type="password"
+                data-testid="auth-password-input"
                 placeholder="Senha"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
@@ -171,6 +177,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <div className="text-right">
                 <button
                   type="button"
+                  data-testid="forgot-password-button"
                   onClick={() => { setIsRecovering(true); setAuthError(''); }}
                   className="text-blue-600 text-sm font-semibold hover:underline"
                 >
@@ -181,6 +188,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
             {authError && <p className="text-rose-500 text-sm text-center font-medium">{authError}</p>}
             <button
               type="submit"
+              data-testid="auth-submit-button"
               disabled={authLoading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
             >
@@ -190,6 +198,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               {isLogin ? 'Não tem uma conta?' : 'Já possui uma conta?'}{' '}
               <button
                 type="button"
+                data-testid="auth-mode-toggle"
                 onClick={() => { setIsLogin(!isLogin); setAuthError(''); }}
                 className="text-blue-600 font-bold hover:underline"
               >

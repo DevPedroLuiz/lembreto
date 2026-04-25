@@ -19,14 +19,15 @@ export function Toast({ toast, onDismiss }: ToastProps) {
           initial={{ opacity: 0, y: 50, scale: 0.9 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 20, scale: 0.9 }}
+          data-testid="toast"
           className="fixed bottom-24 md:bottom-8 right-6 z-[200] bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-5 py-4 rounded-2xl shadow-2xl flex items-start gap-3 max-w-[320px]"
         >
           <div className="bg-white/20 dark:bg-black/10 p-2 rounded-full shrink-0">
             <BellRing size={16} />
           </div>
           <div className="flex-1 pr-4">
-            <h4 className="font-bold text-sm mb-0.5">{toast.title}</h4>
-            <p className="text-xs opacity-90">{toast.message}</p>
+            <h4 data-testid="toast-title" className="font-bold text-sm mb-0.5">{toast.title}</h4>
+            <p data-testid="toast-message" className="text-xs opacity-90">{toast.message}</p>
           </div>
           <button
             onClick={onDismiss}

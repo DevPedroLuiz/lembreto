@@ -2,7 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
 import { signToken } from '../../lib/jwt.js';
-import { checkRateLimit } from '../_rate_limit.js';
+import { checkRateLimit, clearRateLimit } from '../_rate_limit.js';
+import { registerSchema, formatZodError } from '../../lib/schemas.js';
+import { logError, logInfo, logWarn } from '../../lib/logger.js';
 
 function getIP(req: VercelRequest): string {
   return (
@@ -17,27 +19,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Método não permitido' });
 
   const ip = getIP(req);
-
-  // ── Rate limiting ─────────────────────────────────────────────────────────
   const rl = await checkRateLimit(ip, 'register');
   if (!rl.allowed) {
-    const minutes = Math.ceil(rl.retryAfterSeconds! / 60);
+    const minutes = Math.ceil((rl.retryAfterSeconds ?? 60) / 60);
+    logWarn('auth_register_rate_limited', { ip, retryAfterSeconds: rl.retryAfterSeconds });
     return res.status(429).json({
       error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
       retryAfterSeconds: rl.retryAfterSeconds,
     });
   }
 
-  const { name, email, password } = req.body ?? {};
-  if (!name || !email || !password)
-    return res.status(400).json({ error: 'Preencha todos os campos' });
+  const parsed = registerSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: formatZodError(parsed.error) });
+  }
 
-  if (password.length < 6)
-    return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
+  const { name, email, password } = parsed.data;
 
   try {
     const existing = await sql`
-      SELECT id FROM users WHERE email = ${email.trim().toLowerCase()}
+      SELECT id FROM users WHERE email = ${email}
     `;
     if (existing.length > 0)
       return res.status(400).json({ error: 'Este email já está em uso' });
@@ -46,15 +47,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const rows = await sql`
       INSERT INTO users (name, email, password)
-      VALUES (${name.trim()}, ${email.trim().toLowerCase()}, ${hashedPassword})
+      VALUES (${name}, ${email}, ${hashedPassword})
       RETURNING id, name, email, avatar
     `;
-    const user  = rows[0];
+    const user = rows[0];
+
+    await clearRateLimit(ip, 'register');
+
     const token = signToken({ sub: user.id, email: user.email });
+    logInfo('auth_register_success', { userId: user.id, ip });
 
     return res.status(201).json({ user, token });
-  } catch (e: any) {
-    console.error('[register]', e.message);
-    return res.status(500).json({ error: `Erro ao criar usuário: ${e.message}` });
+  } catch (error) {
+    logError('auth_register_failed', error, { ip, email });
+    return res.status(500).json({ error: 'Erro ao criar usuário' });
   }
 }

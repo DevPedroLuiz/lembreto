@@ -1,19 +1,16 @@
-// src/hooks/useTasks.ts
-// Encapsulates all task state and CRUD logic
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiGet, apiPost, apiPut, apiDelete } from '../api/client';
 import type { Task, Priority, Status } from '../types';
 
 export function useTasks(token: string | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
 
-  // ── Fetch on token change ─────────────────────────────────────────────────
   useEffect(() => {
     if (!token) {
       setTasks([]);
       return;
     }
+
     apiGet<Task[]>('/api/tasks', token)
       .then((data) => {
         if (Array.isArray(data)) setTasks(data);
@@ -21,21 +18,20 @@ export function useTasks(token: string | null) {
       .catch(() => setTasks([]));
   }, [token]);
 
-  // ── CRUD ──────────────────────────────────────────────────────────────────
-  const createTask = async (payload: {
+  const createTask = useCallback(async (payload: {
     title: string;
     description: string;
     dueDate: string;
     priority: Priority;
     category: string;
   }) => {
-    if (!token) throw new Error('Não autenticado');
+    if (!token) throw new Error('Nao autenticado');
     const created = await apiPost<Task>('/api/tasks', payload, token);
-    setTasks((prev) => [...prev, created]);
+    setTasks((prev) => [created, ...prev]);
     return created;
-  };
+  }, [token]);
 
-  const updateTask = async (
+  const updateTask = useCallback(async (
     id: string,
     payload: Partial<{
       title: string;
@@ -46,31 +42,36 @@ export function useTasks(token: string | null) {
       status: Status;
     }>
   ) => {
-    if (!token) throw new Error('Não autenticado');
+    if (!token) throw new Error('Nao autenticado');
     const updated = await apiPut<Task>(`/api/tasks/${id}`, payload, token);
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
     return updated;
-  };
+  }, [token]);
 
-  const deleteTask = async (id: string) => {
-    if (!token) throw new Error('Não autenticado');
-    // Optimistic update
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+  const deleteTask = useCallback(async (id: string) => {
+    if (!token) throw new Error('Nao autenticado');
+
+    let snapshot: Task[] = [];
+    setTasks((prev) => {
+      snapshot = prev;
+      return prev.filter((t) => t.id !== id);
+    });
+
     try {
       await apiDelete(`/api/tasks/${id}`, token);
     } catch (err) {
-      // Rollback handled by caller if needed
+      setTasks(snapshot);
       throw err;
     }
-  };
+  }, [token]);
 
-  const toggleStatus = async (task: Task) => {
-    const newStatus: Status =
-      task.status === 'pending' ? 'completed' : 'pending';
-    // Optimistic update
+  const toggleStatus = useCallback(async (task: Task) => {
+    const newStatus: Status = task.status === 'pending' ? 'completed' : 'pending';
+
     setTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t))
     );
+
     try {
       const updated = await apiPut<Task>(
         `/api/tasks/${task.id}`,
@@ -82,7 +83,6 @@ export function useTasks(token: string | null) {
       );
       return { task: updated, newStatus };
     } catch {
-      // Rollback
       setTasks((prev) =>
         prev.map((t) =>
           t.id === task.id ? { ...t, status: task.status } : t
@@ -90,10 +90,9 @@ export function useTasks(token: string | null) {
       );
       throw new Error('Falha ao atualizar status');
     }
-  };
+  }, [token]);
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-  const clearTasks = () => setTasks([]);
+  const clearTasks = useCallback(() => setTasks([]), []);
 
   return {
     tasks,

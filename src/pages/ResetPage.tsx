@@ -70,6 +70,7 @@ export function ResetPage() {
                 autoFocus
                 required
                 type="password"
+                data-testid="reset-password-input"
                 placeholder="Nova senha (mín. 6 caracteres)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -81,6 +82,7 @@ export function ResetPage() {
               <input
                 required
                 type="password"
+                data-testid="reset-confirm-input"
                 placeholder="Confirmar nova senha"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -90,6 +92,7 @@ export function ResetPage() {
             {error && <p className="text-rose-500 text-sm text-center font-medium">{error}</p>}
             <button
               type="submit"
+              data-testid="reset-submit-button"
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-3.5 font-bold transition-all active:scale-95"
             >

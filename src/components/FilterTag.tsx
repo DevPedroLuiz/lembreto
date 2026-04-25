@@ -4,6 +4,7 @@ import { Tag } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 interface FilterTagProps {
+  key?: string | number;
   active: boolean;
   onClick: () => void;
   label: string;

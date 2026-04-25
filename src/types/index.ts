@@ -1,8 +1,7 @@
-// src/types/index.ts
-// Shared TypeScript types used across the app
+import type { TaskPriority, TaskStatus } from '../../lib/contracts';
 
-export type Priority = 'low' | 'medium' | 'high';
-export type Status = 'pending' | 'completed';
+export type Priority = TaskPriority;
+export type Status = TaskStatus;
 
 export interface User {
   id: string;

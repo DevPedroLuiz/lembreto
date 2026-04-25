@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from '../_db.js';
 import { extractBearerToken, verifyToken } from '../../lib/jwt.js';
+import { buildTokenJti } from '../../lib/auth.js';
+import { logInfo, logWarn } from '../../lib/logger.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST')
@@ -12,20 +14,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const payload = verifyToken(token);
 
-    // Registra o token na blacklist até ele expirar naturalmente
     await sql`
       INSERT INTO token_blacklist (token_jti, user_id, expires_at)
       VALUES (
-        ${payload.sub + '_' + (payload.iat ?? 0)},
+        ${buildTokenJti(payload)},
         ${payload.sub},
         to_timestamp(${payload.exp ?? 0})
       )
       ON CONFLICT (token_jti) DO NOTHING
     `;
 
+    logInfo('auth_logout_success', { userId: payload.sub });
     return res.json({ message: 'Logout realizado com sucesso' });
   } catch {
-    // Token inválido/expirado — logout silencioso é aceitável
+    logWarn('auth_logout_with_invalid_token');
     return res.json({ message: 'Logout realizado com sucesso' });
   }
 }

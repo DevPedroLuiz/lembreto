@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import sql from '../_db.js';
 import { signToken } from '../../lib/jwt.js';
 import { checkRateLimit, clearRateLimit } from '../_rate_limit.js';
+import { loginSchema, formatZodError } from '../../lib/schemas.js';
+import { logError, logInfo, logWarn } from '../../lib/logger.js';
 
 function getIP(req: VercelRequest): string {
   return (
@@ -17,29 +19,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Método não permitido' });
 
   const ip = getIP(req);
-
-  // ── Rate limiting ─────────────────────────────────────────────────────────
   const rl = await checkRateLimit(ip, 'login');
   if (!rl.allowed) {
-    const minutes = Math.ceil(rl.retryAfterSeconds! / 60);
+    const minutes = Math.ceil((rl.retryAfterSeconds ?? 60) / 60);
+    logWarn('auth_login_rate_limited', { ip, retryAfterSeconds: rl.retryAfterSeconds });
     return res.status(429).json({
       error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
       retryAfterSeconds: rl.retryAfterSeconds,
     });
   }
 
-  const { email, password } = req.body ?? {};
-  if (!email || !password)
-    return res.status(400).json({ error: 'Preencha todos os campos' });
+  const parsed = loginSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: formatZodError(parsed.error) });
+  }
+
+  const { email, password } = parsed.data;
 
   try {
     const rows = await sql`
       SELECT id, name, email, avatar, password AS password_hash
       FROM users
-      WHERE email = ${email.trim().toLowerCase()}
+      WHERE email = ${email}
     `;
 
-    // Resposta genérica — não revela se o e-mail existe (evita user enumeration)
     if (rows.length === 0)
       return res.status(401).json({ error: 'Email ou senha incorretos' });
 
@@ -49,15 +52,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!passwordMatch)
       return res.status(401).json({ error: 'Email ou senha incorretos' });
 
-    // Login bem-sucedido: limpa o histórico de tentativas deste IP
     await clearRateLimit(ip, 'login');
 
-    const { password_hash: _, ...safeUser } = user;
+    const { password_hash: _passwordHash, ...safeUser } = user;
     const token = signToken({ sub: safeUser.id, email: safeUser.email });
 
+    logInfo('auth_login_success', { userId: safeUser.id, ip });
     return res.json({ user: safeUser, token });
-  } catch (e: any) {
-    console.error('[login]', e.message);
-    return res.status(500).json({ error: `Erro interno: ${e.message}` });
+  } catch (error) {
+    logError('auth_login_failed', error, { ip, email });
+    return res.status(500).json({ error: 'Erro interno' });
   }
 }

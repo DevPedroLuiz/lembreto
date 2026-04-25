@@ -1,29 +1,22 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from '../_db.js';
-import { extractBearerToken, verifyToken } from '../../lib/jwt.js';
-
-async function getAuthUser(userId: string) {
-  const rows = await sql`SELECT id FROM users WHERE id = ${userId}`;
-  return rows[0] ?? null;
-}
+import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../../lib/auth.js';
+import { createTaskSchema, formatZodError } from '../../lib/schemas.js';
+import { logError, logInfo } from '../../lib/logger.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Valida o JWT no header Authorization: Bearer <token>
-  const token = extractBearerToken(req.headers.authorization);
-  if (!token) return res.status(401).json({ error: 'Não autorizado' });
-
-  let userId: string;
+  let auth;
   try {
-    const payload = verifyToken(token);
-    userId = payload.sub;
-  } catch {
-    return res.status(401).json({ error: 'Token inválido ou expirado' });
+    auth = await requireAuthFromAuthorizationHeader(sql, req.headers.authorization);
+  } catch (error) {
+    const authFailure = getAuthFailureResponse(error);
+    if (authFailure) return res.status(authFailure.status).json({ error: authFailure.error });
+    logError('tasks_auth_failed', error);
+    return res.status(500).json({ error: 'Erro interno ao autenticar' });
   }
 
-  const user = await getAuthUser(userId);
-  if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
+  const user = auth.user;
 
-  // GET /api/tasks
   if (req.method === 'GET') {
     try {
       const rows = await sql`
@@ -42,28 +35,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ORDER BY created_at DESC
       `;
       return res.json(rows);
-    } catch (e: any) {
-      console.error('[GET /tasks]', e.message);
-      return res.status(500).json({ error: `Erro ao buscar tarefas: ${e.message}` });
+    } catch (error) {
+      logError('tasks_list_failed', error, { userId: user.id });
+      return res.status(500).json({ error: 'Erro ao buscar tarefas' });
     }
   }
 
-  // POST /api/tasks
   if (req.method === 'POST') {
-    const { title, description, dueDate, priority, category } = req.body ?? {};
-    if (!title?.trim())
-      return res.status(400).json({ error: 'Título obrigatório' });
+    const parsed = createTaskSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: formatZodError(parsed.error) });
+    }
+
+    const { title, description, dueDate, priority, category } = parsed.data;
 
     try {
       const rows = await sql`
         INSERT INTO tasks (user_id, title, description, due_date, priority, category)
         VALUES (
           ${user.id},
-          ${title.trim()},
-          ${description || ''},
+          ${title},
+          ${description},
           ${dueDate || null},
-          ${priority  || 'medium'},
-          ${category  || 'Geral'}
+          ${priority},
+          ${category}
         )
         RETURNING
           id,
@@ -76,10 +71,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status,
           created_at  AS "createdAt"
       `;
+      logInfo('task_created', { userId: user.id });
       return res.status(201).json(rows[0]);
-    } catch (e: any) {
-      console.error('[POST /tasks]', e.message);
-      return res.status(500).json({ error: `Erro ao criar tarefa: ${e.message}` });
+    } catch (error) {
+      logError('task_create_failed', error, { userId: user.id });
+      return res.status(500).json({ error: 'Erro ao criar tarefa' });
     }
   }
 

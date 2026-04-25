@@ -8,12 +8,14 @@ interface SidebarItemProps {
   icon: React.ReactNode;
   label: string;
   badge?: number;
+  testId?: string;
 }
 
-export function SidebarItem({ active, onClick, icon, label, badge }: SidebarItemProps) {
+export function SidebarItem({ active, onClick, icon, label, badge, testId }: SidebarItemProps) {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
       className={cn(
         'w-full flex items-center justify-between px-4 py-3.5 rounded-2xl transition-all font-medium outline-none group',
         active

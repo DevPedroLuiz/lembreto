@@ -1,4 +1,3 @@
-// src/pages/DashboardPage.tsx
 import React from 'react';
 import { CheckCircle2, Target, CalendarDays, Bell, ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -17,6 +16,8 @@ interface DashboardPageProps {
   onToggle: (t: Task) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onEdit: (t: Task) => void;
+  deletingTaskIds?: ReadonlySet<string>;
+  togglingTaskIds?: ReadonlySet<string>;
 }
 
 export function DashboardPage({
@@ -30,6 +31,8 @@ export function DashboardPage({
   onToggle,
   onDelete,
   onEdit,
+  deletingTaskIds,
+  togglingTaskIds,
 }: DashboardPageProps) {
   return (
     <motion.div
@@ -39,16 +42,14 @@ export function DashboardPage({
       exit={{ opacity: 0, y: -10 }}
       className="space-y-10"
     >
-      {/* Métricas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <MetricCard title="Total"    value={tasks.length}          icon={<Target size={20} />} />
-        <MetricCard title="Feitas"   value={completedTasks.length} icon={<CheckCircle2 size={20} />} />
-        <MetricCard title="Hoje"     value={todayCount}            icon={<CalendarDays size={20} />} />
-        <MetricCard title="Atrasadas" value={overdueCount}         icon={<Bell size={20} />} error />
+        <MetricCard title="Total" value={tasks.length} icon={<Target size={20} />} />
+        <MetricCard title="Feitas" value={completedTasks.length} icon={<CheckCircle2 size={20} />} />
+        <MetricCard title="Hoje" value={todayCount} icon={<CalendarDays size={20} />} />
+        <MetricCard title="Atrasadas" value={overdueCount} icon={<Bell size={20} />} error />
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Pendentes */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold">Pendentes</h3>
@@ -68,18 +69,19 @@ export function DashboardPage({
                 onDelete={onDelete}
                 onEdit={onEdit}
                 compact
+                isDeleting={deletingTaskIds?.has(task.id)}
+                isToggling={togglingTaskIds?.has(task.id)}
               />
             ))}
             {pendingTasks.length === 0 && (
               <div className="py-16 text-center opacity-60">
                 <CheckCircle2 size={40} className="mx-auto mb-4 text-emerald-500" />
-                <p className="font-medium">Nenhuma pendência.</p>
+                <p className="font-medium">Nenhuma pendencia.</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Progresso */}
         <div className="bg-slate-900 dark:bg-[#131b2f] rounded-[2rem] p-8 text-white relative overflow-hidden flex flex-col min-h-[280px]">
           <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
             <Sparkles size={100} />
@@ -89,8 +91,7 @@ export function DashboardPage({
           </span>
           <div className="mt-auto z-10">
             <h3 className="text-5xl font-light mt-8 mb-2">
-              {completedTasks.length}{' '}
-              <span className="text-slate-400 text-2xl">/ {tasks.length}</span>
+              {completedTasks.length} <span className="text-slate-400 text-2xl">/ {tasks.length}</span>
             </h3>
             <p className="text-slate-400 text-sm mb-6">Tarefas completadas.</p>
             <button

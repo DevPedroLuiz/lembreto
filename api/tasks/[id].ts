@@ -1,33 +1,30 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from '../_db.js';
-import { extractBearerToken, verifyToken } from '../../lib/jwt.js';
-
-async function getAuthUser(userId: string) {
-  const rows = await sql`SELECT id FROM users WHERE id = ${userId}`;
-  return rows[0] ?? null;
-}
+import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../../lib/auth.js';
+import { updateTaskSchema, formatZodError } from '../../lib/schemas.js';
+import { logError, logInfo } from '../../lib/logger.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Valida o JWT no header Authorization: Bearer <token>
-  const token = extractBearerToken(req.headers.authorization);
-  if (!token) return res.status(401).json({ error: 'Não autorizado' });
-
-  let userId: string;
+  let auth;
   try {
-    const payload = verifyToken(token);
-    userId = payload.sub;
-  } catch {
-    return res.status(401).json({ error: 'Token inválido ou expirado' });
+    auth = await requireAuthFromAuthorizationHeader(sql, req.headers.authorization);
+  } catch (error) {
+    const authFailure = getAuthFailureResponse(error);
+    if (authFailure) return res.status(authFailure.status).json({ error: authFailure.error });
+    logError('task_auth_failed', error);
+    return res.status(500).json({ error: 'Erro interno ao autenticar' });
   }
 
-  const user = await getAuthUser(userId);
-  if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
-
+  const user = auth.user;
   const { id } = req.query as { id: string };
 
-  // PUT /api/tasks/:id
   if (req.method === 'PUT') {
-    const { title, description, dueDate, priority, category, status } = req.body ?? {};
+    const parsed = updateTaskSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: formatZodError(parsed.error) });
+    }
+
+    const { title, description, dueDate, priority, category, status } = parsed.data;
 
     try {
       const current = await sql`
@@ -40,12 +37,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cur = current[0];
       const rows = await sql`
         UPDATE tasks SET
-          title       = ${title       !== undefined ? title.trim()    : cur.title},
-          description = ${description !== undefined ? description     : cur.description},
-          due_date    = ${dueDate     !== undefined ? dueDate || null  : cur.due_date},
-          priority    = ${priority    !== undefined ? priority        : cur.priority},
-          category    = ${category    !== undefined ? category        : cur.category},
-          status      = ${status      !== undefined ? status          : cur.status}
+          title       = ${title !== undefined ? title : cur.title},
+          description = ${description !== undefined ? description : cur.description},
+          due_date    = ${dueDate !== undefined ? dueDate || null : cur.due_date},
+          priority    = ${priority !== undefined ? priority : cur.priority},
+          category    = ${category !== undefined ? category : cur.category},
+          status      = ${status !== undefined ? status : cur.status}
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
           id,
@@ -58,21 +55,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status,
           created_at  AS "createdAt"
       `;
+      logInfo('task_updated', { userId: user.id, taskId: id });
       return res.json(rows[0]);
-    } catch (e: any) {
-      console.error('[PUT /tasks/:id]', e.message);
-      return res.status(500).json({ error: `Erro ao atualizar tarefa: ${e.message}` });
+    } catch (error) {
+      logError('task_update_failed', error, { userId: user.id, taskId: id });
+      return res.status(500).json({ error: 'Erro ao atualizar tarefa' });
     }
   }
 
-  // DELETE /api/tasks/:id
   if (req.method === 'DELETE') {
     try {
       await sql`DELETE FROM tasks WHERE id = ${id} AND user_id = ${user.id}`;
+      logInfo('task_deleted', { userId: user.id, taskId: id });
       return res.status(204).send('');
-    } catch (e: any) {
-      console.error('[DELETE /tasks/:id]', e.message);
-      return res.status(500).json({ error: `Erro ao deletar tarefa: ${e.message}` });
+    } catch (error) {
+      logError('task_delete_failed', error, { userId: user.id, taskId: id });
+      return res.status(500).json({ error: 'Erro ao deletar tarefa' });
     }
   }
 
