@@ -104,7 +104,7 @@ Para o workflow funcionar no GitHub Actions, configure estes secrets no reposit√
 
 ## Deploy
 
-O deploy protegido fica em [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+ O deploy protegido fica em [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
 Ele publica em producao apenas quando o workflow `CI` termina com sucesso na branch `main`, ou manualmente via `workflow_dispatch`.
 
 Secrets necessarios para deploy na Vercel:
