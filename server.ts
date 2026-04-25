@@ -72,7 +72,7 @@ const authMiddleware = async (req: any, res: any, next: any) => {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 
   app.set('trust proxy', true);
   app.use(express.json({ limit: '10mb' }));

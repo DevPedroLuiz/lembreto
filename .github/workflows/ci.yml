@@ -42,6 +42,7 @@ jobs:
           cat <<EOF > .env.local
           DATABASE_URL=$DATABASE_URL
           JWT_SECRET=$JWT_SECRET
+          PORT=3001
           APP_URL=http://127.0.0.1:3001
           EOF
 
