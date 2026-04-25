@@ -131,7 +131,7 @@ Use:
 npm run cleanup:db
 ```
 
-Em producao, o ideal e agendar esse script com cron.
+Em producao, o ideal e agendar esse script com cron. No plano Hobby da Vercel, o cron precisa rodar no maximo uma vez por dia.
 
 ### Seguranca aplicada
 
