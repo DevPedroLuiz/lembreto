@@ -70,6 +70,30 @@ async function loginUser(page: Page, email: string, password: string): Promise<s
   return String(loginPayload.token);
 }
 
+async function loginUserWithRememberedEmail(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<string> {
+  await page.goto('/');
+
+  const loginResponsePromise = waitForJsonResponse(
+    page,
+    (response) =>
+      response.url().includes('/api/auth/login') &&
+      response.request().method() === 'POST',
+  );
+
+  await page.getByTestId('auth-email-input').fill(email);
+  await page.getByTestId('auth-password-input').fill(password);
+  await page.getByTestId('remember-email-checkbox').check();
+  await page.getByTestId('auth-submit-button').click();
+
+  const loginPayload = await loginResponsePromise;
+  await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+  return String(loginPayload.token);
+}
+
 async function createTask(page: Page, title: string, options?: { time?: string }): Promise<void> {
   await page.getByTestId('sidebar-tasks').click();
   await page.getByTestId('new-task-button').click();
@@ -302,6 +326,75 @@ test.describe('Lembreto critical flows', () => {
 
       await expect(page.getByTestId('task-sort-category')).toHaveAttribute('aria-pressed', 'true');
       await expectFirstTaskTitle(page, 'Categoria estudo');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('visually differentiates overdue all-day and timed tasks', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const overdueAllDay = new Date();
+    overdueAllDay.setDate(overdueAllDay.getDate() - 2);
+    overdueAllDay.setHours(23, 59, 0, 0);
+
+    const overdueTimed = new Date();
+    overdueTimed.setDate(overdueTimed.getDate() - 2);
+    overdueTimed.setHours(8, 0, 0, 0);
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Atrasada dia todo',
+          dueDate: overdueAllDay.toISOString(),
+          priority: 'medium',
+          category: 'Pessoal',
+        },
+        {
+          title: 'Atrasada com horario',
+          dueDate: overdueTimed.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+      ]);
+
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
+      await page.getByTestId('sidebar-tasks').click();
+
+      const allDayTask = taskCard(page, 'Atrasada dia todo');
+      await expect(allDayTask.getByTestId('task-due-badge')).toHaveAttribute('data-overdue-kind', 'all-day');
+      await expect(allDayTask.getByTestId('task-all-day-badge')).toHaveText('Dia todo');
+      await expect(allDayTask.getByTestId('task-time-badge')).toHaveCount(0);
+
+      const timedTask = taskCard(page, 'Atrasada com horario');
+      await expect(timedTask.getByTestId('task-due-badge')).toHaveAttribute('data-overdue-kind', 'timed');
+      await expect(timedTask.getByTestId('task-time-badge')).toHaveText('08:00');
+      await expect(timedTask.getByTestId('task-all-day-badge')).toHaveCount(0);
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('remembers the user email on the login screen when requested', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+
+      await loginUserWithRememberedEmail(page, user.email, user.password);
+      await page.getByTestId('sidebar-logout').click();
+
+      await expect(page.getByTestId('auth-email-input')).toHaveValue(user.email);
+      await expect(page.getByTestId('remember-email-checkbox')).toBeChecked();
+      await expect(page.getByTestId('auth-password-input')).toHaveValue('');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

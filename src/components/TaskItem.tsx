@@ -62,6 +62,7 @@ function TaskItemComponent({
   const isBusy = isDeleting || isToggling;
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const timeDescription = getTaskTimeDescription(task.dueDate);
+  const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
 
   const formatDate = () => {
     try {
@@ -153,12 +154,15 @@ function TaskItemComponent({
           </span>
           <span
             data-testid="task-due-badge"
+            data-overdue-kind={overdueKind}
             title={timeDescription}
             aria-label={`${formatDate()} - ${timeDescription}`}
             className={cn(
               'flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest',
-              isOverdue
+              overdueKind === 'timed'
                 ? 'text-rose-600 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10'
+                : overdueKind === 'all-day'
+                  ? 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/10'
                 : 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5'
             )}
           >
@@ -168,9 +172,22 @@ function TaskItemComponent({
           {timeLabel && (
             <span
               data-testid="task-time-badge"
-              className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:bg-white/5 dark:text-slate-400"
+              className={cn(
+                'flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest',
+                isOverdue
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+                  : 'bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400'
+              )}
             >
               {timeLabel}
+            </span>
+          )}
+          {overdueKind === 'all-day' && (
+            <span
+              data-testid="task-all-day-badge"
+              className="flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              Dia todo
             </span>
           )}
           {isDeleting && (
