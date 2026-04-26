@@ -133,6 +133,32 @@ body {
     linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
 }
 
+@keyframes bell-attention {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  12% {
+    transform: rotate(-14deg);
+  }
+  24% {
+    transform: rotate(12deg);
+  }
+  36% {
+    transform: rotate(-10deg);
+  }
+  48% {
+    transform: rotate(8deg);
+  }
+  60% {
+    transform: rotate(-4deg);
+  }
+}
+
+.animate-bell-attention {
+  animation: bell-attention 1.4s ease-in-out infinite;
+  transform-origin: top center;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

@@ -2,6 +2,7 @@
 // Typed localStorage helpers — keeps storage logic in one place
 
 import type { User } from '../types';
+import type { AppNotification } from '../types';
 
 export const LS = {
   saveUser: (user: User) =>
@@ -35,4 +36,15 @@ export const LS = {
 
   saveConfig: (cfg: object) =>
     localStorage.setItem('tm_config', JSON.stringify(cfg)),
+
+  saveNotifications: (notifications: AppNotification[]) =>
+    localStorage.setItem('tm_notifications', JSON.stringify(notifications)),
+
+  loadNotifications: (): AppNotification[] => {
+    try {
+      return JSON.parse(localStorage.getItem('tm_notifications') || '[]') as AppNotification[];
+    } catch {
+      return [];
+    }
+  },
 };

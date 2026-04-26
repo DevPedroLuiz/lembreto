@@ -7,15 +7,36 @@ interface MetricCardProps {
   icon: React.ReactNode;
   error?: boolean;
   tone?: 'brand' | 'emerald' | 'violet';
+  onClick?: () => void;
+  ariaLabel?: string;
+  testId?: string;
 }
 
-export function MetricCard({ title, value, icon, error, tone = 'brand' }: MetricCardProps) {
+export function MetricCard({
+  title,
+  value,
+  icon,
+  error,
+  tone = 'brand',
+  onClick,
+  ariaLabel,
+  testId,
+}: MetricCardProps) {
+  const isInteractive = Boolean(onClick);
+
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      data-testid={testId}
       className={cn(
-        'surface-panel flex min-h-[148px] flex-col justify-between p-5 md:p-6',
+        'surface-panel flex min-h-[148px] w-full flex-col justify-between p-5 text-left md:p-6',
+        isInteractive && 'transition-all hover:-translate-y-1 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
+        isInteractive && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
         error && 'border-rose-200/80 dark:border-rose-500/20',
       )}
+      disabled={!isInteractive}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -51,6 +72,6 @@ export function MetricCard({ title, value, icon, error, tone = 'brand' }: Metric
           style={{ width: `${Math.min(Math.max(value * 12, 16), 100)}%` }}
         />
       </div>
-    </div>
+    </button>
   );
 }

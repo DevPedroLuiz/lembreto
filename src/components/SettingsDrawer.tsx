@@ -1,6 +1,8 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  ArrowRight,
+  BellRing,
   CheckCircle2,
   Moon,
   Settings,
@@ -51,6 +53,9 @@ interface SettingsDrawerProps {
   onClose: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  notificationsEnabled: boolean;
+  onToggleNotifications: () => void;
+  onOpenNotificationsCenter: () => void;
   sound: boolean;
   onToggleSound: () => void;
   confirmDelete: boolean;
@@ -65,6 +70,12 @@ const settingCards = [
     title: 'Modo escuro',
     description: 'Ativa uma interface mais confortável para ambientes com pouca luz.',
     icon: Moon,
+  },
+  {
+    key: 'notifications',
+    title: 'Notificações do sistema',
+    description: 'Controla toasts, avisos do navegador e o registro de novos eventos na central.',
+    icon: BellRing,
   },
   {
     key: 'sound',
@@ -91,6 +102,9 @@ export function SettingsDrawer({
   onClose,
   darkMode,
   onToggleDarkMode,
+  notificationsEnabled,
+  onToggleNotifications,
+  onOpenNotificationsCenter,
   sound,
   onToggleSound,
   confirmDelete,
@@ -103,6 +117,11 @@ export function SettingsDrawer({
       active: darkMode,
       onClick: onToggleDarkMode,
       ariaLabel: 'Alternar modo escuro',
+    },
+    notifications: {
+      active: notificationsEnabled,
+      onClick: onToggleNotifications,
+      ariaLabel: 'Alternar notificações do sistema',
     },
     sound: {
       active: sound,
@@ -199,6 +218,29 @@ export function SettingsDrawer({
                   );
                 })}
               </div>
+
+              <section className="surface-soft mt-6 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="pr-4">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Central de notificações
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      Abra o histórico completo dos avisos do sistema e acompanhe o que ainda precisa da sua atenção.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={onOpenNotificationsCenter}
+                    data-testid="settings-open-notifications-center"
+                    className="action-secondary shrink-0"
+                  >
+                    Abrir
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+              </section>
             </div>
 
             <div className="border-t border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">

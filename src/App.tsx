@@ -7,6 +7,7 @@
 } from 'react';
 import {
   Bell,
+  BellRing,
   LayoutDashboard,
   ListTodo,
   Plus,
@@ -14,7 +15,8 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { format, isPast, isToday, parseISO } from 'date-fns';
-import { AnimatePresence } from 'motion/react';
+import { ptBR } from 'date-fns/locale';
+import { AnimatePresence, motion } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
 import { useTasks } from './hooks/useTasks';
@@ -22,25 +24,91 @@ import { useToast } from './hooks/useToast';
 import { LS } from './lib/storage';
 import { cn } from './lib/cn';
 import { AUTH_UNAUTHORIZED_EVENT } from './lib/authEvents';
-import { buildDueDateFromForm, parseDueDateToForm } from './lib/taskDueDate';
-import { type Priority, type Task } from './types';
+import {
+  buildDueDateFromForm,
+  getTaskTimeLabel,
+  parseDueDateToForm,
+} from './lib/taskDueDate';
+import {
+  buildRecurringDates,
+  getRecurrenceSuggestion,
+  type RecurrenceMode,
+  type RecurrenceSuggestion,
+} from './lib/taskRecurrence';
+import { type AppNotification, type NotificationTarget, type Priority, type Task } from './types';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Sidebar } from './components/Sidebar';
 import { TaskDrawer } from './components/TaskDrawer';
+import { TaskDetailsDialog } from './components/TaskDetailsDialog';
+import { DashboardMetricDialog } from './components/DashboardMetricDialog';
+import { NotificationsInboxDrawer } from './components/NotificationsInboxDrawer';
 import { ProfileDrawer } from './components/ProfileDrawer';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AuthPage } from './pages/AuthPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { ResetPage } from './pages/ResetPage';
 import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
 
 type AppConfigPatch = Partial<{
+  notifications: boolean;
   sound: boolean;
   confirmDelete: boolean;
   showCompleted: boolean;
 }>;
+
+type DashboardMetricKey = 'completed' | 'today' | 'overdue';
+
+type NotificationTone = 'info' | 'success' | 'warning' | 'error';
+
+type EmitNotificationOptions = {
+  toastOnly?: boolean;
+  skipToast?: boolean;
+  target?: NotificationTarget;
+  dedupeKey?: string;
+};
+
+function fallbackCopyText(text: string) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
+function buildTaskShareMessage(task: Task): string {
+  let dueLabel = 'Data indisponível';
+
+  try {
+    dueLabel = format(parseISO(task.dueDate), "dd 'de' MMMM 'de' yyyy", {
+      locale: ptBR,
+    });
+  } catch {
+    // keep fallback
+  }
+
+  const timeLabel = getTaskTimeLabel(task.dueDate);
+  const statusLabel = task.status === 'completed' ? 'Concluído' : 'Pendente';
+
+  return [
+    `Lembrete: ${task.title}`,
+    task.description?.trim() ? `Detalhes: ${task.description.trim()}` : null,
+    `Prazo: ${dueLabel}`,
+    `Horário: ${timeLabel || 'Dia todo'}`,
+    `Prioridade: ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}`,
+    `Categoria: ${task.category || 'Geral'}`,
+    `Status: ${statusLabel}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -48,10 +116,16 @@ export default function App() {
 
   const auth = useAuth();
   const { tasks, createTask, updateTask, deleteTask, toggleStatus } = useTasks(isResetPasswordRoute ? null : auth.token);
-  const { toastMsg, setToastMsg, notify, showToast } = useToast();
+  const {
+    toastMsg,
+    setToastMsg,
+    notify: triggerToastNotification,
+    showToast: triggerToastOnly,
+    requestPermission,
+  } = useToast();
 
   const [darkMode, setDarkMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notifications'>('dashboard');
   const [filterCategory, setFilterCategory] = useState('Todas');
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -59,7 +133,9 @@ export default function App() {
   const [showTaskDrawer, setShowTaskDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
 
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [configSound, setConfigSound] = useState(true);
   const [configConfirmDelete, setConfigConfirmDelete] = useState(true);
   const [configShowCompleted, setConfigShowCompleted] = useState(true);
@@ -70,14 +146,22 @@ export default function App() {
   const [formTime, setFormTime] = useState('');
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formCategory, setFormCategory] = useState('Geral');
+  const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
+  const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
+  const [formRecurrenceUntil, setFormRecurrenceUntil] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
+  const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const [dashboardMetricDialog, setDashboardMetricDialog] = useState<DashboardMetricKey | null>(null);
+  const [taskDetailsReturnMetric, setTaskDetailsReturnMetric] = useState<DashboardMetricKey | null>(null);
   const [deletingTaskIds, setDeletingTaskIds] = useState<Set<string>>(new Set());
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTask, setPendingDeleteTask] = useState<{
     id: string;
     title: string;
   } | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => LS.loadNotifications());
 
   const [profName, setProfName] = useState('');
   const [profEmail, setProfEmail] = useState('');
@@ -89,6 +173,7 @@ export default function App() {
 
   useEffect(() => {
     const cfg = LS.getConfig() as Record<string, unknown>;
+    if (typeof cfg.notifications === 'boolean') setNotificationsEnabled(cfg.notifications);
     if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
     if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
     if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
@@ -102,6 +187,18 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
+    LS.saveNotifications(notifications);
+  }, [notifications]);
+
+  useEffect(() => {
+    if (activeTab !== 'notifications') return;
+
+    setNotifications((prev) => prev.map((notification) => (
+      notification.read ? notification : { ...notification, read: true }
+    )));
+  }, [activeTab]);
+
+  useEffect(() => {
     const syncPathname = () => setPathname(window.location.pathname);
     window.addEventListener('popstate', syncPathname);
     return () => window.removeEventListener('popstate', syncPathname);
@@ -110,28 +207,45 @@ export default function App() {
   useEffect(() => {
     const onUnauthorized = () => {
       if (!auth.token) return;
-      showToast('SessÃ£o encerrada', 'Sua sessÃ£o expirou. FaÃ§a login novamente.');
+
+      if (notificationsEnabled) {
+        setNotifications((prev) => [
+          {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            title: 'Sessão encerrada',
+            message: 'Sua sessão expirou. Faça login novamente.',
+            tone: 'warning',
+            read: false,
+            createdAt: new Date().toISOString(),
+          },
+          ...prev,
+        ].slice(0, 80));
+      }
+
+      triggerToastOnly('Sessão encerrada', 'Sua sessão expirou. Faça login novamente.');
       void auth.logout();
     };
 
     window.addEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
-  }, [auth.logout, auth.token, showToast]);
+  }, [auth.logout, auth.token, notificationsEnabled, triggerToastOnly]);
 
   const saveConfig = useCallback((patch: AppConfigPatch) => {
     const persistedConfig = LS.getConfig();
     const next = {
       ...persistedConfig,
+      notifications: notificationsEnabled,
       sound: configSound,
       confirmDelete: configConfirmDelete,
       showCompleted: configShowCompleted,
       ...patch,
     };
+    setNotificationsEnabled(Boolean(next.notifications));
     setConfigSound(next.sound);
     setConfigConfirmDelete(next.confirmDelete);
     setConfigShowCompleted(next.showCompleted);
     LS.saveConfig(next);
-  }, [configConfirmDelete, configShowCompleted, configSound]);
+  }, [configConfirmDelete, configShowCompleted, configSound, notificationsEnabled]);
 
   const playSuccessSound = useCallback(() => {
     if (!configSound) return;
@@ -162,6 +276,46 @@ export default function App() {
     }
   }, [configSound]);
 
+  const emitNotification = useCallback((
+    title: string,
+    message: string,
+    tone: NotificationTone = 'info',
+    options?: EmitNotificationOptions
+  ) => {
+    if (!notificationsEnabled) return;
+
+    let wasAdded = false;
+
+    setNotifications((prev) => {
+      if (options?.dedupeKey && prev.some((notification) => notification.dedupeKey === options.dedupeKey)) {
+        return prev;
+      }
+
+      wasAdded = true;
+
+      const entry: AppNotification = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        title,
+        message,
+        tone,
+        read: false,
+        createdAt: new Date().toISOString(),
+        target: options?.target,
+        dedupeKey: options?.dedupeKey,
+      };
+
+      return [entry, ...prev].slice(0, 80);
+    });
+
+    if (!wasAdded || options?.skipToast) return;
+
+    if (options?.toastOnly) {
+      triggerToastOnly(title, message);
+    } else {
+      triggerToastNotification(title, message);
+    }
+  }, [notificationsEnabled, triggerToastNotification, triggerToastOnly]);
+
   const resetTaskForm = useCallback(() => {
     setFormTitle('');
     setFormDesc('');
@@ -169,17 +323,40 @@ export default function App() {
     setFormTime('');
     setFormPriority('medium');
     setFormCategory('Geral');
+    setFormRecurrenceEnabled(false);
+    setFormRecurrenceMode('daily');
+    setFormRecurrenceUntil('');
     setEditingTask(null);
     setShowTaskDrawer(false);
   }, []);
 
+  useEffect(() => {
+    if (!selectedTask) return;
+
+    const updatedTask = tasks.find((task) => task.id === selectedTask.id);
+    if (!updatedTask) {
+      setSelectedTask(null);
+      setShowTaskDetails(false);
+      return;
+    }
+
+    if (updatedTask !== selectedTask) {
+      setSelectedTask(updatedTask);
+    }
+  }, [selectedTask, tasks]);
+
   const openNewTask = useCallback(() => {
     resetTaskForm();
+    setShowNotificationsInbox(false);
+    setSelectedTask(null);
+    setShowTaskDetails(false);
+    setTaskDetailsReturnMetric(null);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
   const openTaskFromTemplate = useCallback((template: QuickStartTemplate) => {
     resetTaskForm();
+    setShowNotificationsInbox(false);
     setFormTitle(template.title);
     setFormDesc(template.description);
     setFormDate(template.date);
@@ -190,6 +367,7 @@ export default function App() {
   }, [resetTaskForm]);
 
   const openEditTask = useCallback((task: Task) => {
+    setShowNotificationsInbox(false);
     const dueDateForm = parseDueDateToForm(task.dueDate);
     setFormTitle(task.title);
     setFormDesc(task.description);
@@ -197,9 +375,97 @@ export default function App() {
     setFormTime(dueDateForm.time);
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
+    setFormRecurrenceEnabled(false);
+    setFormRecurrenceMode('daily');
+    setFormRecurrenceUntil('');
     setEditingTask(task);
+    setSelectedTask(task);
+    setShowTaskDetails(false);
+    setTaskDetailsReturnMetric(null);
     setShowTaskDrawer(true);
   }, []);
+
+  const openDuplicateTask = useCallback((task: Task) => {
+    setShowNotificationsInbox(false);
+    const dueDateForm = parseDueDateToForm(task.dueDate);
+    setFormTitle(`${task.title} (cópia)`);
+    setFormDesc(task.description);
+    setFormDate(dueDateForm.date);
+    setFormTime(dueDateForm.time);
+    setFormPriority(task.priority);
+    setFormCategory(task.category || 'Geral');
+    setFormRecurrenceEnabled(false);
+    setFormRecurrenceMode('daily');
+    setFormRecurrenceUntil('');
+    setEditingTask(null);
+    setSelectedTask(null);
+    setShowTaskDetails(false);
+    setTaskDetailsReturnMetric(null);
+    setShowTaskDrawer(true);
+  }, []);
+
+  const openTaskDetails = useCallback((task: Task) => {
+    setShowNotificationsInbox(false);
+    setDashboardMetricDialog(null);
+    setTaskDetailsReturnMetric(null);
+    setSelectedTask(task);
+    setShowTaskDetails(true);
+  }, []);
+
+  const openTaskDetailsFromMetric = useCallback((task: Task, metric: DashboardMetricKey) => {
+    setShowNotificationsInbox(false);
+    setDashboardMetricDialog(null);
+    setTaskDetailsReturnMetric(metric);
+    setSelectedTask(task);
+    setShowTaskDetails(true);
+  }, []);
+
+  const closeTaskDetails = useCallback(() => {
+    setShowTaskDetails(false);
+    setSelectedTask(null);
+    setTaskDetailsReturnMetric(null);
+  }, []);
+
+  const openDashboardMetric = useCallback((metric: DashboardMetricKey) => {
+    setDashboardMetricDialog(metric);
+  }, []);
+
+  const closeDashboardMetric = useCallback(() => {
+    setDashboardMetricDialog(null);
+  }, []);
+
+  const returnToDashboardMetric = useCallback(() => {
+    if (!taskDetailsReturnMetric) return;
+    setShowTaskDetails(false);
+    setDashboardMetricDialog(taskDetailsReturnMetric);
+    setTaskDetailsReturnMetric(null);
+  }, [taskDetailsReturnMetric]);
+
+  const handleShareTask = useCallback(async (task: Task) => {
+    const shareMessage = buildTaskShareMessage(task);
+
+    try {
+      if ('share' in navigator && typeof navigator.share === 'function') {
+        await navigator.share({
+          title: task.title,
+          text: shareMessage,
+        });
+        emitNotification('Lembrete compartilhado', 'O conteúdo foi enviado pelo compartilhamento do dispositivo.', 'success');
+        return;
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareMessage);
+      } else {
+        fallbackCopyText(shareMessage);
+      }
+
+      emitNotification('Resumo copiado', 'O lembrete foi copiado para você compartilhar onde quiser.', 'info');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      emitNotification('Não foi possível compartilhar', 'Tente novamente em outro navegador ou aplicativo.', 'error');
+    }
+  }, [emitNotification]);
 
   const taskDueDateError = useMemo(() => {
     if (!formDate) return '';
@@ -212,13 +478,72 @@ export default function App() {
     return '';
   }, [formDate, formTime]);
 
+  const recurringDates = useMemo(() => {
+    if (!formRecurrenceEnabled || !formDate || !formRecurrenceUntil) return [];
+    return buildRecurringDates(formDate, formRecurrenceUntil, formRecurrenceMode);
+  }, [formDate, formRecurrenceEnabled, formRecurrenceMode, formRecurrenceUntil]);
+
+  const recurrenceError = useMemo(() => {
+    if (editingTask || !formRecurrenceEnabled) return '';
+    if (!formDate) return '';
+    if (!formRecurrenceUntil) return 'Defina a data final da repetição.';
+    if (formRecurrenceUntil < formDate) return 'A repetição precisa terminar na mesma data ou depois do início.';
+    if (recurringDates.length === 0) return 'Nenhuma data do intervalo corresponde a esse padrão de repetição.';
+    if (recurringDates.length > 120) return 'Reduza o intervalo para no máximo 120 lembretes por criação.';
+    return '';
+  }, [editingTask, formDate, formRecurrenceEnabled, formRecurrenceUntil, recurringDates.length]);
+
+  const applyRecurrenceSuggestion = useCallback((suggestion: RecurrenceSuggestion) => {
+    const nextSuggestion = getRecurrenceSuggestion(formDate, suggestion);
+    if (!nextSuggestion) {
+      emitNotification('Escolha a data inicial primeiro', 'Defina o primeiro dia do lembrete antes de aplicar uma sugestão.', 'warning');
+      return;
+    }
+
+    setFormRecurrenceEnabled(true);
+    setFormRecurrenceMode(nextSuggestion.mode);
+    setFormRecurrenceUntil(nextSuggestion.until);
+  }, [emitNotification, formDate]);
+
+  const unreadNotifications = useMemo(
+    () => notifications.filter((notification) => !notification.read).length,
+    [notifications],
+  );
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((notification) => (
+      notification.read ? notification : { ...notification, read: true }
+    )));
+  }, []);
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
+
+  const handleToggleNotifications = useCallback(async () => {
+    const nextValue = !notificationsEnabled;
+    saveConfig({ notifications: nextValue });
+
+    if (nextValue) {
+      await requestPermission();
+      triggerToastOnly('Notificações ativadas', 'Novos avisos voltarão a aparecer na central e na interface.');
+    } else {
+      triggerToastOnly('Notificações desativadas', 'A central deixará de registrar novos avisos até você reativar.');
+    }
+  }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly]);
+
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formTitle.trim() || !formDate || isTaskSubmitting) return;
 
     if (taskDueDateError) {
-      notify('Prazo inválido', taskDueDateError);
+      emitNotification('Prazo inválido', taskDueDateError, 'warning');
+      return;
+    }
+
+    if (recurrenceError) {
+      emitNotification('Repetição inválida', recurrenceError, 'warning');
       return;
     }
 
@@ -232,25 +557,45 @@ export default function App() {
       category: formCategory,
     };
 
-    try {
-      setIsTaskSubmitting(true);
+      try {
+        setIsTaskSubmitting(true);
 
-      if (editingTask) {
-        await updateTask(editingTask.id, payload);
-        notify('Lembrete atualizado!', 'As informaÃ§Ãµes do lembrete foram salvas.');
-      } else {
-        const created = await createTask(payload);
-        notify('Lembrete criado!', `"${created.title}" foi adicionado.`);
-      }
+        if (editingTask) {
+          await updateTask(editingTask.id, payload);
+          emitNotification('Lembrete atualizado!', 'As informações do lembrete foram salvas.', 'success', {
+            target: { type: 'task', taskId: editingTask.id },
+          });
+        } else {
+          if (formRecurrenceEnabled && recurringDates.length > 1) {
+            for (const dateValue of recurringDates) {
+              await createTask({
+                ...payload,
+                dueDate: buildDueDateFromForm(dateValue, formTime),
+              });
+            }
+
+            emitNotification(
+              'Lembretes criados!',
+              `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
+              'success',
+            );
+          } else {
+            const created = await createTask(payload);
+            emitNotification('Lembrete criado!', `"${created.title}" foi adicionado.`, 'success', {
+              target: { type: 'task', taskId: created.id },
+            });
+          }
+        }
 
       resetTaskForm();
     } catch (err: unknown) {
-      notify('Erro', err instanceof Error ? err.message : 'Falha ao salvar o lembrete.');
+      emitNotification('Erro', err instanceof Error ? err.message : 'Falha ao salvar o lembrete.', 'error');
     } finally {
       setIsTaskSubmitting(false);
     }
   }, [
     createTask,
+    emitNotification,
     editingTask,
     formCategory,
     formDate,
@@ -258,12 +603,15 @@ export default function App() {
     formPriority,
     formTime,
     formTitle,
-    isTaskSubmitting,
-    notify,
-    resetTaskForm,
-    taskDueDateError,
-    updateTask,
-  ]);
+      isTaskSubmitting,
+      resetTaskForm,
+      recurringDates,
+      recurrenceError,
+      formRecurrenceEnabled,
+      formRecurrenceUntil,
+      taskDueDateError,
+      updateTask,
+    ]);
 
   const handleToggle = useCallback(async (task: Task) => {
     if (togglingTaskIds.has(task.id)) return;
@@ -274,10 +622,15 @@ export default function App() {
 
       if (newStatus === 'completed') {
         playSuccessSound();
-        notify('ParabÃ©ns!', `"${task.title}" foi concluÃ­da.`);
+        emitNotification('Parabéns!', `"${task.title}" foi concluído.`, 'success', {
+          target: { type: 'task', taskId: task.id },
+        });
       }
+
+      return newStatus;
     } catch {
-      notify('Erro', 'Falha ao atualizar o status do lembrete.');
+      emitNotification('Erro', 'Falha ao atualizar o status do lembrete.', 'error');
+      return null;
     } finally {
       setTogglingTaskIds((prev) => {
         const next = new Set(prev);
@@ -285,7 +638,15 @@ export default function App() {
         return next;
       });
     }
-  }, [notify, playSuccessSound, toggleStatus, togglingTaskIds]);
+  }, [emitNotification, playSuccessSound, toggleStatus, togglingTaskIds]);
+
+  const handleToggleFromDetails = useCallback(async (task: Task) => {
+    const nextStatus = await handleToggle(task);
+    if (nextStatus === 'completed') {
+      setShowTaskDetails(false);
+      setSelectedTask(null);
+    }
+  }, [handleToggle]);
 
   const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -304,9 +665,13 @@ export default function App() {
     try {
       setDeletingTaskIds((prev) => new Set(prev).add(id));
       await deleteTask(id);
-      showToast('Lembrete removido', 'O lembrete foi excluÃ­do com sucesso.');
+      emitNotification('Lembrete removido', 'O lembrete foi excluído com sucesso.', 'info', { toastOnly: true });
+      if (selectedTask?.id === id) {
+        setSelectedTask(null);
+        setShowTaskDetails(false);
+      }
     } catch {
-      notify('Erro', 'Falha ao excluir o lembrete.');
+      emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
     } finally {
       setDeletingTaskIds((prev) => {
         const next = new Set(prev);
@@ -314,7 +679,39 @@ export default function App() {
         return next;
       });
     }
-  }, [configConfirmDelete, deleteTask, deletingTaskIds, notify, showToast, tasks]);
+  }, [configConfirmDelete, deleteTask, deletingTaskIds, emitNotification, selectedTask?.id, tasks]);
+
+  const handleDeleteFromDetails = useCallback((task: Task) => {
+    if (deletingTaskIds.has(task.id)) return;
+
+    setSelectedTask(task);
+    if (configConfirmDelete) {
+      setPendingDeleteTask({
+        id: task.id,
+        title: task.title,
+      });
+      return;
+    }
+
+    try {
+      setDeletingTaskIds((prev) => new Set(prev).add(task.id));
+      void deleteTask(task.id).then(() => {
+        emitNotification('Lembrete removido', 'O lembrete foi excluído com sucesso.', 'info', { toastOnly: true });
+        setSelectedTask(null);
+        setShowTaskDetails(false);
+      }).catch(() => {
+        emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
+      }).finally(() => {
+        setDeletingTaskIds((prev) => {
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        });
+      });
+    } catch {
+      emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
+    }
+  }, [configConfirmDelete, deleteTask, deletingTaskIds, emitNotification]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!pendingDeleteTask || deletingTaskIds.has(pendingDeleteTask.id)) return;
@@ -324,10 +721,14 @@ export default function App() {
     try {
       setDeletingTaskIds((prev) => new Set(prev).add(taskToDelete.id));
       await deleteTask(taskToDelete.id);
-      showToast('Lembrete removido', 'O lembrete foi excluÃ­do com sucesso.');
+      emitNotification('Lembrete removido', 'O lembrete foi excluído com sucesso.', 'info', { toastOnly: true });
+      if (selectedTask?.id === taskToDelete.id) {
+        setSelectedTask(null);
+        setShowTaskDetails(false);
+      }
       setPendingDeleteTask(null);
     } catch {
-      notify('Erro', 'Falha ao excluir o lembrete.');
+      emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
     } finally {
       setDeletingTaskIds((prev) => {
         const next = new Set(prev);
@@ -335,9 +736,10 @@ export default function App() {
         return next;
       });
     }
-  }, [deleteTask, deletingTaskIds, notify, pendingDeleteTask, showToast]);
+  }, [deleteTask, deletingTaskIds, emitNotification, pendingDeleteTask, selectedTask]);
 
   const openProfile = useCallback(() => {
+    setShowNotificationsInbox(false);
     setProfName(auth.currentUser?.name || '');
     setProfEmail(auth.currentUser?.email || '');
     setProfPassword('');
@@ -357,14 +759,16 @@ export default function App() {
         password: profPassword || undefined,
         avatar: profAvatar,
       });
-      notify('Perfil atualizado!', 'Suas informaÃ§Ãµes foram salvas.');
+      emitNotification('Perfil atualizado!', 'Suas informações foram salvas.', 'success', {
+        target: { type: 'profile' },
+      });
       setShowProfileDrawer(false);
     } catch (err: unknown) {
-      notify('Erro', err instanceof Error ? err.message : 'Falha ao atualizar perfil.');
+      emitNotification('Erro', err instanceof Error ? err.message : 'Falha ao atualizar perfil.', 'error');
     } finally {
       setIsProfileSubmitting(false);
     }
-  }, [auth.updateProfile, isProfileSubmitting, notify, profAvatar, profEmail, profName, profPassword]);
+  }, [auth.updateProfile, emitNotification, isProfileSubmitting, profAvatar, profEmail, profName, profPassword]);
 
   const normalizedSearch = deferredSearch.trim().toLowerCase();
 
@@ -406,7 +810,46 @@ export default function App() {
     );
   }, [pendingTasks]);
 
+  const todayTasks = useMemo(() => {
+    return pendingTasks.filter((task) => {
+      try {
+        return isToday(parseISO(task.dueDate));
+      } catch {
+        return false;
+      }
+    });
+  }, [pendingTasks]);
+
+  const overdueTasks = useMemo(() => {
+    return pendingTasks.filter((task) => {
+      try {
+        const dueDate = parseISO(task.dueDate);
+        return isPast(dueDate) && !isToday(dueDate);
+      } catch {
+        return false;
+      }
+    });
+  }, [pendingTasks]);
+
+  useEffect(() => {
+    if (!notificationsEnabled || overdueTasks.length === 0) return;
+
+    overdueTasks.forEach((task) => {
+      emitNotification(
+        'Lembrete atrasado',
+        `"${task.title}" passou do prazo e precisa da sua atenção.`,
+        'warning',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `overdue:${task.id}`,
+          skipToast: true,
+        },
+      );
+    });
+  }, [emitNotification, notificationsEnabled, overdueTasks]);
+
   const openSettings = useCallback(() => {
+    setShowNotificationsInbox(false);
     setShowSettings(true);
   }, []);
 
@@ -419,12 +862,65 @@ export default function App() {
   }, []);
 
   const openTasksTab = useCallback(() => {
+    setShowNotificationsInbox(false);
     setActiveTab('tasks');
   }, []);
 
   const openDashboardTab = useCallback(() => {
+    setShowNotificationsInbox(false);
     setActiveTab('dashboard');
   }, []);
+
+  const openNotificationsCenter = useCallback(() => {
+    setShowNotificationsInbox(false);
+    setShowSettings(false);
+    setActiveTab('notifications');
+  }, []);
+
+  const openNotificationsInbox = useCallback(() => {
+    setShowNotificationsInbox(true);
+  }, []);
+
+  const closeNotificationsInbox = useCallback(() => {
+    setShowNotificationsInbox(false);
+  }, []);
+
+  const handleOpenNotification = useCallback((notification: AppNotification) => {
+    setNotifications((prev) => prev.map((item) => (
+      item.id === notification.id ? { ...item, read: true } : item
+    )));
+
+    setShowNotificationsInbox(false);
+    setShowSettings(false);
+
+    if (notification.target?.type === 'task') {
+      const relatedTask = tasks.find((task) => task.id === notification.target.taskId);
+      setActiveTab('tasks');
+
+      if (relatedTask) {
+        setDashboardMetricDialog(null);
+        setTaskDetailsReturnMetric(null);
+        setSelectedTask(relatedTask);
+        setShowTaskDetails(true);
+      } else {
+        triggerToastOnly('Lembrete indisponível', 'Esse lembrete pode ter sido removido ou alterado desde a notificação.');
+      }
+
+      return;
+    }
+
+    if (notification.target?.type === 'profile') {
+      openProfile();
+      return;
+    }
+
+    if (notification.target?.type === 'settings') {
+      openSettings();
+      return;
+    }
+
+    setActiveTab('notifications');
+  }, [openProfile, openSettings, tasks, triggerToastOnly]);
 
   const dismissToast = useCallback(() => {
     setToastMsg(null);
@@ -451,14 +947,56 @@ export default function App() {
   }
 
   if (!auth.currentUser || !auth.token) {
-    return <AuthPage auth={auth} toastNotify={notify} />;
+    return (
+      <AuthPage
+        auth={auth}
+        toastNotify={(title, message) => emitNotification(title, message, 'success', {
+          target: { type: 'notifications' },
+        })}
+      />
+    );
   }
 
   const greetingName = auth.currentUser.name.split(' ')[0];
-  const pageTitle = activeTab === 'dashboard' ? `OlÃ¡, ${greetingName}` : 'Sua agenda';
+  const pageTitle = activeTab === 'dashboard'
+    ? `Olá, ${greetingName}`
+    : activeTab === 'tasks'
+      ? 'Sua agenda'
+      : 'Notificações';
   const pageDescription = activeTab === 'dashboard'
-    ? 'Aqui estÃ¡ uma visÃ£o clara do que pede atenÃ§Ã£o hoje.'
-    : 'Organize lembretes, refine prioridades e avance com tranquilidade.';
+    ? 'Aqui está uma visão clara do que pede atenção hoje.'
+    : activeTab === 'tasks'
+      ? 'Organize lembretes, refine prioridades e avance com tranquilidade.'
+      : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
+  const dashboardMetricContent = dashboardMetricDialog === 'completed'
+    ? {
+        title: 'Lembretes conclu\u00eddos',
+        description: 'Tudo o que voc\u00ea finalizou recentemente, com acesso r\u00e1pido para reabrir ou revisar detalhes.',
+        tasks: completedTasks,
+        countLabel: `${completedTasks.length} conclu\u00eddo${completedTasks.length === 1 ? '' : 's'}`,
+      }
+    : dashboardMetricDialog === 'today'
+      ? {
+        title: 'Lembretes para hoje',
+        description: 'Aqui est\u00e3o os itens planejados para hoje, prontos para ganhar prioridade e execu\u00e7\u00e3o.',
+        tasks: todayTasks,
+        countLabel: `${todayTasks.length} para hoje`,
+      }
+      : dashboardMetricDialog === 'overdue'
+        ? {
+            title: 'Lembretes atrasados',
+            description: 'Uma vis\u00e3o dedicada do que passou do prazo para voc\u00ea reorganizar sem perder contexto.',
+            tasks: overdueTasks,
+            countLabel: `${overdueTasks.length} atrasado${overdueTasks.length === 1 ? '' : 's'}`,
+          }
+        : null;
+  const taskDetailsBackLabel = taskDetailsReturnMetric === 'completed'
+    ? 'Voltar para concluídos'
+    : taskDetailsReturnMetric === 'today'
+      ? 'Voltar para hoje'
+      : taskDetailsReturnMetric === 'overdue'
+        ? 'Voltar para atrasados'
+        : '';
 
   return (
     <div className="flex h-screen w-full overflow-hidden text-slate-900 dark:text-slate-100">
@@ -488,6 +1026,19 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <motion.button
+              onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
+              aria-label="Abrir notificações recentes"
+              data-testid="header-notifications-button-mobile"
+              className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+            >
+              <BellRing size={20} className={unreadNotifications > 0 ? 'animate-bell-attention' : ''} />
+              {unreadNotifications > 0 && (
+                <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {Math.min(unreadNotifications, 9)}
+                </span>
+              )}
+            </motion.button>
             <button
               onClick={openSettings}
               aria-label="Abrir configuraÃ§Ãµes"
@@ -525,12 +1076,22 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
-                  {pendingTasks.length} pendente{pendingTasks.length === 1 ? '' : 's'}
-                </span>
-                <span className="rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
-                  {completedTasks.length} concluÃ­da{completedTasks.length === 1 ? '' : 's'}
-                </span>
+                <motion.button
+                  type="button"
+                  onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
+                  data-testid="header-notifications-button"
+                  aria-label="Abrir notificações recentes"
+                  className="relative inline-flex h-14 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:border-white/20 dark:hover:bg-white/[0.08]"
+                >
+                  <span className="icon-slot h-5 w-5">
+                    <BellRing size={20} className={unreadNotifications > 0 ? 'animate-bell-attention' : ''} />
+                  </span>
+                  {unreadNotifications > 0 && (
+                    <span className="absolute -right-2 -top-2 inline-flex min-w-6 items-center justify-center rounded-full bg-rose-500 px-1.5 py-1 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
+                      {Math.min(unreadNotifications, 99)}
+                    </span>
+                  )}
+                </motion.button>
               </div>
             </div>
           </div>
@@ -556,11 +1117,14 @@ export default function App() {
                 todayCount={pendingSummary.todayCount}
                 overdueCount={pendingSummary.overdueCount}
                 onViewAll={openTasksTab}
+                onOpenCompleted={() => openDashboardMetric('completed')}
+                onOpenToday={() => openDashboardMetric('today')}
+                onOpenOverdue={() => openDashboardMetric('overdue')}
                 onNewTask={openNewTask}
                 onApplyTemplate={openTaskFromTemplate}
                 onToggle={handleToggle}
                 onDelete={handleDelete}
-                onEdit={openEditTask}
+                onEdit={openTaskDetails}
                 deletingTaskIds={deletingTaskIds}
                 togglingTaskIds={togglingTaskIds}
               />
@@ -578,9 +1142,17 @@ export default function App() {
                 onNewTask={openNewTask}
                 onToggle={handleToggle}
                 onDelete={handleDelete}
-                onEdit={openEditTask}
+                onEdit={openTaskDetails}
                 deletingTaskIds={deletingTaskIds}
                 togglingTaskIds={togglingTaskIds}
+              />
+            )}
+            {activeTab === 'notifications' && (
+              <NotificationsPage
+                notifications={notifications}
+                onMarkAllRead={markAllNotificationsRead}
+                onClearAll={clearNotifications}
+                onOpenNotification={handleOpenNotification}
               />
             )}
           </AnimatePresence>
@@ -588,7 +1160,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 md:hidden">
-        <div className="flex items-center justify-around p-2">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -596,9 +1168,9 @@ export default function App() {
               'flex flex-col items-center rounded-2xl p-3 transition-colors',
               activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
-          >
-            <LayoutDashboard size={24} />
-          </button>
+            >
+              <LayoutDashboard size={24} />
+            </button>
           <div className="relative -top-6">
             <button
               onClick={openNewTask}
@@ -624,6 +1196,43 @@ export default function App() {
         </div>
       </nav>
 
+      <TaskDetailsDialog
+        open={showTaskDetails && Boolean(selectedTask)}
+        task={selectedTask}
+        isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
+        isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
+        backLabel={taskDetailsBackLabel || undefined}
+        onClose={closeTaskDetails}
+        onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
+        onEdit={openEditTask}
+        onDuplicate={openDuplicateTask}
+        onShare={handleShareTask}
+        onToggle={handleToggleFromDetails}
+        onDelete={handleDeleteFromDetails}
+      />
+
+      <DashboardMetricDialog
+        open={Boolean(dashboardMetricContent)}
+        title={dashboardMetricContent?.title ?? ''}
+        description={dashboardMetricContent?.description ?? ''}
+        tasks={dashboardMetricContent?.tasks ?? []}
+        countLabel={dashboardMetricContent?.countLabel ?? ''}
+        onClose={closeDashboardMetric}
+        onOpenAll={() => {
+          closeDashboardMetric();
+          openTasksTab();
+        }}
+        onToggle={handleToggle}
+        onDelete={handleDelete}
+        onEdit={(task) => {
+          if (dashboardMetricDialog) {
+            openTaskDetailsFromMetric(task, dashboardMetricDialog);
+          }
+        }}
+        deletingTaskIds={deletingTaskIds}
+        togglingTaskIds={togglingTaskIds}
+      />
+
       <TaskDrawer
         open={showTaskDrawer}
         onClose={resetTaskForm}
@@ -645,6 +1254,15 @@ export default function App() {
         setPriority={setFormPriority}
         category={formCategory}
         setCategory={setFormCategory}
+        recurrenceEnabled={formRecurrenceEnabled}
+        setRecurrenceEnabled={setFormRecurrenceEnabled}
+        recurrenceMode={formRecurrenceMode}
+        setRecurrenceMode={setFormRecurrenceMode}
+        recurrenceUntil={formRecurrenceUntil}
+        setRecurrenceUntil={setFormRecurrenceUntil}
+        recurrenceError={recurrenceError}
+        recurrencePreviewCount={recurringDates.length}
+        onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}
       />
 
       <ProfileDrawer
@@ -669,12 +1287,26 @@ export default function App() {
         onClose={closeSettingsDrawer}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((value) => !value)}
+        notificationsEnabled={notificationsEnabled}
+        onToggleNotifications={() => {
+          void handleToggleNotifications();
+        }}
+        onOpenNotificationsCenter={openNotificationsCenter}
         sound={configSound}
         onToggleSound={() => saveConfig({ sound: !configSound })}
         confirmDelete={configConfirmDelete}
         onToggleConfirmDelete={() => saveConfig({ confirmDelete: !configConfirmDelete })}
         showCompleted={configShowCompleted}
         onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
+      />
+
+      <NotificationsInboxDrawer
+        open={showNotificationsInbox}
+        notifications={notifications}
+        unreadCount={unreadNotifications}
+        onClose={closeNotificationsInbox}
+        onOpenNotification={handleOpenNotification}
+        onOpenCenter={openNotificationsCenter}
       />
 
       <Toast toast={toastMsg} onDismiss={dismissToast} />

@@ -81,15 +81,15 @@ function TaskItemComponent({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
-      whileHover={!isCompleted && !isBusy ? { y: -2 } : {}}
-      role={!isCompleted && !isBusy ? 'button' : undefined}
-      tabIndex={!isCompleted && !isBusy ? 0 : -1}
-      aria-label={!isCompleted && !isBusy ? `Editar lembrete ${task.title}` : undefined}
+      whileHover={!isBusy ? { y: -2 } : {}}
+      role={!isBusy ? 'button' : undefined}
+      tabIndex={!isBusy ? 0 : -1}
+      aria-label={!isBusy ? `Abrir lembrete ${task.title}` : undefined}
       onClick={() => {
-        if (!isCompleted && !isBusy) onEdit(task);
+        if (!isBusy) onEdit(task);
       }}
       onKeyDown={(event) => {
-        if (isCompleted || isBusy) return;
+        if (isBusy) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         onEdit(task);
@@ -97,9 +97,8 @@ function TaskItemComponent({
       className={cn(
         'surface-soft group relative flex items-start gap-4 p-4 md:p-5',
         isBusy && 'opacity-75',
-        isCompleted
-          ? 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.03]'
-          : 'cursor-pointer hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
+        !isBusy && 'cursor-pointer hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
+        isCompleted && 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.03]',
       )}
     >
       <div

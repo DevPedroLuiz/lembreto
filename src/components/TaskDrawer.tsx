@@ -1,8 +1,9 @@
-import React from 'react';
+﻿import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CalendarDays, Loader2, X } from 'lucide-react';
+import { CalendarDays, Loader2, Repeat, Sparkles, X } from 'lucide-react';
 import type { Priority, Task } from '../types';
 import { CATEGORIES } from '../types';
+import type { RecurrenceMode, RecurrenceSuggestion } from '../lib/taskRecurrence';
 
 const TIME_OPTIONS = [
   '',
@@ -11,6 +12,21 @@ const TIME_OPTIONS = [
     const minutes = index % 2 === 0 ? '00' : '30';
     return `${hours}:${minutes}`;
   }),
+];
+
+const RECURRENCE_MODE_OPTIONS: Array<{ value: RecurrenceMode; label: string }> = [
+  { value: 'daily', label: 'Todos os dias' },
+  { value: 'weekdays', label: 'De segunda a sexta' },
+  { value: 'weekends', label: 'Apenas fins de semana' },
+  { value: 'weekly', label: 'Uma vez por semana' },
+];
+
+const RECURRENCE_SUGGESTIONS: Array<{ key: RecurrenceSuggestion; label: string }> = [
+  { key: 'weekdays', label: 'De segunda a sexta' },
+  { key: 'weekends', label: 'Nos fins de semana' },
+  { key: 'month', label: 'Todo o mês atual' },
+  { key: 'weekly', label: 'Toda semana' },
+  { key: 'next7Days', label: 'Próximos 7 dias' },
 ];
 
 interface TaskDrawerProps {
@@ -34,6 +50,15 @@ interface TaskDrawerProps {
   setPriority: (value: Priority) => void;
   category: string;
   setCategory: (value: string) => void;
+  recurrenceEnabled: boolean;
+  setRecurrenceEnabled: (value: boolean) => void;
+  recurrenceMode: RecurrenceMode;
+  setRecurrenceMode: (value: RecurrenceMode) => void;
+  recurrenceUntil: string;
+  setRecurrenceUntil: (value: string) => void;
+  recurrenceError?: string;
+  recurrencePreviewCount?: number;
+  onApplyRecurrenceSuggestion: (suggestion: RecurrenceSuggestion) => void;
 }
 
 export function TaskDrawer({
@@ -57,6 +82,15 @@ export function TaskDrawer({
   setPriority,
   category,
   setCategory,
+  recurrenceEnabled,
+  setRecurrenceEnabled,
+  recurrenceMode,
+  setRecurrenceMode,
+  recurrenceUntil,
+  setRecurrenceUntil,
+  recurrenceError = '',
+  recurrencePreviewCount = 0,
+  onApplyRecurrenceSuggestion,
 }: TaskDrawerProps) {
   const isEditing = Boolean(editingTask);
 
@@ -253,6 +287,124 @@ export function TaskDrawer({
                     </div>
                   </div>
                 </section>
+
+                {!isEditing && (
+                  <section className="surface-soft p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Repetição</h3>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Crie vários lembretes com o mesmo conteúdo em um intervalo de datas.
+                        </p>
+                      </div>
+
+                      <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                        <input
+                          type="checkbox"
+                          data-testid="task-recurrence-toggle"
+                          checked={recurrenceEnabled}
+                          disabled={isSubmitting}
+                          onChange={(event) => setRecurrenceEnabled(event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        Repetir
+                      </label>
+                    </div>
+
+                    {recurrenceEnabled && (
+                      <div className="space-y-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                              Como repetir
+                            </label>
+                            <select
+                              value={recurrenceMode}
+                              disabled={isSubmitting}
+                              data-testid="task-recurrence-mode"
+                              onChange={(event) => setRecurrenceMode(event.target.value as RecurrenceMode)}
+                              className="field-control cursor-pointer"
+                            >
+                              {RECURRENCE_MODE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                              Repetir até
+                            </label>
+                            <input
+                              type="date"
+                              min={date || minimumDate}
+                              value={recurrenceUntil}
+                              disabled={isSubmitting}
+                              data-testid="task-recurrence-until"
+                              onChange={(event) => setRecurrenceUntil(event.target.value)}
+                              style={{ colorScheme: darkMode ? 'dark' : 'light' }}
+                              className={[
+                                'field-control',
+                                recurrenceError
+                                  ? 'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:focus:border-rose-400'
+                                  : '',
+                              ].join(' ')}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                            Sugestões rápidas
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {RECURRENCE_SUGGESTIONS.map((suggestion) => (
+                              <button
+                                key={suggestion.key}
+                                type="button"
+                                data-testid={`task-recurrence-suggestion-${suggestion.key}`}
+                                onClick={() => onApplyRecurrenceSuggestion(suggestion.key)}
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                              >
+                                <Sparkles size={14} />
+                                {suggestion.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+                          <div className="flex items-start gap-3">
+                            <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                              <Repeat size={18} />
+                            </span>
+                            <div>
+                              <p
+                                data-testid="task-recurrence-count"
+                                className="text-sm font-semibold text-slate-900 dark:text-white"
+                              >
+                                {recurrencePreviewCount > 0
+                                  ? `${recurrencePreviewCount} lembrete${recurrencePreviewCount === 1 ? '' : 's'} será${recurrencePreviewCount === 1 ? '' : 'ão'} criado${recurrencePreviewCount === 1 ? '' : 's'}`
+                                  : 'Defina o intervalo para gerar seus lembretes'}
+                              </p>
+                              <p
+                                data-testid="task-recurrence-help"
+                                className={[
+                                  'mt-1 text-sm leading-6',
+                                  recurrenceError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
+                                ].join(' ')}
+                              >
+                                {recurrenceError || 'Você pode ajustar o tipo de repetição e a data final antes de criar tudo de uma vez.'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
               </form>
             </div>
 
@@ -261,7 +413,7 @@ export function TaskDrawer({
                 form="task-form"
                 type="submit"
                 data-testid="task-submit-button"
-                disabled={isSubmitting || Boolean(dueDateError)}
+                disabled={isSubmitting || Boolean(dueDateError) || Boolean(recurrenceError)}
                 className="action-primary w-full rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
               >
                 {isSubmitting ? (
@@ -271,6 +423,8 @@ export function TaskDrawer({
                   </>
                 ) : isEditing ? (
                   'Salvar alterações'
+                ) : recurrenceEnabled && recurrencePreviewCount > 1 ? (
+                  `Criar ${recurrencePreviewCount} lembretes`
                 ) : (
                   'Adicionar lembrete'
                 )}

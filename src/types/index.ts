@@ -22,5 +22,22 @@ export interface Task {
   createdAt: string;
 }
 
+export type NotificationTarget =
+  | { type: 'task'; taskId: string }
+  | { type: 'notifications' }
+  | { type: 'profile' }
+  | { type: 'settings' };
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+  tone: 'info' | 'success' | 'warning' | 'error';
+  target?: NotificationTarget;
+  dedupeKey?: string;
+}
+
 export const CATEGORIES = ['Geral', 'Trabalho', 'Pessoal', 'Estudos'] as const;
 export type Category = (typeof CATEGORIES)[number];

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   ArrowRight,
   Bell,
@@ -65,6 +65,9 @@ interface DashboardPageProps {
   todayCount: number;
   overdueCount: number;
   onViewAll: () => void;
+  onOpenCompleted: () => void;
+  onOpenToday: () => void;
+  onOpenOverdue: () => void;
   onNewTask: () => void;
   onApplyTemplate: (template: QuickStartTemplate) => void;
   onToggle: (task: Task) => void;
@@ -81,6 +84,9 @@ export function DashboardPage({
   todayCount,
   overdueCount,
   onViewAll,
+  onOpenCompleted,
+  onOpenToday,
+  onOpenOverdue,
   onNewTask,
   onApplyTemplate,
   onToggle,
@@ -138,10 +144,42 @@ export function DashboardPage({
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-4">
-            <MetricCard title="Total" value={tasks.length} icon={<Target size={20} />} tone="brand" />
-            <MetricCard title="Concluídos" value={completedTasks.length} icon={<CheckCircle2 size={20} />} tone="emerald" />
-            <MetricCard title="Para hoje" value={todayCount} icon={<CalendarDays size={20} />} tone="violet" />
-            <MetricCard title="Atrasados" value={overdueCount} icon={<Bell size={20} />} error />
+            <MetricCard
+              title="Total"
+              value={tasks.length}
+              icon={<Target size={20} />}
+              tone="brand"
+              onClick={onViewAll}
+              ariaLabel="Abrir todos os lembretes"
+              testId="dashboard-metric-total"
+            />
+            <MetricCard
+              title="Concluídos"
+              value={completedTasks.length}
+              icon={<CheckCircle2 size={20} />}
+              tone="emerald"
+              onClick={onOpenCompleted}
+              ariaLabel="Abrir lembretes concluídos"
+              testId="dashboard-metric-completed"
+            />
+            <MetricCard
+              title="Para hoje"
+              value={todayCount}
+              icon={<CalendarDays size={20} />}
+              tone="violet"
+              onClick={onOpenToday}
+              ariaLabel="Abrir lembretes para hoje"
+              testId="dashboard-metric-today"
+            />
+            <MetricCard
+              title="Atrasados"
+              value={overdueCount}
+              icon={<Bell size={20} />}
+              error
+              onClick={onOpenOverdue}
+              ariaLabel="Abrir lembretes atrasados"
+              testId="dashboard-metric-overdue"
+            />
           </div>
         </div>
 

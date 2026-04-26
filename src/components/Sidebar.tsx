@@ -15,8 +15,8 @@ import type { Task, User } from '../types';
 
 interface SidebarProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'tasks';
-  setActiveTab: (tab: 'dashboard' | 'tasks') => void;
+  activeTab: 'dashboard' | 'tasks' | 'notifications';
+  setActiveTab: (tab: 'dashboard' | 'tasks' | 'notifications') => void;
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
   pendingTasks: Task[];

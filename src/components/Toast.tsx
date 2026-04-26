@@ -13,11 +13,11 @@ export function Toast({ toast, onDismiss }: ToastProps) {
     <AnimatePresence>
       {toast && (
         <motion.div
-          initial={{ opacity: 0, y: 32, scale: 0.96 }}
+          initial={{ opacity: 0, y: -24, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 16, scale: 0.96 }}
+          exit={{ opacity: 0, y: -16, scale: 0.96 }}
           data-testid="toast"
-          className="fixed bottom-24 right-4 z-[200] flex max-w-[360px] items-start gap-3 rounded-[24px] border border-slate-200/80 bg-white/96 px-5 py-4 text-slate-900 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 dark:text-white md:bottom-8 md:right-8"
+          className="fixed right-4 top-4 z-[200] flex max-w-[360px] items-start gap-3 rounded-[24px] border border-slate-200/80 bg-white/96 px-5 py-4 text-slate-900 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 dark:text-white md:right-8 md:top-8"
         >
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white">
             <BellRing size={16} />
