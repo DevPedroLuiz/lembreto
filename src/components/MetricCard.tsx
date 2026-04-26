@@ -1,4 +1,3 @@
-// src/components/MetricCard.tsx
 import React from 'react';
 import { cn } from '../lib/cn';
 
@@ -7,25 +6,51 @@ interface MetricCardProps {
   value: number;
   icon: React.ReactNode;
   error?: boolean;
+  tone?: 'brand' | 'emerald' | 'violet';
 }
 
-export function MetricCard({ title, value, icon, error }: MetricCardProps) {
+export function MetricCard({ title, value, icon, error, tone = 'brand' }: MetricCardProps) {
   return (
-    <div className="bg-white dark:bg-white/[0.02] border border-slate-200/60 dark:border-white/5 rounded-3xl p-5 md:p-6 shadow-sm flex flex-col justify-between">
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-slate-500 font-medium text-sm">{title}</span>
+    <div
+      className={cn(
+        'surface-panel flex min-h-[148px] flex-col justify-between p-5 md:p-6',
+        error && 'border-rose-200/80 dark:border-rose-500/20',
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{title}</p>
+          <p className="mt-2 font-display text-4xl font-semibold tracking-tight text-slate-950 dark:text-white">
+            {value}
+          </p>
+        </div>
         <div
           className={cn(
-            'p-2 rounded-xl',
+            'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border shadow-[0_16px_32px_-24px_rgba(15,23,42,0.45)]',
             error
-              ? 'bg-rose-50 text-rose-500 dark:bg-rose-500/10'
-              : 'bg-slate-50 text-slate-400 dark:bg-white/5'
+              ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+              : tone === 'emerald'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : tone === 'violet'
+                  ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+                  : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
           )}
         >
-          {icon}
+          <span className="icon-slot h-5 w-5">
+            {icon}
+          </span>
         </div>
       </div>
-      <div className="text-4xl font-light">{value}</div>
+
+      <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06]">
+        <div
+          className={cn(
+            'h-full rounded-full',
+            error ? 'bg-rose-500/70 dark:bg-rose-400/70' : 'bg-blue-500/70 dark:bg-blue-400/70',
+          )}
+          style={{ width: `${Math.min(Math.max(value * 12, 16), 100)}%` }}
+        />
+      </div>
     </div>
   );
 }

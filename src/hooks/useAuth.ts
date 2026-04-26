@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiPost, apiPut } from '../api/client';
 import { LS } from '../lib/storage';
 import type { User } from '../types';
@@ -20,9 +20,10 @@ export function useAuth() {
 
     (async () => {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json() as { user: User; token: string };
+        const response = await fetch('/api/auth/me', { credentials: 'include' });
+
+        if (response.ok) {
+          const data = await response.json() as { user: User; token: string };
           setCurrentUser(data.user);
           setToken(data.token);
           LS.saveUser(data.user);
@@ -43,14 +44,14 @@ export function useAuth() {
 
   const persistTokenCookie = async (newToken: string) => {
     try {
-      const res = await fetch('/api/auth/me', {
+      const response = await fetch('/api/auth/me', {
         method: 'POST',
         credentials: 'include',
         headers: { Authorization: `Bearer ${newToken}` },
       });
 
-      if (!res.ok) {
-        throw new Error('Falha ao persistir cookie de sessão');
+      if (!response.ok) {
+        throw new Error('Falha ao persistir o cookie de sessão');
       }
     } catch {
       console.warn('[useAuth] Não foi possível persistir a sessão em cookie.');
@@ -58,10 +59,7 @@ export function useAuth() {
   };
 
   const login = async (email: string, password: string) => {
-    const data = await apiPost<{ user: User; token: string }>(
-      '/api/auth/login',
-      { email, password }
-    );
+    const data = await apiPost<{ user: User; token: string }>('/api/auth/login', { email, password });
     setToken(data.token);
     setCurrentUser(data.user);
     LS.saveUser(data.user);
@@ -70,10 +68,11 @@ export function useAuth() {
   };
 
   const register = async (name: string, email: string, password: string) => {
-    const data = await apiPost<{ user: User; token: string }>(
-      '/api/auth/register',
-      { name: name.trim(), email, password }
-    );
+    const data = await apiPost<{ user: User; token: string }>('/api/auth/register', {
+      name: name.trim(),
+      email,
+      password,
+    });
     setToken(data.token);
     setCurrentUser(data.user);
     LS.saveUser(data.user);

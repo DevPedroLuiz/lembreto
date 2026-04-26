@@ -1,9 +1,6 @@
-// src/components/ProfileDrawer.tsx
-// Slide-in drawer for editing the user profile
-
 import React, { useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, Camera, UserIcon as User, LogOut, Loader2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Camera, Loader2, LogOut, UserIcon as User, X } from 'lucide-react';
 import type { User as UserType } from '../types';
 import { MAX_AVATAR_BYTES, isAllowedAvatarMimeType } from '../../lib/avatar';
 
@@ -12,18 +9,18 @@ export { User as UserIcon };
 interface ProfileDrawerProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (event: React.FormEvent) => void;
   onLogout: () => void;
   currentUser: UserType;
   isSubmitting?: boolean;
   name: string;
-  setName: (v: string) => void;
+  setName: (value: string) => void;
   email: string;
-  setEmail: (v: string) => void;
+  setEmail: (value: string) => void;
   password: string;
-  setPassword: (v: string) => void;
+  setPassword: (value: string) => void;
   avatar: string | null;
-  setAvatar: (v: string | null) => void;
+  setAvatar: (value: string | null) => void;
 }
 
 export function ProfileDrawer({
@@ -45,17 +42,29 @@ export function ProfileDrawer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarError, setAvatarError] = React.useState('');
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const openAvatarPicker = () => {
+    if (!isSubmitting) fileInputRef.current?.click();
+  };
+
+  const handleAvatarKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openAvatarPicker();
+  };
+
+  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
+
     if (!isAllowedAvatarMimeType(file.type)) {
       setAvatarError('Use PNG, JPG, WEBP ou GIF para o avatar.');
-      e.target.value = '';
+      event.target.value = '';
       return;
     }
+
     if (file.size > MAX_AVATAR_BYTES) {
       setAvatarError(`Avatar muito grande. Limite de ${Math.round(MAX_AVATAR_BYTES / 1024)} KB.`);
-      e.target.value = '';
+      event.target.value = '';
       return;
     }
 
@@ -78,144 +87,205 @@ export function ProfileDrawer({
             onClick={() => {
               if (!isSubmitting) onClose();
             }}
-            className="fixed inset-0 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm z-[100]"
+            className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm dark:bg-black/70"
           />
 
-          <motion.div
+          <motion.aside
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed top-0 right-0 h-full w-full max-w-md bg-white dark:bg-[#040814] shadow-2xl z-[101] border-l border-slate-200 dark:border-white/10 flex flex-col"
+            transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+            className="fixed right-0 top-0 z-[101] flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white/96 shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-drawer-title"
           >
-            <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5 shrink-0">
-              <h2 className="text-xl font-semibold">Editar Perfil</h2>
-              <button
-                onClick={onClose}
-                disabled={isSubmitting}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <X size={20} />
-              </button>
+            <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="section-eyebrow">Conta</span>
+                  <h2 id="profile-drawer-title" className="mt-4 text-2xl font-semibold text-slate-950 dark:text-white">
+                    Editar perfil
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Atualize seus dados de acesso e personalize a apresentação da sua conta.
+                  </p>
+                </div>
+
+                <button
+                  onClick={onClose}
+                  disabled={isSubmitting}
+                  aria-label="Fechar perfil"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
               <form id="profile-form" onSubmit={onSubmit} className="space-y-6" aria-busy={isSubmitting}>
-                <div className="flex justify-center">
-                  <div
-                    data-testid="profile-avatar-trigger"
-                    className={`relative group ${isSubmitting ? 'cursor-wait' : 'cursor-pointer'}`}
-                    onClick={() => {
-                      if (!isSubmitting) fileInputRef.current?.click();
-                    }}
-                  >
-                    {avatar ? (
-                      <img
-                        src={avatar}
-                        alt="Avatar"
-                        data-testid="profile-avatar-preview"
-                        className="w-24 h-24 rounded-full object-cover border-4 border-white dark:border-[#040814] shadow-md"
-                      />
-                    ) : (
-                      <div data-testid="profile-avatar-preview" className="w-24 h-24 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 flex items-center justify-center border-4 border-white dark:border-[#040814]">
-                        <User size={36} />
+                <section className="surface-soft p-5">
+                  <div className="mb-5 flex items-center gap-4">
+                    <div
+                      data-testid="profile-avatar-trigger"
+                      className={`relative ${isSubmitting ? 'cursor-wait' : 'cursor-pointer'}`}
+                      onClick={openAvatarPicker}
+                      onKeyDown={handleAvatarKeyDown}
+                      role="button"
+                      tabIndex={isSubmitting ? -1 : 0}
+                      aria-label="Alterar avatar"
+                      aria-disabled={isSubmitting}
+                    >
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt="Avatar"
+                          data-testid="profile-avatar-preview"
+                          className="h-24 w-24 rounded-[28px] object-cover shadow-md"
+                        />
+                      ) : (
+                        <div
+                          data-testid="profile-avatar-preview"
+                          className="flex h-24 w-24 items-center justify-center rounded-[28px] bg-blue-100 text-blue-600 shadow-sm dark:bg-blue-500/10 dark:text-blue-300"
+                        >
+                          <User size={34} />
+                        </div>
+                      )}
+
+                      <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-black/45 opacity-0 transition-opacity hover:opacity-100">
+                        {isSubmitting ? (
+                          <Loader2 size={20} className="animate-spin text-white" />
+                        ) : (
+                          <Camera size={20} className="text-white" />
+                        )}
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      {isSubmitting ? <Loader2 size={20} className="text-white animate-spin" /> : <Camera size={20} className="text-white" />}
+
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        data-testid="profile-avatar-input"
+                        disabled={isSubmitting}
+                        className="hidden"
+                        onChange={handleAvatarChange}
+                      />
                     </div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      data-testid="profile-avatar-input"
-                      disabled={isSubmitting}
-                      className="hidden"
-                      onChange={handleAvatarChange}
-                    />
+
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                        {currentUser.name}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{currentUser.email}</p>
+                      <p className="mt-3 text-xs uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                        Toque na imagem para alterar o avatar
+                      </p>
+                    </div>
                   </div>
-                </div>
-                {avatarError && (
-                  <p className="text-sm text-rose-500 text-center -mt-2">{avatarError}</p>
-                )}
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    Nome
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    data-testid="profile-name-input"
-                    value={name}
-                    disabled={isSubmitting}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-[#0a0f1e] border border-slate-200 dark:border-white/5 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                  />
-                </div>
+                  {avatarError && (
+                    <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                      {avatarError}
+                    </p>
+                  )}
+                </section>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    Email
-                  </label>
-                  <input
-                    required
-                    type="email"
-                    data-testid="profile-email-input"
-                    value={email}
-                    disabled={isSubmitting}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-[#0a0f1e] border border-slate-200 dark:border-white/5 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                  />
-                </div>
+                <section className="surface-soft p-5">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Informações da conta</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Mantenha seus dados atualizados para facilitar o acesso.
+                    </p>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    Nova Senha (Opcional)
-                  </label>
-                  <input
-                    type="password"
-                    data-testid="profile-password-input"
-                    placeholder="Deixe em branco para manter"
-                    value={password}
-                    disabled={isSubmitting}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-[#0a0f1e] border border-slate-200 dark:border-white/5 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                  />
-                </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                        Nome
+                      </label>
+                      <input
+                        autoFocus
+                        required
+                        type="text"
+                        autoComplete="name"
+                        data-testid="profile-name-input"
+                        value={name}
+                        disabled={isSubmitting}
+                        onChange={(event) => setName(event.target.value)}
+                        className="field-control"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                        E-mail
+                      </label>
+                      <input
+                        required
+                        type="email"
+                        autoComplete="email"
+                        data-testid="profile-email-input"
+                        value={email}
+                        disabled={isSubmitting}
+                        onChange={(event) => setEmail(event.target.value)}
+                        className="field-control"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                        Nova senha
+                      </label>
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        data-testid="profile-password-input"
+                        placeholder="Deixe em branco para manter a senha atual"
+                        value={password}
+                        disabled={isSubmitting}
+                        onChange={(event) => setPassword(event.target.value)}
+                        className="field-control"
+                      />
+                    </div>
+                  </div>
+                </section>
               </form>
             </div>
 
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 shrink-0 space-y-3">
-              <button
-                form="profile-form"
-                type="submit"
-                data-testid="profile-submit-button"
-                disabled={isSubmitting}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-70 disabled:cursor-wait text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Salvando...
-                  </>
-                ) : (
-                  'Salvar Perfil'
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  onClose();
-                  onLogout();
-                }}
-                type="button"
-                disabled={isSubmitting}
-                className="w-full md:hidden flex items-center justify-center gap-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 font-bold py-3.5 rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <LogOut size={18} /> Sair da Conta
-              </button>
+            <div className="border-t border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+              <div className="space-y-3">
+                <button
+                  form="profile-form"
+                  type="submit"
+                  data-testid="profile-submit-button"
+                  disabled={isSubmitting}
+                  className="action-primary w-full rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Salvando alterações...
+                    </>
+                  ) : (
+                    'Salvar perfil'
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    onClose();
+                    onLogout();
+                  }}
+                  type="button"
+                  disabled={isSubmitting}
+                  className="action-secondary w-full rounded-2xl py-4 text-rose-600 dark:text-rose-300"
+                >
+                  <LogOut size={18} />
+                  Sair da conta
+                </button>
+              </div>
             </div>
-          </motion.div>
+          </motion.aside>
         </>
       )}
     </AnimatePresence>

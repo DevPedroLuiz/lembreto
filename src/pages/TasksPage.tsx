@@ -40,14 +40,14 @@ interface TasksPageProps {
   completedTasks: Task[];
   filteredTasks: Task[];
   filterCategory: string;
-  setFilterCategory: (cat: string) => void;
+  setFilterCategory: (category: string) => void;
   search: string;
-  setSearch: (v: string) => void;
+  setSearch: (value: string) => void;
   showCompleted: boolean;
   onNewTask: () => void;
-  onToggle: (t: Task) => void;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onEdit: (t: Task) => void;
+  onToggle: (task: Task) => void;
+  onDelete: (id: string, event: React.MouseEvent) => void;
+  onEdit: (task: Task) => void;
   deletingTaskIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
 }
@@ -82,14 +82,11 @@ function sortTasks(tasks: Task[], sortMode: SortMode): Task[] {
   const sortedTasks = [...tasks];
 
   sortedTasks.sort((left, right) => {
-    if (sortMode === 'dueDate') {
-      return compareDueDateAsc(left, right);
-    }
+    if (sortMode === 'dueDate') return compareDueDateAsc(left, right);
 
     if (sortMode === 'priority') {
       const priorityDiff = PRIORITY_ORDER[left.priority] - PRIORITY_ORDER[right.priority];
       if (priorityDiff !== 0) return priorityDiff;
-
       return compareDueDateAsc(left, right);
     }
 
@@ -98,7 +95,6 @@ function sortTasks(tasks: Task[], sortMode: SortMode): Task[] {
         sensitivity: 'base',
       });
       if (categoryDiff !== 0) return categoryDiff;
-
       return compareDueDateAsc(left, right);
     }
 
@@ -122,38 +118,41 @@ function PaginationControls({
   const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between">
+    <div className="surface-soft flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <p
         data-testid={`${testIdPrefix}-summary`}
         className="text-sm font-medium text-slate-500 dark:text-slate-400"
       >
         Mostrando {startItem}-{endItem} de {totalItems}
       </p>
+
       <div className="flex items-center justify-between gap-2 sm:justify-end">
         <button
           type="button"
           data-testid={`${testIdPrefix}-prev`}
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+          className="action-secondary h-10 rounded-xl px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ChevronLeft size={16} />
           Anterior
         </button>
+
         <span
           data-testid={`${testIdPrefix}-page`}
-          className="min-w-[84px] text-center text-sm font-semibold text-slate-600 dark:text-slate-300"
+          className="min-w-[106px] text-center text-sm font-semibold text-slate-600 dark:text-slate-300"
         >
-          Pagina {currentPage} de {totalPages}
+          Página {currentPage} de {totalPages}
         </span>
+
         <button
           type="button"
           data-testid={`${testIdPrefix}-next`}
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+          className="action-secondary h-10 rounded-xl px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Proxima
+          Próxima
           <ChevronRight size={16} />
         </button>
       </div>
@@ -194,12 +193,12 @@ export function TasksPage({
 
   const sortedPendingTasks = React.useMemo(
     () => sortTasks(filteredTasks, sortMode),
-    [filteredTasks, sortMode]
+    [filteredTasks, sortMode],
   );
 
   const sortedCompletedTasks = React.useMemo(
     () => sortTasks(completedTasks, sortMode),
-    [completedTasks, sortMode]
+    [completedTasks, sortMode],
   );
 
   const pendingTotalPages = Math.max(1, Math.ceil(sortedPendingTasks.length / PAGE_SIZE));
@@ -235,9 +234,10 @@ export function TasksPage({
     return sortedCompletedTasks.slice(start, start + PAGE_SIZE);
   }, [completedPage, sortedCompletedTasks]);
 
-  const activeSortLabel = React.useMemo(() => {
-    return SORT_OPTIONS.find((option) => option.value === sortMode)?.label ?? 'Recentes';
-  }, [sortMode]);
+  const activeSortLabel = React.useMemo(
+    () => SORT_OPTIONS.find((option) => option.value === sortMode)?.label ?? 'Recentes',
+    [sortMode],
+  );
 
   return (
     <motion.div
@@ -245,27 +245,37 @@ export function TasksPage({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
+      className="space-y-6"
     >
-      <div className="mb-8 space-y-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center">
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input
-              type="text"
-              data-testid="task-search-input"
-              placeholder="Buscar tarefas..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-white/10 dark:bg-white/5"
-            />
+      <section className="surface-panel p-5 md:p-6">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div>
+            <span className="section-eyebrow">
+              <ArrowUpDown size={14} />
+              Organização da agenda
+            </span>
+            <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+              Filtre, ordene e acompanhe cada entrega com clareza.
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
+              Use pesquisa, categorias e ordenação para localizar rapidamente o que precisa ser feito agora.
+            </p>
           </div>
 
-          <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.03] md:min-w-[340px]">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-              <ArrowUpDown size={14} />
-              Ordenacao
+          <div className="surface-soft p-4">
+            <div className="relative">
+              <Search className="field-icon" size={18} />
+              <input
+                type="text"
+                data-testid="task-search-input"
+                placeholder="Buscar lembretes por título"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="field-control field-control-with-icon"
+              />
             </div>
-            <div className="flex flex-wrap gap-2">
+
+            <div className="mt-4 flex flex-wrap gap-2">
               {SORT_OPTIONS.map((option) => {
                 const isActive = sortMode === option.value;
                 return (
@@ -278,8 +288,8 @@ export function TasksPage({
                     className={[
                       'inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-all',
                       isActive
-                        ? 'bg-slate-900 text-white shadow-md dark:bg-white dark:text-slate-900'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10',
+                        ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.7)]'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
                     ].join(' ')}
                   >
                     {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
@@ -288,10 +298,11 @@ export function TasksPage({
                 );
               })}
             </div>
-            <div className="flex items-center gap-2 pt-1">
+
+            <div className="mt-4 flex items-center gap-2">
               <span
                 data-testid="task-sort-summary"
-                className="inline-flex h-7 items-center rounded-full bg-slate-100 px-3 text-xs font-semibold text-slate-600 dark:bg-white/5 dark:text-slate-300"
+                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Ordenado por {activeSortLabel}
               </span>
@@ -299,24 +310,36 @@ export function TasksPage({
           </div>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
-          <FilterTag active={filterCategory === 'Todas'} onClick={() => setFilterCategory('Todas')} label="Todas" />
-          {CATEGORIES.map((cat) => (
-            <FilterTag key={cat} active={filterCategory === cat} onClick={() => setFilterCategory(cat)} label={cat} />
+        <div className="mt-5 flex gap-2 overflow-x-auto pb-1 md:hidden">
+          <FilterTag
+            active={filterCategory === 'Todas'}
+            onClick={() => setFilterCategory('Todas')}
+            label="Todas"
+          />
+          {CATEGORIES.map((category) => (
+            <FilterTag
+              key={category}
+              active={filterCategory === category}
+              onClick={() => setFilterCategory(category)}
+              label={category}
+            />
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="space-y-4">
+      <section className="surface-panel p-5 md:p-6">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Lembretes pendentes</h4>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {sortedPendingTasks.length} lembrete{sortedPendingTasks.length === 1 ? '' : 's'} em aberto
+            </p>
+          </div>
+        </div>
+
         <AnimatePresence>
           {sortedPendingTasks.length > 0 ? (
-            <>
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                  {sortedPendingTasks.length} tarefa{sortedPendingTasks.length === 1 ? '' : 's'} pendente{sortedPendingTasks.length === 1 ? '' : 's'}
-                </p>
-              </div>
-
+            <div className="space-y-3">
               {paginatedPendingTasks.map((task) => (
                 <TaskItem
                   key={task.id}
@@ -335,34 +358,37 @@ export function TasksPage({
                 onPageChange={setPendingPage}
                 testIdPrefix="pending-pagination"
               />
-            </>
+            </div>
           ) : (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="rounded-3xl border border-dashed border-slate-200 bg-white/30 py-20 text-center dark:border-white/10 dark:bg-white/5"
+              className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]"
             >
-              <Sparkles size={32} className="mx-auto mb-4 text-slate-400" />
-              <h3 className="mb-2 text-lg font-semibold">Nada por aqui</h3>
-              <p className="mb-6 text-slate-500">Nenhuma tarefa encontrada.</p>
-              <button
-                onClick={onNewTask}
-                className="rounded-xl bg-slate-900 px-6 py-3 font-semibold text-white transition-transform active:scale-95 dark:bg-white dark:text-slate-900"
-              >
-                Criar Tarefa
+              <Sparkles size={34} className="mx-auto mb-4 text-slate-400" />
+              <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nada por aqui</h4>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Não encontramos lembretes com os filtros atuais.
+              </p>
+              <button onClick={onNewTask} className="action-primary mt-6">
+                Criar lembrete
               </button>
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </section>
 
       {showCompleted && filterCategory === 'Todas' && !search && sortedCompletedTasks.length > 0 && (
-        <div className="mt-12 space-y-4 opacity-60">
-          <div className="flex items-center justify-between gap-4">
-            <h3 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
-              Concluidas ({sortedCompletedTasks.length})
-            </h3>
+        <section className="surface-panel p-5 opacity-90 md:p-6">
+          <div className="mb-5">
+            <h4 className="text-lg font-semibold text-slate-900 dark:text-white">
+              Concluídos ({sortedCompletedTasks.length})
+            </h4>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Histórico recente do que já foi finalizado.
+            </p>
           </div>
+
           <div className="space-y-3">
             {paginatedCompletedTasks.map((task) => (
               <TaskItem
@@ -377,13 +403,16 @@ export function TasksPage({
               />
             ))}
           </div>
-          <PaginationControls
-            totalItems={sortedCompletedTasks.length}
-            currentPage={completedPage}
-            onPageChange={setCompletedPage}
-            testIdPrefix="completed-pagination"
-          />
-        </div>
+
+          <div className="mt-4">
+            <PaginationControls
+              totalItems={sortedCompletedTasks.length}
+              currentPage={completedPage}
+              onPageChange={setCompletedPage}
+              testIdPrefix="completed-pagination"
+            />
+          </div>
+        </section>
       )}
     </motion.div>
   );

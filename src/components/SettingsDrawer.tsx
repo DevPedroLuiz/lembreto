@@ -1,24 +1,46 @@
-// src/components/SettingsDrawer.tsx
-// Slide-in drawer for app settings
-
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, Settings, Moon, Volume2, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  CheckCircle2,
+  Moon,
+  Settings,
+  ShieldAlert,
+  Volume2,
+  X,
+} from 'lucide-react';
 
-// ── Toggle sub-component ──────────────────────────────────────────────────────
-function Toggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+function Toggle({
+  active,
+  onClick,
+  ariaLabel,
+  autoFocus = false,
+}: {
+  active: boolean;
+  onClick: () => void;
+  ariaLabel: string;
+  autoFocus?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
-      className={`w-12 h-6 rounded-full relative transition-colors focus:outline-none border shadow-inner ${
+      autoFocus={autoFocus}
+      aria-label={ariaLabel}
+      role="switch"
+      aria-checked={active}
+      className={[
+        'relative h-8 w-14 rounded-full border transition-colors',
         active
-          ? 'bg-blue-500 border-blue-600'
-          : 'bg-slate-200 dark:bg-[#040814] border-slate-300 dark:border-white/10'
-      }`}
+          ? 'border-blue-600 bg-blue-600 dark:border-blue-500 dark:bg-blue-500'
+          : 'border-slate-300 bg-slate-200 dark:border-white/10 dark:bg-slate-800',
+      ].join(' ')}
     >
-      <motion.div
-        animate={{ x: active ? 24 : 2 }}
-        className="w-5 h-5 rounded-full shadow-sm absolute top-0 bg-white"
+      <motion.span
+        animate={{ x: active ? 28 : 4 }}
+        transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+        className={[
+          'absolute top-1 flex h-6 w-6 items-center justify-center rounded-full shadow-sm',
+          active ? 'bg-white' : 'bg-white dark:bg-slate-200',
+        ].join(' ')}
       />
     </button>
   );
@@ -37,6 +59,33 @@ interface SettingsDrawerProps {
   onToggleShowCompleted: () => void;
 }
 
+const settingCards = [
+  {
+    key: 'darkMode',
+    title: 'Modo escuro',
+    description: 'Ativa uma interface mais confortável para ambientes com pouca luz.',
+    icon: Moon,
+  },
+  {
+    key: 'sound',
+    title: 'Efeitos sonoros',
+    description: 'Reproduz um pequeno som ao concluir lembretes importantes.',
+    icon: Volume2,
+  },
+  {
+    key: 'confirmDelete',
+    title: 'Confirmar exclusão',
+    description: 'Solicita confirmação antes de remover um lembrete da agenda.',
+    icon: ShieldAlert,
+  },
+  {
+    key: 'showCompleted',
+    title: 'Mostrar concluídos',
+    description: 'Mantém o histórico de lembretes finalizados visível na listagem.',
+    icon: CheckCircle2,
+  },
+] as const;
+
 export function SettingsDrawer({
   open,
   onClose,
@@ -49,6 +98,29 @@ export function SettingsDrawer({
   showCompleted,
   onToggleShowCompleted,
 }: SettingsDrawerProps) {
+  const toggleMap = {
+    darkMode: {
+      active: darkMode,
+      onClick: onToggleDarkMode,
+      ariaLabel: 'Alternar modo escuro',
+    },
+    sound: {
+      active: sound,
+      onClick: onToggleSound,
+      ariaLabel: 'Alternar efeitos sonoros',
+    },
+    confirmDelete: {
+      active: confirmDelete,
+      onClick: onToggleConfirmDelete,
+      ariaLabel: 'Alternar confirmação de exclusão',
+    },
+    showCompleted: {
+      active: showCompleted,
+      onClick: onToggleShowCompleted,
+      ariaLabel: 'Alternar exibição de lembretes concluídos',
+    },
+  } as const;
+
   return (
     <AnimatePresence>
       {open && (
@@ -58,76 +130,83 @@ export function SettingsDrawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm z-[100]"
+            className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm dark:bg-black/70"
           />
 
-          <motion.div
+          <motion.aside
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed top-0 right-0 h-full w-full max-w-sm bg-white dark:bg-[#040814] shadow-2xl z-[101] border-l border-slate-200 dark:border-white/10 flex flex-col"
+            transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+            className="fixed right-0 top-0 z-[101] flex h-full w-full max-w-lg flex-col border-l border-slate-200/80 bg-white/96 shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-drawer-title"
           >
-            {/* Header */}
-            <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5 shrink-0">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Settings size={20} className="text-blue-500" /> Configurações
-              </h2>
-              <button
-                onClick={onClose}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 transition-colors"
-              >
-                <X size={20} />
-              </button>
+            <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="section-eyebrow">
+                    <Settings size={14} />
+                    Preferências
+                  </span>
+                  <h2 id="settings-drawer-title" className="mt-4 text-2xl font-semibold text-slate-950 dark:text-white">
+                    Configurações
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Ajuste o comportamento da interface para combinar com o seu ritmo de trabalho.
+                  </p>
+                </div>
+
+                <button
+                  onClick={onClose}
+                  aria-label="Fechar configurações"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              {/* Appearance */}
-              <section>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Moon size={14} /> Aparência
-                </h3>
-                <div className="flex items-center justify-between bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
-                  <span className="font-semibold text-sm">Modo Escuro</span>
-                  <Toggle active={darkMode} onClick={onToggleDarkMode} />
-                </div>
-              </section>
+            <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
+              <div className="space-y-4">
+                {settingCards.map((card, index) => {
+                  const config = toggleMap[card.key];
+                  const Icon = card.icon;
 
-              {/* Behaviour */}
-              <section>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Settings size={14} /> Comportamento
-                </h3>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
-                    <span className="font-semibold text-sm flex items-center gap-2">
-                      <Volume2 size={16} className="text-slate-400" /> Efeitos Sonoros
-                    </span>
-                    <Toggle active={sound} onClick={onToggleSound} />
-                  </div>
-                  <div className="flex items-center justify-between bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
-                    <span className="font-semibold text-sm flex items-center gap-2">
-                      <ShieldAlert size={16} className="text-slate-400" /> Confirmar Exclusão
-                    </span>
-                    <Toggle active={confirmDelete} onClick={onToggleConfirmDelete} />
-                  </div>
-                  <div className="flex items-center justify-between bg-slate-50 dark:bg-white/5 p-4 rounded-2xl">
-                    <span className="font-semibold text-sm flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-slate-400" /> Exibir Concluídas
-                    </span>
-                    <Toggle active={showCompleted} onClick={onToggleShowCompleted} />
-                  </div>
-                </div>
-              </section>
+                  return (
+                    <section key={card.key} className="surface-soft flex items-start justify-between gap-4 p-5">
+                      <div className="flex gap-4 pr-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+                          <Icon size={18} />
+                        </div>
+
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{card.title}</h3>
+                          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                            {card.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      <Toggle
+                        active={config.active}
+                        onClick={config.onClick}
+                        ariaLabel={config.ariaLabel}
+                        autoFocus={index === 0}
+                      />
+                    </section>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 shrink-0">
-              <p className="text-xs text-center text-slate-400">
-                Configurações salvas no navegador.
+            <div className="border-t border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+              <p className="text-center text-xs text-slate-400 dark:text-slate-500">
+                As configurações são salvas neste navegador.
               </p>
             </div>
-          </motion.div>
+          </motion.aside>
         </>
       )}
     </AnimatePresence>

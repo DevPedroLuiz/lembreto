@@ -1,8 +1,5 @@
-// src/components/Toast.tsx
-// Animated toast notification
-
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { BellRing, X } from 'lucide-react';
 import type { ToastMessage } from '../hooks/useToast';
 
@@ -16,24 +13,31 @@ export function Toast({ toast, onDismiss }: ToastProps) {
     <AnimatePresence>
       {toast && (
         <motion.div
-          initial={{ opacity: 0, y: 50, scale: 0.9 }}
+          initial={{ opacity: 0, y: 32, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 20, scale: 0.9 }}
+          exit={{ opacity: 0, y: 16, scale: 0.96 }}
           data-testid="toast"
-          className="fixed bottom-24 md:bottom-8 right-6 z-[200] bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-5 py-4 rounded-2xl shadow-2xl flex items-start gap-3 max-w-[320px]"
+          className="fixed bottom-24 right-4 z-[200] flex max-w-[360px] items-start gap-3 rounded-[24px] border border-slate-200/80 bg-white/96 px-5 py-4 text-slate-900 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 dark:text-white md:bottom-8 md:right-8"
         >
-          <div className="bg-white/20 dark:bg-black/10 p-2 rounded-full shrink-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white">
             <BellRing size={16} />
           </div>
-          <div className="flex-1 pr-4">
-            <h4 data-testid="toast-title" className="font-bold text-sm mb-0.5">{toast.title}</h4>
-            <p data-testid="toast-message" className="text-xs opacity-90">{toast.message}</p>
+
+          <div className="min-w-0 flex-1 pr-5">
+            <h4 data-testid="toast-title" className="text-sm font-semibold">
+              {toast.title}
+            </h4>
+            <p data-testid="toast-message" className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {toast.message}
+            </p>
           </div>
+
           <button
             onClick={onDismiss}
-            className="absolute top-4 right-4 opacity-50 hover:opacity-100"
+            aria-label="Fechar notificação"
+            className="absolute right-4 top-4 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
           >
-            <X size={14} />
+            <X size={16} />
           </button>
         </motion.div>
       )}

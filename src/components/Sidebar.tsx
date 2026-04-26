@@ -1,13 +1,12 @@
-// src/components/Sidebar.tsx
 import React from 'react';
 import {
-  Target,
+  ChevronRight,
   LayoutDashboard,
   ListTodo,
   LogOut,
-  User as UserIcon,
   Settings,
-  ChevronRight,
+  Target,
+  User as UserIcon,
 } from 'lucide-react';
 import { SidebarItem } from './SidebarItem';
 import { FilterTag } from './FilterTag';
@@ -37,99 +36,158 @@ export function Sidebar({
   onOpenSettings,
   onLogout,
 }: SidebarProps) {
+  const handleProfileKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onOpenProfile();
+  };
+
+  const categorySummary = CATEGORIES.map((category) => ({
+    category,
+    count: pendingTasks.filter((task) => task.category === category).length,
+  }));
+
   return (
-    <aside className="hidden md:flex flex-col w-72 h-full border-r border-slate-200/60 dark:border-white/5 bg-white/50 dark:bg-[#0a0f1e]/80 backdrop-blur-xl shrink-0 p-6">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-2 mb-10">
-        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-sky-400 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-          <Target size={22} />
-        </div>
-        <h1 className="font-bold text-xl tracking-tight">Lembreto</h1>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 space-y-2">
-        <SidebarItem
-          active={activeTab === 'dashboard'}
-          onClick={() => setActiveTab('dashboard')}
-          icon={<LayoutDashboard size={20} />}
-          label="Dashboard"
-          testId="sidebar-dashboard"
-        />
-        <SidebarItem
-          active={activeTab === 'tasks'}
-          onClick={() => setActiveTab('tasks')}
-          icon={<ListTodo size={20} />}
-          label="Minhas Tarefas"
-          badge={pendingTasks.length}
-          testId="sidebar-tasks"
-        />
-
-        <div className="pt-8 pb-3 px-3">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Categorias
-          </h3>
-        </div>
-
-        <FilterTag
-          active={filterCategory === 'Todas'}
-          onClick={() => { setFilterCategory('Todas'); setActiveTab('tasks'); }}
-          label="Todas"
-          count={pendingTasks.length}
-        />
-        {CATEGORIES.map((cat) => (
-          <FilterTag
-            key={cat}
-            active={filterCategory === cat}
-            onClick={() => { setFilterCategory(cat); setActiveTab('tasks'); }}
-            label={cat}
-            count={pendingTasks.filter((t) => t.category === cat).length}
-          />
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div className="mt-auto pt-6 space-y-4">
-        <div
-          onClick={onOpenProfile}
-          data-testid="sidebar-profile-button"
-          className="bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 cursor-pointer transition-colors rounded-2xl p-4 flex items-center gap-3"
-        >
-          {currentUser.avatar ? (
-            <img
-              src={currentUser.avatar}
-              alt="Avatar"
-              data-testid="sidebar-profile-avatar"
-              className="w-10 h-10 rounded-full object-cover"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 flex items-center justify-center shrink-0">
-              <UserIcon size={20} />
+    <aside className="hidden h-full w-[320px] shrink-0 flex-col p-5 md:flex">
+      <div className="surface-panel flex h-full flex-col p-5">
+        <div className="mb-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,0.7)]">
+              <Target size={24} />
             </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p data-testid="sidebar-profile-name" className="text-sm font-semibold truncate">{currentUser.name}</p>
-            <p data-testid="sidebar-profile-email" className="text-[10px] text-slate-500 truncate">{currentUser.email}</p>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                Organização pessoal
+              </p>
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                Lembreto
+              </h1>
+            </div>
           </div>
-          <button
-            onClick={(e) => { e.stopPropagation(); onLogout(); }}
-            data-testid="sidebar-logout"
-            className="text-slate-400 hover:text-rose-500 transition-colors shrink-0"
-            title="Sair"
+
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pendentes</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{pendingTasks.length}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Categorias</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{CATEGORIES.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <nav className="space-y-2">
+          <SidebarItem
+            active={activeTab === 'dashboard'}
+            onClick={() => setActiveTab('dashboard')}
+            icon={<LayoutDashboard size={20} />}
+            label="Painel"
+            testId="sidebar-dashboard"
+          />
+          <SidebarItem
+            active={activeTab === 'tasks'}
+            onClick={() => setActiveTab('tasks')}
+            icon={<ListTodo size={20} />}
+            label="Meus lembretes"
+            badge={pendingTasks.length}
+            testId="sidebar-tasks"
+          />
+        </nav>
+
+        <div className="mt-8 flex-1 overflow-y-auto pr-1">
+          <div className="mb-3 flex items-center justify-between px-1">
+            <h2 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+              Categorias
+            </h2>
+            <span className="text-xs text-slate-400 dark:text-slate-500">Filtro rápido</span>
+          </div>
+
+          <div className="space-y-2">
+            <FilterTag
+              active={filterCategory === 'Todas'}
+              onClick={() => {
+                setFilterCategory('Todas');
+                setActiveTab('tasks');
+              }}
+              label="Todas"
+              count={pendingTasks.length}
+            />
+            {categorySummary.map(({ category, count }) => (
+              <FilterTag
+                key={category}
+                active={filterCategory === category}
+                onClick={() => {
+                  setFilterCategory(category);
+                  setActiveTab('tasks');
+                }}
+                label={category}
+                count={count}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-3 border-t border-slate-200/80 pt-5 dark:border-white/10">
+          <div
+            onClick={onOpenProfile}
+            onKeyDown={handleProfileKeyDown}
+            role="button"
+            tabIndex={0}
+            aria-label="Abrir perfil"
+            data-testid="sidebar-profile-button"
+            className="rounded-[24px] border border-slate-200 bg-slate-50/90 p-4 transition-all hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
           >
-            <LogOut size={18} />
+            <div className="flex items-center gap-3">
+              {currentUser.avatar ? (
+                <img
+                  src={currentUser.avatar}
+                  alt="Avatar"
+                  data-testid="sidebar-profile-avatar"
+                  className="h-11 w-11 rounded-2xl object-cover"
+                />
+              ) : (
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                  <UserIcon size={20} />
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1">
+                <p data-testid="sidebar-profile-name" className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  {currentUser.name}
+                </p>
+                <p data-testid="sidebar-profile-email" className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {currentUser.email}
+                </p>
+              </div>
+
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLogout();
+                }}
+                data-testid="sidebar-logout"
+                className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10"
+                title="Sair"
+                aria-label="Sair da conta"
+              >
+                <LogOut size={18} />
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={onOpenSettings}
+            data-testid="sidebar-settings-button"
+            className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <Settings size={16} />
+              Configurações
+            </span>
+            <ChevronRight size={16} />
           </button>
         </div>
-
-        <button
-          onClick={onOpenSettings}
-          className="flex items-center justify-between w-full px-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 transition-colors"
-        >
-          <span className="text-sm font-medium flex items-center gap-2">
-            <Settings size={16} /> Configurações
-          </span>
-          <ChevronRight size={16} />
-        </button>
       </div>
     </aside>
   );

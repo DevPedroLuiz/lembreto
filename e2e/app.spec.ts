@@ -117,6 +117,81 @@ async function expectFirstTaskTitle(page: Page, title: string): Promise<void> {
 }
 
 test.describe('Lembreto critical flows', () => {
+  test('exposes drawer semantics and focus for keyboard users', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await expect(page.getByRole('dialog', { name: /novo lembrete/i })).toBeVisible();
+      await expect(page.getByTestId('task-title-input')).toBeFocused();
+      await page.getByRole('button', { name: 'Fechar formulário de lembrete' }).click();
+      await expect(page.getByTestId('task-title-input')).toHaveCount(0);
+
+      await page.getByTestId('sidebar-profile-button').click();
+      await expect(page.getByRole('dialog', { name: /editar perfil/i })).toBeVisible();
+      await expect(page.getByTestId('profile-name-input')).toBeFocused();
+      await page.getByRole('button', { name: 'Fechar perfil' }).click();
+      await expect(page.getByTestId('profile-name-input')).toHaveCount(0);
+
+      await page.getByTestId('sidebar-settings-button').click();
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-drawer-title"]')).toBeVisible();
+      await expect(page.getByRole('switch', { name: 'Alternar modo escuro' })).toBeFocused();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('shows a guided empty state for first-time users', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await expect(page.getByTestId('dashboard-welcome-state')).toBeVisible();
+      await expect(page.getByTestId('dashboard-create-first-task')).toBeVisible();
+      await expect(page.getByTestId('dashboard-explore-categories')).toBeVisible();
+      await expect(page.getByTestId('dashboard-use-example')).toBeVisible();
+
+      await page.getByTestId('dashboard-template-trabalho').click();
+
+      await expect(page.getByTestId('task-title-input')).toHaveValue('Planejar a semana');
+      await expect(page.getByTestId('task-description-input')).toHaveValue(
+        'Liste as 3 prioridades que precisam sair do papel nos próximos dias.',
+      );
+      await expect(page.getByTestId('task-category-select')).toHaveValue('Trabalho');
+      await expect(page.getByTestId('task-priority-select')).toHaveValue('high');
+      await expect(page.getByTestId('task-time-select')).toHaveValue('09:00');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('highlights an invalid past due date before submitting', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await page.getByTestId('task-title-input').fill('Validar prazo visual');
+      await page.getByTestId('task-date-input').fill(formatDateLocal(yesterday));
+
+      await expect(page.getByTestId('task-date-help')).toHaveText('Escolha uma data de hoje em diante.');
+      await expect(page.getByTestId('task-submit-button')).toBeDisabled();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('registers, manages tasks, resets password and logs in again', async ({ page }) => {
     const user = buildE2ETestUser();
 
@@ -133,7 +208,7 @@ test.describe('Lembreto critical flows', () => {
       const createdTask = taskCard(page, initialTaskTitle);
       await expect(createdTask).toBeVisible();
       await expect(createdTask.getByTestId('task-time-badge')).toHaveText('08:00');
-      await expect(createdTask.getByTestId('task-due-badge')).toHaveAttribute('title', 'Horario: 08:00');
+      await expect(createdTask.getByTestId('task-due-badge')).toHaveAttribute('title', 'Horário: 08:00');
 
       await createdTask.click();
       await page.getByTestId('task-title-input').fill(updatedTaskTitle);
@@ -162,7 +237,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('reset-password-input').fill(user.nextPassword);
       await page.getByTestId('reset-confirm-input').fill(user.nextPassword);
       await page.getByTestId('reset-submit-button').click();
-      await expect(page.getByRole('link', { name: /Ir para o Login/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Ir para o login/i })).toBeVisible();
 
       await loginUser(page, user.email, user.nextPassword);
     } finally {
@@ -261,17 +336,17 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-tasks').click();
 
       await expect(page.getByTestId('pending-pagination-summary')).toHaveText('Mostrando 1-20 de 26');
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Pagina 1 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Página 1 de 2');
       await expect(page.getByTestId('task-item')).toHaveCount(20);
 
       await page.getByTestId('pending-pagination-next').click();
 
       await expect(page.getByTestId('pending-pagination-summary')).toHaveText('Mostrando 21-26 de 26');
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Pagina 2 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Página 2 de 2');
       await expect(page.getByTestId('task-item')).toHaveCount(6);
 
       await page.getByTestId('pending-pagination-prev').click();
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Pagina 1 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText('Página 1 de 2');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

@@ -49,5 +49,5 @@ export function getTaskTimeLabel(isoDate: string): string | null {
 
 export function getTaskTimeDescription(isoDate: string): string {
   const timeLabel = getTaskTimeLabel(isoDate);
-  return timeLabel ? `Horario: ${timeLabel}` : 'Dia todo';
+  return timeLabel ? `Horário: ${timeLabel}` : 'Dia todo';
 }

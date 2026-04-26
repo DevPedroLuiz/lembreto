@@ -25,7 +25,7 @@ export function useTasks(token: string | null) {
     priority: Priority;
     category: string;
   }) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
     const created = await apiPost<Task>('/api/tasks', payload, token);
     setTasks((prev) => [created, ...prev]);
     return created;
@@ -42,14 +42,14 @@ export function useTasks(token: string | null) {
       status: Status;
     }>
   ) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
     const updated = await apiPut<Task>(`/api/tasks/${id}`, payload, token);
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
     return updated;
   }, [token]);
 
   const deleteTask = useCallback(async (id: string) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     let snapshot: Task[] = [];
     setTasks((prev) => {
@@ -88,7 +88,7 @@ export function useTasks(token: string | null) {
           t.id === task.id ? { ...t, status: task.status } : t
         )
       );
-      throw new Error('Falha ao atualizar status');
+      throw new Error('Falha ao atualizar o status');
     }
   }, [token]);
 

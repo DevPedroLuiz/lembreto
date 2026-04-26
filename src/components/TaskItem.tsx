@@ -1,29 +1,26 @@
-// src/components/TaskItem.tsx
-// Individual task row used in both Dashboard and Tasks views
-
 import React from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Circle, Clock, Loader2, Trash2, Tag } from 'lucide-react';
+import { CheckCircle2, Circle, Clock3, Loader2, Tag, Trash2 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
-import type { Task, Priority } from '../types';
+import type { Priority, Task } from '../types';
 
 function cn(...inputs: Parameters<typeof clsx>) {
   return twMerge(clsx(inputs));
 }
 
 const PRIORITY_COLORS: Record<Priority, string> = {
-  low: 'text-slate-500 bg-slate-100 dark:bg-white/5',
-  medium: 'text-amber-600 bg-amber-50 dark:bg-amber-500/10',
-  high: 'text-rose-600 bg-rose-50 dark:bg-rose-500/10',
+  low: 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300',
+  medium: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
+  high: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300',
 };
 
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
-  medium: 'Media',
+  medium: 'Média',
   high: 'Alta',
 };
 
@@ -67,8 +64,8 @@ function TaskItemComponent({
   const formatDate = () => {
     try {
       if (isToday(date)) return 'Hoje';
-      if (isTomorrow(date)) return 'Amanha';
-      return format(date, 'dd MMM', { locale: ptBR });
+      if (isTomorrow(date)) return 'Amanhã';
+      return format(date, "dd 'de' MMM", { locale: ptBR });
     } catch {
       return '--';
     }
@@ -83,141 +80,172 @@ function TaskItemComponent({
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
+      exit={{ opacity: 0, scale: 0.96 }}
       whileHover={!isCompleted && !isBusy ? { y: -2 } : {}}
-      className={cn(
-        'group relative flex items-start gap-4 p-4 md:p-5 rounded-2xl transition-all border',
-        isBusy && 'opacity-70',
-        isCompleted
-          ? 'bg-slate-50 dark:bg-white/[0.01] border-transparent'
-          : 'bg-white dark:bg-[#0a0f1e] border-slate-200 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10 hover:shadow-xl hover:shadow-slate-200/40 dark:hover:shadow-black/40 cursor-pointer'
-      )}
+      role={!isCompleted && !isBusy ? 'button' : undefined}
+      tabIndex={!isCompleted && !isBusy ? 0 : -1}
+      aria-label={!isCompleted && !isBusy ? `Editar lembrete ${task.title}` : undefined}
       onClick={() => {
         if (!isCompleted && !isBusy) onEdit(task);
       }}
+      onKeyDown={(event) => {
+        if (isCompleted || isBusy) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onEdit(task);
+      }}
+      className={cn(
+        'surface-soft group relative flex items-start gap-4 p-4 md:p-5',
+        isBusy && 'opacity-75',
+        isCompleted
+          ? 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.03]'
+          : 'cursor-pointer hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
+      )}
     >
+      <div
+        className={cn(
+          'absolute inset-y-4 left-3 w-1 rounded-full',
+          task.priority === 'high'
+            ? 'bg-rose-400/80'
+            : task.priority === 'medium'
+              ? 'bg-amber-400/80'
+              : 'bg-slate-300 dark:bg-slate-600',
+        )}
+      />
+
       <button
         data-testid="task-toggle"
         disabled={isBusy}
-        onClick={(e) => {
-          e.stopPropagation();
+        aria-label={isCompleted ? `Reabrir lembrete ${task.title}` : `Concluir lembrete ${task.title}`}
+        onClick={(event) => {
+          event.stopPropagation();
           onToggle(task);
         }}
         className={cn(
-          'mt-0.5 shrink-0 transition-colors disabled:opacity-50 disabled:cursor-wait',
+          'ml-3 mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait disabled:opacity-60',
           isCompleted
-            ? 'text-emerald-500'
-            : 'text-slate-300 hover:text-blue-500 dark:text-slate-600 dark:hover:text-blue-400'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+            : 'border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400 dark:hover:border-blue-400/30 dark:hover:text-blue-300',
         )}
       >
         {isToggling ? (
-          <Loader2 size={24} className="animate-spin" />
+          <Loader2 size={22} className="animate-spin" />
         ) : isCompleted ? (
-          <CheckCircle2 size={24} />
+          <CheckCircle2 size={22} />
         ) : (
-          <Circle size={24} />
+          <Circle size={22} />
         )}
       </button>
 
-      <div className="flex-1 min-w-0">
-        <h3
-          className={cn(
-            'font-semibold text-base truncate mb-1',
-            isCompleted
-              ? 'line-through text-slate-400'
-              : 'text-slate-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400'
-          )}
-        >
-          {task.title}
-        </h3>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3
+              className={cn(
+                'truncate text-base font-semibold',
+                isCompleted
+                  ? 'text-slate-400 line-through dark:text-slate-500'
+                  : 'text-slate-900 dark:text-white',
+              )}
+            >
+              {task.title}
+            </h3>
+            {!compact && task.description && (
+              <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {task.description}
+              </p>
+            )}
+          </div>
 
-        {!compact && task.description && (
-          <p className="text-sm text-slate-500 line-clamp-1 mb-2 pr-8">
-            {task.description}
-          </p>
-        )}
+          <button
+            data-testid="task-delete"
+            disabled={isBusy}
+            aria-label={`Excluir lembrete ${task.title}`}
+            onClick={(event) => onDelete(task.id, event)}
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
+              isDeleting
+                ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300'
+                : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:bg-rose-500/10 dark:hover:text-rose-300',
+            )}
+          >
+            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          </button>
+        </div>
 
-        <div className="flex flex-wrap items-center gap-2 mt-1">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {!isCompleted && (
             <span
               className={cn(
-                'px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest',
-                PRIORITY_COLORS[task.priority]
+                'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
+                PRIORITY_COLORS[task.priority],
               )}
             >
               {PRIORITY_LABELS[task.priority]}
             </span>
           )}
-          <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md">
-            <Tag size={10} />
+
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+            <Tag size={12} />
             {task.category || 'Geral'}
           </span>
+
           <span
             data-testid="task-due-badge"
             data-overdue-kind={overdueKind}
             title={timeDescription}
             aria-label={`${formatDate()} - ${timeDescription}`}
             className={cn(
-              'flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest',
+              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
               overdueKind === 'timed'
-                ? 'text-rose-600 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10'
+                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
                 : overdueKind === 'all-day'
-                  ? 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/10'
-                : 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+                  : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
             )}
           >
-            <Clock size={10} />
+            <Clock3 size={12} />
             {formatDate()}
           </span>
+
           {timeLabel && (
             <span
               data-testid="task-time-badge"
               className={cn(
-                'flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest',
+                'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold',
                 isOverdue
-                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
-                  : 'bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-400'
+                  ? 'border-rose-200 bg-rose-100 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/15 dark:text-rose-300'
+                  : 'border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
               )}
             >
               {timeLabel}
             </span>
           )}
+
           {overdueKind === 'all-day' && (
             <span
               data-testid="task-all-day-badge"
-              className="flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+              className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300"
             >
               Dia todo
             </span>
           )}
+
           {isDeleting && (
-            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 px-2 py-0.5 rounded-md">
-              <Loader2 size={10} className="animate-spin" />
+            <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+              <Loader2 size={12} className="animate-spin" />
               Excluindo
             </span>
           )}
+
           {isToggling && (
-            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 rounded-md">
-              <Loader2 size={10} className="animate-spin" />
+            <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+              <Loader2 size={12} className="animate-spin" />
               {isCompleted ? 'Reabrindo' : 'Concluindo'}
             </span>
           )}
         </div>
       </div>
-
-      <button
-        data-testid="task-delete"
-        disabled={isBusy}
-        onClick={(e) => onDelete(task.id, e)}
-        className={cn(
-          'p-2 bg-slate-50 dark:bg-white/5 rounded-xl transition-all absolute right-4 top-4 disabled:cursor-wait',
-          isDeleting
-            ? 'opacity-100 text-rose-500'
-            : 'opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10'
-        )}
-      >
-        {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-      </button>
     </motion.div>
   );
 }
@@ -234,5 +262,5 @@ export const TaskItem = React.memo(
     prev.task.status === next.task.status &&
     prev.compact === next.compact &&
     prev.isDeleting === next.isDeleting &&
-    prev.isToggling === next.isToggling
+    prev.isToggling === next.isToggling,
 );

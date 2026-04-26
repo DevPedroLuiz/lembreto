@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useCallback,
   useDeferredValue,
   useEffect,
@@ -13,7 +13,7 @@ import {
   Settings,
   User as UserIcon,
 } from 'lucide-react';
-import { isPast, isToday, parseISO } from 'date-fns';
+import { format, isPast, isToday, parseISO } from 'date-fns';
 import { AnimatePresence } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
@@ -33,7 +33,7 @@ import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AuthPage } from './pages/AuthPage';
 import { ResetPage } from './pages/ResetPage';
-import { DashboardPage } from './pages/DashboardPage';
+import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
 
 type AppConfigPatch = Partial<{
@@ -43,12 +43,11 @@ type AppConfigPatch = Partial<{
 }>;
 
 export default function App() {
-  if (window.location.pathname === '/reset-password') {
-    return <ResetPage />;
-  }
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+  const isResetPasswordRoute = pathname === '/reset-password';
 
   const auth = useAuth();
-  const { tasks, createTask, updateTask, deleteTask, toggleStatus } = useTasks(auth.token);
+  const { tasks, createTask, updateTask, deleteTask, toggleStatus } = useTasks(isResetPasswordRoute ? null : auth.token);
   const { toastMsg, setToastMsg, notify, showToast } = useToast();
 
   const [darkMode, setDarkMode] = useState(false);
@@ -86,6 +85,8 @@ export default function App() {
   const [profAvatar, setProfAvatar] = useState<string | null>(null);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
 
+  const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+
   useEffect(() => {
     const cfg = LS.getConfig() as Record<string, unknown>;
     if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
@@ -101,9 +102,15 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
+    const syncPathname = () => setPathname(window.location.pathname);
+    window.addEventListener('popstate', syncPathname);
+    return () => window.removeEventListener('popstate', syncPathname);
+  }, []);
+
+  useEffect(() => {
     const onUnauthorized = () => {
       if (!auth.token) return;
-      showToast('Sessao encerrada', 'Sua sessao expirou. Entre novamente.');
+      showToast('SessÃ£o encerrada', 'Sua sessÃ£o expirou. FaÃ§a login novamente.');
       void auth.logout();
     };
 
@@ -171,6 +178,17 @@ export default function App() {
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
+  const openTaskFromTemplate = useCallback((template: QuickStartTemplate) => {
+    resetTaskForm();
+    setFormTitle(template.title);
+    setFormDesc(template.description);
+    setFormDate(template.date);
+    setFormTime(template.time ?? '');
+    setFormPriority(template.priority);
+    setFormCategory(template.category);
+    setShowTaskDrawer(true);
+  }, [resetTaskForm]);
+
   const openEditTask = useCallback((task: Task) => {
     const dueDateForm = parseDueDateToForm(task.dueDate);
     setFormTitle(task.title);
@@ -183,17 +201,28 @@ export default function App() {
     setShowTaskDrawer(true);
   }, []);
 
+  const taskDueDateError = useMemo(() => {
+    if (!formDate) return '';
+
+    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime));
+    if (isPast(dueDateValue) && !isToday(dueDateValue)) {
+      return 'Escolha uma data de hoje em diante.';
+    }
+
+    return '';
+  }, [formDate, formTime]);
+
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formTitle.trim() || !formDate || isTaskSubmitting) return;
 
-    const dueDate = buildDueDateFromForm(formDate, formTime);
-    const dueDateValue = new Date(dueDate);
-
-    if (isPast(dueDateValue) && !isToday(dueDateValue)) {
-      notify('Atencao', 'A data estipulada ja passou.');
+    if (taskDueDateError) {
+      notify('Prazo inválido', taskDueDateError);
+      return;
     }
+
+    const dueDate = buildDueDateFromForm(formDate, formTime);
 
     const payload = {
       title: formTitle,
@@ -208,15 +237,15 @@ export default function App() {
 
       if (editingTask) {
         await updateTask(editingTask.id, payload);
-        notify('Atualizada!', 'Sua tarefa foi modificada.');
+        notify('Lembrete atualizado!', 'As informaÃ§Ãµes do lembrete foram salvas.');
       } else {
         const created = await createTask(payload);
-        notify('Tarefa criada!', `"${created.title}" foi adicionada.`);
+        notify('Lembrete criado!', `"${created.title}" foi adicionado.`);
       }
 
       resetTaskForm();
     } catch (err: unknown) {
-      notify('Erro', err instanceof Error ? err.message : 'Falha ao salvar tarefa.');
+      notify('Erro', err instanceof Error ? err.message : 'Falha ao salvar o lembrete.');
     } finally {
       setIsTaskSubmitting(false);
     }
@@ -232,6 +261,7 @@ export default function App() {
     isTaskSubmitting,
     notify,
     resetTaskForm,
+    taskDueDateError,
     updateTask,
   ]);
 
@@ -244,10 +274,10 @@ export default function App() {
 
       if (newStatus === 'completed') {
         playSuccessSound();
-        notify('Parabens!', `"${task.title}" concluida!`);
+        notify('ParabÃ©ns!', `"${task.title}" foi concluÃ­da.`);
       }
     } catch {
-      notify('Erro', 'Falha ao atualizar status.');
+      notify('Erro', 'Falha ao atualizar o status do lembrete.');
     } finally {
       setTogglingTaskIds((prev) => {
         const next = new Set(prev);
@@ -266,7 +296,7 @@ export default function App() {
       const task = tasks.find((item) => item.id === id);
       setPendingDeleteTask({
         id,
-        title: task?.title || 'esta tarefa',
+        title: task?.title || 'este lembrete',
       });
       return;
     }
@@ -274,9 +304,9 @@ export default function App() {
     try {
       setDeletingTaskIds((prev) => new Set(prev).add(id));
       await deleteTask(id);
-      showToast('Removida', 'A tarefa foi deletada.');
+      showToast('Lembrete removido', 'O lembrete foi excluÃ­do com sucesso.');
     } catch {
-      notify('Erro', 'Falha ao deletar.');
+      notify('Erro', 'Falha ao excluir o lembrete.');
     } finally {
       setDeletingTaskIds((prev) => {
         const next = new Set(prev);
@@ -294,10 +324,10 @@ export default function App() {
     try {
       setDeletingTaskIds((prev) => new Set(prev).add(taskToDelete.id));
       await deleteTask(taskToDelete.id);
-      showToast('Removida', 'A tarefa foi deletada.');
+      showToast('Lembrete removido', 'O lembrete foi excluÃ­do com sucesso.');
       setPendingDeleteTask(null);
     } catch {
-      notify('Erro', 'Falha ao deletar.');
+      notify('Erro', 'Falha ao excluir o lembrete.');
     } finally {
       setDeletingTaskIds((prev) => {
         const next = new Set(prev);
@@ -327,7 +357,7 @@ export default function App() {
         password: profPassword || undefined,
         avatar: profAvatar,
       });
-      notify('Perfil atualizado!', 'Suas informacoes foram salvas.');
+      notify('Perfil atualizado!', 'Suas informaÃ§Ãµes foram salvas.');
       setShowProfileDrawer(false);
     } catch (err: unknown) {
       notify('Erro', err instanceof Error ? err.message : 'Falha ao atualizar perfil.');
@@ -405,6 +435,17 @@ export default function App() {
     setPendingDeleteTask(null);
   }, [deletingTaskIds, pendingDeleteTask]);
 
+  const navigateTo = useCallback((nextPath: string) => {
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setPathname(nextPath);
+  }, []);
+
+  if (isResetPasswordRoute) {
+    return <ResetPage onBackToLogin={() => navigateTo('/')} />;
+  }
+
   if (auth.restoring) {
     return <LoadingScreen />;
   }
@@ -413,8 +454,14 @@ export default function App() {
     return <AuthPage auth={auth} toastNotify={notify} />;
   }
 
+  const greetingName = auth.currentUser.name.split(' ')[0];
+  const pageTitle = activeTab === 'dashboard' ? `OlÃ¡, ${greetingName}` : 'Sua agenda';
+  const pageDescription = activeTab === 'dashboard'
+    ? 'Aqui estÃ¡ uma visÃ£o clara do que pede atenÃ§Ã£o hoje.'
+    : 'Organize lembretes, refine prioridades e avance com tranquilidade.';
+
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-900 dark:bg-[#02040a] dark:text-slate-100">
+    <div className="flex h-screen w-full overflow-hidden text-slate-900 dark:text-slate-100">
       <Sidebar
         currentUser={auth.currentUser}
         activeTab={activeTab}
@@ -427,22 +474,31 @@ export default function App() {
         onLogout={auth.logout}
       />
 
-      <main className="flex h-full flex-1 flex-col overflow-x-hidden overflow-y-auto bg-slate-50 dark:bg-transparent">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/60 bg-white/70 p-4 backdrop-blur-md dark:border-white/5 dark:bg-[#0a0f1e]/80 md:hidden">
+      <main className="relative flex h-full flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="pointer-events-none absolute inset-0 bg-grid opacity-40 dark:opacity-20" />
+
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/70 bg-white/80 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/75 md:hidden">
           <div className="flex items-center gap-2">
-            <Bell size={22} className="text-blue-500" />
-            <h1 className="text-lg font-bold">Lembreto</h1>
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_30px_-22px_rgba(37,99,235,0.8)]">
+              <Bell size={18} />
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Painel</p>
+              <h1 className="text-lg font-semibold">Lembreto</h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={openSettings}
-              className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-white/10"
+              aria-label="Abrir configuraÃ§Ãµes"
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
             >
               <Settings size={20} />
             </button>
             <button
               onClick={openProfile}
-              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-transparent bg-blue-100 text-blue-600 transition-all hover:border-blue-500 dark:bg-blue-900/40"
+              aria-label="Abrir perfil"
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white text-blue-600 transition-all hover:border-blue-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-blue-300"
             >
               {auth.currentUser.avatar ? (
                 <img src={auth.currentUser.avatar} alt="Avatar" className="h-full w-full object-cover" />
@@ -453,27 +509,40 @@ export default function App() {
           </div>
         </header>
 
-        <div className="mx-auto flex-1 w-full max-w-7xl p-4 pb-28 md:p-10 md:pb-10">
-          <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="mb-1 text-3xl font-bold">
-                {activeTab === 'dashboard'
-                  ? `Ola, ${auth.currentUser.name.split(' ')[0]}`
-                  : 'Suas Atividades'}
-              </h2>
-              <p className="text-slate-500 dark:text-slate-400">
-                {activeTab === 'dashboard'
-                  ? 'Aqui esta o panorama do seu dia.'
-                  : 'Gerencie e organize suas prioridades.'}
-              </p>
+        <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 md:p-8 md:pb-8 xl:p-10">
+          <div className="surface-panel mb-8 p-5 md:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <span className="section-eyebrow">
+                  {activeTab === 'dashboard' ? 'Painel principal' : 'GestÃ£o de lembretes'}
+                </span>
+                <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
+                  {pageTitle}
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+                  {pageDescription}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+                  {pendingTasks.length} pendente{pendingTasks.length === 1 ? '' : 's'}
+                </span>
+                <span className="rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                  {completedTasks.length} concluÃ­da{completedTasks.length === 1 ? '' : 's'}
+                </span>
+              </div>
             </div>
+          </div>
+
+          <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             {activeTab === 'tasks' && (
               <button
                 onClick={openNewTask}
                 data-testid="new-task-button"
-                className="hidden items-center gap-2 rounded-2xl bg-slate-900 px-6 py-3 font-semibold text-white shadow-xl transition-all hover:opacity-90 active:scale-95 dark:bg-white dark:text-slate-900 md:flex"
+                className="action-primary hidden md:inline-flex"
               >
-                <Plus size={20} /> Nova Tarefa
+                <Plus size={20} /> Novo lembrete
               </button>
             )}
           </div>
@@ -488,6 +557,7 @@ export default function App() {
                 overdueCount={pendingSummary.overdueCount}
                 onViewAll={openTasksTab}
                 onNewTask={openNewTask}
+                onApplyTemplate={openTaskFromTemplate}
                 onToggle={handleToggle}
                 onDelete={handleDelete}
                 onEdit={openEditTask}
@@ -517,13 +587,14 @@ export default function App() {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/90 backdrop-blur-xl dark:border-white/5 dark:bg-[#040814]/90 md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 md:hidden">
         <div className="flex items-center justify-around p-2">
           <button
             onClick={openDashboardTab}
+            aria-label="Abrir dashboard"
             className={cn(
-              'flex flex-col items-center rounded-xl p-3 transition-colors',
-              activeTab === 'dashboard' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500'
+              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
           >
             <LayoutDashboard size={24} />
@@ -531,16 +602,18 @@ export default function App() {
           <div className="relative -top-6">
             <button
               onClick={openNewTask}
-              className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-slate-50 bg-blue-600 text-white shadow-xl shadow-blue-500/30 transition-transform active:scale-95 dark:border-[#040814]"
+              aria-label="Criar novo lembrete"
+              className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-slate-100 bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_24px_40px_-22px_rgba(37,99,235,0.7)] transition-transform active:scale-95 dark:border-slate-950"
             >
               <Plus size={32} />
             </button>
           </div>
           <button
             onClick={openTasksTab}
+            aria-label="Abrir lista de lembretes"
             className={cn(
-              'relative flex flex-col items-center rounded-xl p-3 transition-colors',
-              activeTab === 'tasks' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500'
+              'relative flex flex-col items-center rounded-2xl p-3 transition-colors',
+              activeTab === 'tasks' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
           >
             <ListTodo size={24} />
@@ -566,6 +639,8 @@ export default function App() {
         setDate={setFormDate}
         time={formTime}
         setTime={setFormTime}
+        dueDateError={taskDueDateError}
+        minimumDate={minimumTaskDate}
         priority={formPriority}
         setPriority={setFormPriority}
         category={formCategory}
@@ -606,14 +681,14 @@ export default function App() {
 
       <ConfirmDialog
         open={Boolean(pendingDeleteTask)}
-        title="Excluir tarefa?"
+        title="Excluir lembrete?"
         message={
           pendingDeleteTask
-            ? `Voce esta prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
+            ? `VocÃª estÃ¡ prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
             : ''
         }
-        confirmLabel="Excluir tarefa"
-        cancelLabel="Manter tarefa"
+        confirmLabel="Excluir lembrete"
+        cancelLabel="Manter lembrete"
         isConfirming={pendingDeleteTask ? deletingTaskIds.has(pendingDeleteTask.id) : false}
         onConfirm={() => {
           void handleConfirmDelete();
@@ -623,3 +698,5 @@ export default function App() {
     </div>
   );
 }
+
+
