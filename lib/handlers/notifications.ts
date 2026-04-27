@@ -1,5 +1,5 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
-import { logError, logInfo } from '../logger.js';
+import { logError, logInfo, logWarn } from '../logger.js';
 import {
   clearNotificationsForUser,
   createNotification,
@@ -8,6 +8,7 @@ import {
   listNotificationsForUser,
   markAllNotificationsRead,
   markNotificationReadState,
+  NotificationReferenceUnavailableError,
   setNotificationsEnabled,
 } from '../notifications.js';
 import {
@@ -100,6 +101,13 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
       }));
       return json(result.created ? 201 : 200, result);
     } catch (error) {
+      if (error instanceof NotificationReferenceUnavailableError) {
+        logWarn('notification_create_skipped_missing_reference', getRequestMeta(request, {
+          userId: user.id,
+        }));
+        return json(409, { error: 'Referencia da notificacao nao esta mais disponivel' });
+      }
+
       logError('notification_create_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao registrar notificacao' });
     }

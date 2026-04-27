@@ -52,8 +52,26 @@ export interface ScheduledNotificationSummary {
   createdNotifications: number;
 }
 
+export class NotificationReferenceUnavailableError extends Error {
+  constructor(message = 'Notification reference unavailable') {
+    super(message);
+    this.name = 'NotificationReferenceUnavailableError';
+  }
+}
+
 export const UPCOMING_REMINDER_MINUTES = 15;
 export const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
+
+function isForeignKeyReferenceError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const message = typeof maybeError.message === 'string' ? maybeError.message : '';
+
+  return maybeError.code === '23503'
+    || message.includes('notifications_user_id_fkey')
+    || message.includes('notifications_target_task_id_fkey');
+}
 
 function buildTarget(row: NotificationRow): AppNotificationRecord['target'] | undefined {
   if (!row.targetType) return undefined;
@@ -175,30 +193,39 @@ export async function createNotification(sql: SqlClient, input: CreateNotificati
 
   const targetType = input.target?.type ?? null;
   const targetTaskId = input.target?.type === 'task' ? input.target.taskId : null;
+  let inserted: unknown[];
 
-  const inserted = await sql`
-    INSERT INTO notifications (user_id, title, message, tone, target_type, target_task_id, dedupe_key)
-    VALUES (
-      ${input.userId},
-      ${input.title},
-      ${input.message},
-      ${input.tone},
-      ${targetType},
-      ${targetTaskId},
-      ${input.dedupeKey ?? null}
-    )
-    ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
-    RETURNING
-      id,
-      title,
-      message,
-      created_at AS "createdAt",
-      read,
-      tone,
-      target_type AS "targetType",
-      target_task_id AS "targetTaskId",
-      dedupe_key AS "dedupeKey"
-  `;
+  try {
+    inserted = await sql`
+      INSERT INTO notifications (user_id, title, message, tone, target_type, target_task_id, dedupe_key)
+      VALUES (
+        ${input.userId},
+        ${input.title},
+        ${input.message},
+        ${input.tone},
+        ${targetType},
+        ${targetTaskId},
+        ${input.dedupeKey ?? null}
+      )
+      ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+      RETURNING
+        id,
+        title,
+        message,
+        created_at AS "createdAt",
+        read,
+        tone,
+        target_type AS "targetType",
+        target_task_id AS "targetTaskId",
+        dedupe_key AS "dedupeKey"
+    `;
+  } catch (error) {
+    if (isForeignKeyReferenceError(error)) {
+      throw new NotificationReferenceUnavailableError();
+    }
+
+    throw error;
+  }
 
   if (inserted.length > 0) {
     return {
