@@ -6,21 +6,12 @@
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
   ],
   "rewrites": [
-    { "source": "/api/cron/cleanup",         "destination": "/api/cron/cleanup"       },
-    { "source": "/api/cron/notifications",   "destination": "/api/cron/notifications" },
-    { "source": "/api/auth/register",       "destination": "/api/auth/register"       },
-    { "source": "/api/auth/login",          "destination": "/api/auth/login"          },
-    { "source": "/api/auth/logout",         "destination": "/api/auth/logout"         },
-    { "source": "/api/auth/me",             "destination": "/api/auth/me"             },
-    { "source": "/api/auth/recover",        "destination": "/api/auth/recover"        },
-    { "source": "/api/auth/reset-password", "destination": "/api/auth/reset-password" },
-    { "source": "/api/auth/profile",        "destination": "/api/auth/profile"        },
-    { "source": "/api/notifications/settings", "destination": "/api/notifications/settings" },
-    { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications/mark-all-read" },
-    { "source": "/api/notifications/:id",    "destination": "/api/notifications/[id]"  },
-    { "source": "/api/notifications",        "destination": "/api/notifications/index" },
-    { "source": "/api/tasks/:id",           "destination": "/api/tasks/[id]"          },
-    { "source": "/api/tasks",               "destination": "/api/tasks/index"         },
-    { "source": "/(.*)",                    "destination": "/index.html"              }
+    { "source": "/api/cron/:job", "destination": "/api/cron?job=:job" },
+    { "source": "/api/auth/:action", "destination": "/api/auth?action=:action" },
+    { "source": "/api/tasks/:id", "destination": "/api/tasks?id=:id" },
+    { "source": "/api/notifications/settings", "destination": "/api/notifications?action=settings" },
+    { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications?action=mark-all-read" },
+    { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
+    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }
