@@ -11,6 +11,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
+import { useSwipeToClose } from '../hooks/useSwipeToClose';
 
 function Toggle({
   active,
@@ -119,6 +120,12 @@ export function SettingsDrawer({
   showCompleted,
   onToggleShowCompleted,
 }: SettingsDrawerProps) {
+  const swipe = useSwipeToClose({
+    enabled: open,
+    direction: 'down',
+    onClose,
+  });
+
   const toggleMap = {
     darkMode: {
       active: darkMode,
@@ -161,14 +168,24 @@ export function SettingsDrawer({
 
           <motion.section
             initial={{ opacity: 0, y: 18, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
-            transition={{ type: 'spring', damping: 26, stiffness: 260 }}
+            transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 26, stiffness: 260 }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-drawer-title"
             className="fixed inset-x-4 top-1/2 z-[101] mx-auto flex max-h-[88vh] w-full max-w-5xl -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
           >
+            {swipe.mobileEnabled && (
+              <div
+                className="flex justify-center border-b border-slate-200/70 px-4 py-3 dark:border-white/10"
+                aria-hidden="true"
+                {...swipe.bind}
+              >
+                <span className="h-1.5 w-14 rounded-full bg-slate-300/90 dark:bg-slate-700" />
+              </div>
+            )}
+
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -180,7 +197,7 @@ export function SettingsDrawer({
                     Configurações
                   </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-                    Ajuste notificações, visibilidade e comportamento do aplicativo em uma visão clara e mais agradável de usar.
+                    Ajuste notificações, visibilidade e comportamento do aplicativo em uma visão clara e agradável de usar.
                   </p>
                 </div>
 

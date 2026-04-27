@@ -20,6 +20,7 @@ interface SidebarProps {
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
   pendingTasks: Task[];
+  overdueCount: number;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
   onLogout: () => void;
@@ -32,6 +33,7 @@ export function Sidebar({
   filterCategory,
   setFilterCategory,
   pendingTasks,
+  overdueCount,
   onOpenProfile,
   onOpenSettings,
   onLogout,
@@ -90,7 +92,8 @@ export function Sidebar({
             onClick={() => setActiveTab('tasks')}
             icon={<ListTodo size={20} />}
             label="Meus lembretes"
-            badge={pendingTasks.length}
+            badge={overdueCount}
+            badgeTone="alert"
             testId="sidebar-tasks"
           />
         </nav>

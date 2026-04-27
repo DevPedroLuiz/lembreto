@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   email       TEXT        UNIQUE NOT NULL,
   password    TEXT        NOT NULL,
   avatar      TEXT,
+  notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -75,8 +76,35 @@ CREATE INDEX IF NOT EXISTS idx_prt_user_id    ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_prt_expires_at ON password_reset_tokens(expires_at);
 
 -- ============================================================
+-- Central de notificacoes
+-- ============================================================
+CREATE TABLE IF NOT EXISTS notifications (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title          TEXT        NOT NULL,
+  message        TEXT        NOT NULL,
+  tone           TEXT        NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'error')),
+  read           BOOLEAN     NOT NULL DEFAULT FALSE,
+  target_type    TEXT        CHECK (target_type IN ('task', 'notifications', 'profile', 'settings')),
+  target_task_id UUID        REFERENCES tasks(id) ON DELETE SET NULL,
+  dedupe_key     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+  ON notifications(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read
+  ON notifications(user_id, read, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
+  ON notifications(user_id, dedupe_key)
+  WHERE dedupe_key IS NOT NULL;
+
+-- ============================================================
 -- Limpeza periódica (rode manualmente ou via cron na Vercel)
 -- DELETE FROM token_blacklist      WHERE expires_at < NOW();
 -- DELETE FROM auth_rate_limit      WHERE attempted_at < NOW() - INTERVAL '1 hour';
 -- DELETE FROM password_reset_tokens WHERE expires_at < NOW() OR used = TRUE;
+-- DELETE FROM notifications        WHERE created_at < NOW() - INTERVAL '180 days';
 -- ============================================================

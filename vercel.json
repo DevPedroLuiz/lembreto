@@ -7,6 +7,7 @@
   ],
   "rewrites": [
     { "source": "/api/cron/cleanup",         "destination": "/api/cron/cleanup"       },
+    { "source": "/api/cron/notifications",   "destination": "/api/cron/notifications" },
     { "source": "/api/auth/register",       "destination": "/api/auth/register"       },
     { "source": "/api/auth/login",          "destination": "/api/auth/login"          },
     { "source": "/api/auth/logout",         "destination": "/api/auth/logout"         },
@@ -14,6 +15,10 @@
     { "source": "/api/auth/recover",        "destination": "/api/auth/recover"        },
     { "source": "/api/auth/reset-password", "destination": "/api/auth/reset-password" },
     { "source": "/api/auth/profile",        "destination": "/api/auth/profile"        },
+    { "source": "/api/notifications/settings", "destination": "/api/notifications/settings" },
+    { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications/mark-all-read" },
+    { "source": "/api/notifications/:id",    "destination": "/api/notifications/[id]"  },
+    { "source": "/api/notifications",        "destination": "/api/notifications/index" },
     { "source": "/api/tasks/:id",           "destination": "/api/tasks/[id]"          },
     { "source": "/api/tasks",               "destination": "/api/tasks/index"         },
     { "source": "/(.*)",                    "destination": "/index.html"              }

@@ -24,6 +24,13 @@ import {
   handleTasksCollection,
 } from './lib/handlers/tasks.js';
 import { handleCleanupCron } from './lib/handlers/cron.js';
+import {
+  handleNotificationById,
+  handleNotificationsCollection,
+  handleNotificationsCron,
+  handleNotificationSettings,
+  handleNotificationMarkAllRead,
+} from './lib/handlers/notifications.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -94,7 +101,16 @@ async function startServer() {
   app.put('/api/tasks/:id', run(handleTaskById));
   app.delete('/api/tasks/:id', run(handleTaskById));
 
+  app.get('/api/notifications', run(handleNotificationsCollection));
+  app.post('/api/notifications', run(handleNotificationsCollection));
+  app.delete('/api/notifications', run(handleNotificationsCollection));
+  app.post('/api/notifications/mark-all-read', run(handleNotificationMarkAllRead));
+  app.get('/api/notifications/settings', run(handleNotificationSettings));
+  app.put('/api/notifications/settings', run(handleNotificationSettings));
+  app.put('/api/notifications/:id', run(handleNotificationById));
+
   app.get('/api/cron/cleanup', run(handleCleanupCron));
+  app.get('/api/cron/notifications', run(handleNotificationsCron));
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

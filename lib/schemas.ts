@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { validateAvatarDataUrl } from './avatar.js';
-import { TASK_PRIORITIES, TASK_STATUSES } from './contracts.js';
+import {
+  NOTIFICATION_TONES,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+} from './contracts.js';
 
 const nameSchema = z.string().trim().min(1, 'Nome obrigatorio').max(80, 'Nome muito longo');
 const emailSchema = z.string().trim().email('Email invalido').max(254, 'Email muito longo');
@@ -21,6 +25,21 @@ const avatarSchema = z.string().superRefine((value, ctx) => {
     });
   }
 });
+const notificationTargetSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('task'),
+    taskId: z.string().uuid('Identificador do lembrete invalido'),
+  }).strict(),
+  z.object({
+    type: z.literal('notifications'),
+  }).strict(),
+  z.object({
+    type: z.literal('profile'),
+  }).strict(),
+  z.object({
+    type: z.literal('settings'),
+  }).strict(),
+]);
 
 export const registerSchema = z.object({
   name: nameSchema,
@@ -71,6 +90,22 @@ export const updateTaskSchema = z.object({
   (value) => Object.keys(value).length > 0,
   'Envie ao menos um campo para atualizar',
 );
+
+export const createNotificationSchema = z.object({
+  title: z.string().trim().min(1, 'Titulo obrigatorio').max(120, 'Titulo muito longo'),
+  message: z.string().trim().min(1, 'Mensagem obrigatoria').max(500, 'Mensagem muito longa'),
+  tone: z.enum(NOTIFICATION_TONES).default('info'),
+  target: notificationTargetSchema.optional(),
+  dedupeKey: z.string().trim().max(255, 'Chave de deduplicacao muito longa').optional(),
+}).strict();
+
+export const updateNotificationSchema = z.object({
+  read: z.boolean(),
+}).strict();
+
+export const updateNotificationSettingsSchema = z.object({
+  enabled: z.boolean(),
+}).strict();
 
 export function formatZodError(error: z.ZodError): string {
   const issue = error.issues[0];

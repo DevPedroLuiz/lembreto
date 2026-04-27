@@ -448,7 +448,9 @@ test.describe('Lembreto critical flows', () => {
       });
       await page.getByTestId('profile-submit-button').click();
 
-      await expect(page.getByTestId('profile-submit-button')).toHaveCount(0);
+      await expect(page.getByTestId('profile-save-success')).toBeVisible();
+      await expect(page.getByTestId('profile-submit-button')).toContainText(/salvo com sucesso/i);
+      await expect(page.getByTestId('profile-submit-button')).toHaveCount(0, { timeout: 3000 });
       await expect(page.getByTestId('sidebar-profile-name')).toHaveText(updatedName);
       await expect(page.getByTestId('sidebar-profile-email')).toHaveText(updatedEmail);
       await expect(page.getByTestId('sidebar-profile-avatar')).toHaveAttribute('src', /data:image\/png;base64,/);
@@ -586,6 +588,41 @@ test.describe('Lembreto critical flows', () => {
 
       await expect(page.getByTestId('task-sort-category')).toHaveAttribute('aria-pressed', 'true');
       await expectFirstTaskTitle(page, 'Categoria estudo');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('supports core keyboard shortcuts and shows password strength during registration', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await page.goto('/');
+      await page.getByTestId('auth-mode-toggle').click();
+      await page.getByTestId('auth-password-input').fill('123456');
+      await expect(page.getByTestId('password-strength-indicator')).toContainText(/senha fraca/i);
+      await page.getByTestId('auth-password-input').fill('SenhaSuper123!');
+      await expect(page.getByTestId('password-strength-indicator')).toContainText(/senha forte/i);
+
+      await page.getByTestId('register-name-input').fill(user.name);
+      await page.getByTestId('auth-email-input').fill(user.email);
+      await page.getByTestId('auth-submit-button').click();
+      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+
+      await page.keyboard.press('n');
+      await expect(page.getByRole('dialog', { name: /novo lembrete/i })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('task-title-input')).toHaveCount(0);
+
+      await createTask(page, 'Atalho para exclusão');
+      const shortcutTask = taskCard(page, 'Atalho para exclusão');
+      await shortcutTask.hover();
+      await shortcutTask.getByTestId('task-delete').click();
+      await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+      await page.keyboard.press('Enter');
+      await expect(taskCard(page, 'Atalho para exclusão')).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -779,6 +816,47 @@ test.describe('Lembreto critical flows', () => {
       const taskDetailsDialog = page.getByTestId('task-details-dialog');
       await expect(taskDetailsDialog).toBeVisible();
       await expect(taskDetailsDialog.getByRole('heading', { name: 'Lembrete em atraso com alerta' })).toBeVisible();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('warns before the scheduled time and repeats alerts for overdue reminders', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const upcoming = new Date(Date.now() + 10 * 60 * 1000);
+    upcoming.setSeconds(0, 0);
+
+    const overdue = new Date(Date.now() - 40 * 60 * 1000);
+    overdue.setSeconds(0, 0);
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Lembrete prestes a vencer',
+          dueDate: upcoming.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Lembrete atrasado recorrente',
+          dueDate: overdue.toISOString(),
+          priority: 'medium',
+          category: 'Pessoal',
+        },
+      ]);
+
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
+
+      await page.getByTestId('header-notifications-button').click();
+      const notificationItems = page.getByTestId('recent-notification-item');
+
+      await expect(notificationItems.filter({ hasText: 'Lembrete prestes a vencer' }).first()).toBeVisible();
+      await expect(notificationItems.filter({ hasText: 'Lembrete atrasado recorrente' }).first()).toBeVisible();
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

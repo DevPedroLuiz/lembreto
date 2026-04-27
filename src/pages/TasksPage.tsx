@@ -22,6 +22,7 @@ import { CATEGORIES } from '../types';
 import type { Priority, Task } from '../types';
 
 const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 200;
 
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
@@ -268,6 +269,31 @@ export function TasksPage({
   const [filtersOpen, setFiltersOpen] = React.useState(() =>
     hasStoredCustomFilters(search, filterCategory, initialSortMode, initialPriorityFilter, initialStatusFilter),
   );
+  const [searchInput, setSearchInput] = React.useState(search);
+  const [isMobileViewport, setIsMobileViewport] = React.useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleChange = (event: MediaQueryListEvent) => setIsMobileViewport(event.matches);
+
+    setIsMobileViewport(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  React.useEffect(() => {
+    setSearchInput(search);
+  }, [search]);
+
+  React.useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      if (search !== searchInput) setSearch(searchInput);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [search, searchInput, setSearch]);
 
   const handleSortChange = React.useCallback((nextSortMode: SortMode) => {
     setSortMode(nextSortMode);
@@ -387,8 +413,16 @@ export function TasksPage({
     priorityFilter,
     statusFilter,
   );
+  const activeFilterCount = [
+    filterCategory !== 'Todas',
+    sortMode !== 'created',
+    priorityFilter !== 'all',
+    statusFilter !== 'all',
+    search.trim().length > 0,
+  ].filter(Boolean).length;
 
   const handleResetFilters = React.useCallback(() => {
+    setSearchInput('');
     setSearch('');
     setFilterCategory('Todas');
     setSortMode('created');
@@ -404,6 +438,123 @@ export function TasksPage({
       taskStatusFilter: 'all',
     });
   }, [setFilterCategory, setSearch]);
+
+  const filtersPanel = (
+    <div className="surface-soft max-w-5xl p-4 sm:p-5">
+      <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 dark:border-white/10 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">Controles da lista</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Ajuste a visualização para encontrar exatamente o que precisa.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleResetFilters}
+          disabled={!hasCustomFilters}
+          className="action-ghost h-10 justify-center rounded-xl border border-transparent px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <RotateCcw size={15} />
+          Limpar filtros
+        </button>
+      </div>
+
+      <div className="relative mt-4">
+        <Search className="field-icon" size={18} />
+        <input
+          type="text"
+          data-testid="task-search-input"
+          placeholder="Buscar lembretes por título"
+          value={searchInput}
+          onChange={(event) => setSearchInput(event.target.value)}
+          className="field-control field-control-with-icon"
+        />
+      </div>
+
+      <div className="mt-5 space-y-5">
+        <div>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+              <SlidersHorizontal size={15} />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Ordenação</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Escolha como os lembretes aparecem na lista.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SORT_OPTIONS.map((option) => {
+              const isActive = sortMode === option.value;
+              return (
+                <ControlButton
+                  key={option.value}
+                  type="button"
+                  data-testid={`task-sort-${option.value}`}
+                  onClick={() => handleSortChange(option.value)}
+                  aria-pressed={isActive}
+                  active={isActive}
+                >
+                  {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
+                  {option.label}
+                </ControlButton>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <div>
+            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Prioridade</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {PRIORITY_FILTER_OPTIONS.map((option) => {
+                const isActive = priorityFilter === option.value;
+                return (
+                  <ControlButton
+                    key={option.value}
+                    type="button"
+                    data-testid={`task-priority-filter-${option.value}`}
+                    onClick={() => handlePriorityFilterChange(option.value)}
+                    aria-pressed={isActive}
+                    active={isActive}
+                    className={option.value === 'all' ? 'sm:col-span-2' : ''}
+                  >
+                    <Flag size={14} />
+                    {option.label}
+                  </ControlButton>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Status</p>
+            <div className="grid gap-2">
+              {STATUS_FILTER_OPTIONS.map((option) => {
+                const isActive = statusFilter === option.value;
+                return (
+                  <ControlButton
+                    key={option.value}
+                    type="button"
+                    data-testid={`task-status-filter-${option.value}`}
+                    onClick={() => handleStatusFilterChange(option.value)}
+                    aria-pressed={isActive}
+                    active={isActive}
+                  >
+                    {option.value === 'completed' ? <CircleDot size={14} /> : <Circle size={14} />}
+                    {option.label}
+                  </ControlButton>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <motion.div
@@ -439,7 +590,7 @@ export function TasksPage({
                 className="action-secondary h-11 justify-center rounded-2xl px-4 py-0 text-sm sm:justify-start"
               >
                 <SlidersHorizontal size={16} />
-                {filtersOpen ? 'Ocultar filtros' : 'Abrir filtros'}
+                {filtersOpen ? 'Ocultar filtros' : activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : 'Abrir filtros'}
                 {filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </button>
 
@@ -474,7 +625,7 @@ export function TasksPage({
             </div>
 
             <AnimatePresence initial={false}>
-              {filtersOpen && (
+              {filtersOpen && !isMobileViewport && (
                 <motion.div
                   id="tasks-filters-panel"
                   initial={{ opacity: 0, height: 0, y: -8 }}
@@ -483,120 +634,7 @@ export function TasksPage({
                   transition={{ duration: 0.2, ease: 'easeOut' }}
                   className="overflow-hidden"
                 >
-                  <div className="surface-soft max-w-5xl p-4 sm:p-5">
-                    <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 dark:border-white/10 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Controles da lista</p>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          Ajuste a visualização para encontrar exatamente o que precisa.
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleResetFilters}
-                        disabled={!hasCustomFilters}
-                        className="action-ghost h-10 justify-center rounded-xl border border-transparent px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45"
-                      >
-                        <RotateCcw size={15} />
-                        Limpar filtros
-                      </button>
-                    </div>
-
-                    <div className="relative mt-4">
-                      <Search className="field-icon" size={18} />
-                      <input
-                        type="text"
-                        data-testid="task-search-input"
-                        placeholder="Buscar lembretes por título"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        className="field-control field-control-with-icon"
-                      />
-                    </div>
-
-                    <div className="mt-5 space-y-5">
-                      <div>
-                        <div className="mb-3 flex items-center gap-2">
-                          <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
-                            <SlidersHorizontal size={15} />
-                          </span>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ordenação</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              Escolha como os lembretes aparecem na lista.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {SORT_OPTIONS.map((option) => {
-                            const isActive = sortMode === option.value;
-                            return (
-                              <ControlButton
-                                key={option.value}
-                                type="button"
-                                data-testid={`task-sort-${option.value}`}
-                                onClick={() => handleSortChange(option.value)}
-                                aria-pressed={isActive}
-                                active={isActive}
-                              >
-                                {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
-                                {option.label}
-                              </ControlButton>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-                        <div>
-                          <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Prioridade</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            {PRIORITY_FILTER_OPTIONS.map((option) => {
-                              const isActive = priorityFilter === option.value;
-                              return (
-                                <ControlButton
-                                  key={option.value}
-                                  type="button"
-                                  data-testid={`task-priority-filter-${option.value}`}
-                                  onClick={() => handlePriorityFilterChange(option.value)}
-                                  aria-pressed={isActive}
-                                  active={isActive}
-                                  className={option.value === 'all' ? 'sm:col-span-2' : ''}
-                                >
-                                  <Flag size={14} />
-                                  {option.label}
-                                </ControlButton>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div>
-                          <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Status</p>
-                          <div className="grid gap-2">
-                            {STATUS_FILTER_OPTIONS.map((option) => {
-                              const isActive = statusFilter === option.value;
-                              return (
-                                <ControlButton
-                                  key={option.value}
-                                  type="button"
-                                  data-testid={`task-status-filter-${option.value}`}
-                                  onClick={() => handleStatusFilterChange(option.value)}
-                                  aria-pressed={isActive}
-                                  active={isActive}
-                                >
-                                  {option.value === 'completed' ? <CircleDot size={14} /> : <Circle size={14} />}
-                                  {option.label}
-                                </ControlButton>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  {filtersPanel}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -619,6 +657,54 @@ export function TasksPage({
           ))}
         </div>
       </section>
+
+      <AnimatePresence>
+        {filtersOpen && isMobileViewport && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setFiltersOpen(false)}
+              className="fixed inset-0 z-[130] bg-slate-950/45 backdrop-blur-sm md:hidden"
+            />
+
+            <motion.section
+              id="tasks-filters-panel"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 24 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-3 bottom-3 z-[131] max-h-[78vh] overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_30px_100px_-28px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96 md:hidden"
+              aria-modal="true"
+              role="dialog"
+              aria-labelledby="mobile-filters-title"
+            >
+              <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-4 dark:border-white/10">
+                <div>
+                  <p id="mobile-filters-title" className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Filtros da agenda
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {activeFilterCount} ativo{activeFilterCount === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(false)}
+                  className="action-ghost h-10 rounded-xl px-3 py-0 text-sm"
+                >
+                  Concluir
+                </button>
+              </div>
+
+              <div className="max-h-[calc(78vh-72px)] overflow-y-auto p-4">
+                {filtersPanel}
+              </div>
+            </motion.section>
+          </>
+        )}
+      </AnimatePresence>
 
       {statusFilter !== 'completed' && (
         <section className="surface-panel p-5 md:p-6">

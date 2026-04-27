@@ -1,6 +1,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, BellRing, X } from 'lucide-react';
+import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { NotificationFeed } from './NotificationFeed';
 import type { AppNotification } from '../types';
 
@@ -22,6 +23,11 @@ export function NotificationsInboxDrawer({
   onOpenCenter,
 }: NotificationsInboxDrawerProps) {
   const recentNotifications = notifications.slice(0, 6);
+  const swipe = useSwipeToClose({
+    enabled: open,
+    direction: 'right',
+    onClose,
+  });
 
   return (
     <AnimatePresence>
@@ -37,14 +43,24 @@ export function NotificationsInboxDrawer({
 
           <motion.aside
             initial={{ x: '100%' }}
-            animate={{ x: 0 }}
+            animate={{ x: swipe.offset }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 240 }}
+            transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 240 }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="notifications-inbox-title"
             className="fixed right-0 top-0 z-[141] flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white/96 shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
           >
+            {swipe.mobileEnabled && (
+              <div
+                className="flex justify-center border-b border-slate-200/70 px-4 py-3 dark:border-white/10"
+                aria-hidden="true"
+                {...swipe.bind}
+              >
+                <span className="h-1.5 w-14 rounded-full bg-slate-300/90 dark:bg-slate-700" />
+              </div>
+            )}
+
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div>

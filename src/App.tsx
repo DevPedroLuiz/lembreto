@@ -2,6 +2,7 @@
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -18,6 +19,7 @@ import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
+import { useNotifications } from './hooks/useNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
 import { LS, type AppConfig } from './lib/storage';
@@ -61,6 +63,7 @@ type AppConfigPatch = Partial<{
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
+type ViewTab = 'dashboard' | 'tasks' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -70,7 +73,11 @@ type EmitNotificationOptions = {
   skipToast?: boolean;
   target?: NotificationTarget;
   dedupeKey?: string;
+  token?: string | null;
 };
+
+const UPCOMING_REMINDER_MINUTES = 15;
+const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
 
 function fallbackCopyText(text: string) {
   const textarea = document.createElement('textarea');
@@ -149,12 +156,27 @@ function buildQuickRescheduleDate(task: Task, preset: QuickReschedulePreset): st
   );
 }
 
+function getMinutesDifference(targetDate: Date, referenceDate: Date) {
+  return Math.floor((targetDate.getTime() - referenceDate.getTime()) / 60000);
+}
+
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const isResetPasswordRoute = pathname === '/reset-password';
 
   const auth = useAuth();
   const { tasks, createTask, updateTask, deleteTask, toggleStatus } = useTasks(isResetPasswordRoute ? null : auth.token);
+  const {
+    notifications,
+    serverEnabled: serverNotificationsEnabled,
+    loaded: notificationsLoaded,
+    refreshNotifications,
+    createNotification,
+    markNotificationRead,
+    markAllRead,
+    clearAll,
+    updateNotificationsEnabled,
+  } = useNotifications(isResetPasswordRoute ? null : auth.token);
   const {
     toastMsg,
     setToastMsg,
@@ -164,7 +186,7 @@ export default function App() {
   } = useToast();
 
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notifications'>('dashboard');
+  const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
   const [filterCategory, setFilterCategory] = useState('Todas');
   const [search, setSearch] = useState('');
 
@@ -200,13 +222,25 @@ export default function App() {
     id: string;
     title: string;
   } | null>(null);
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => LS.loadNotifications());
+  const [notificationClock, setNotificationClock] = useState(() => Date.now());
 
   const [profName, setProfName] = useState('');
   const [profEmail, setProfEmail] = useState('');
   const [profPassword, setProfPassword] = useState('');
   const [profAvatar, setProfAvatar] = useState<string | null>(null);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
+  const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
+  const [tabAnimationDirection, setTabAnimationDirection] = useState(1);
+
+  const profileCloseTimerRef = useRef<number | null>(null);
+  const previousTabRef = useRef<ViewTab>(activeTab);
+  const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const welcomedUserIdRef = useRef<string | null>(null);
+  const notificationPreferenceHydratedRef = useRef(false);
+  const notificationsOverrideRef = useRef<boolean | null>(null);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
@@ -220,20 +254,127 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleChange = (event: MediaQueryListEvent) => setIsMobileViewport(event.matches);
+
+    setIsMobileViewport(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNotificationClock(Date.now());
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!auth.token) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      void refreshNotifications().catch(() => {
+        // keep local state as-is when polling fails
+      });
+    }, 60000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshNotifications().catch(() => {
+        // best effort refresh on return
+      });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [auth.token, refreshNotifications]);
+
+  useEffect(() => () => {
+    if (profileCloseTimerRef.current) {
+      window.clearTimeout(profileCloseTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
   useEffect(() => {
-    LS.saveNotifications(notifications);
-  }, [notifications]);
+    if (serverNotificationsEnabled === null) return;
+
+    if (notificationPreferenceHydratedRef.current) return;
+
+    notificationPreferenceHydratedRef.current = true;
+    setNotificationsEnabled(serverNotificationsEnabled);
+    LS.saveConfig({
+      ...LS.getConfig(),
+      notifications: serverNotificationsEnabled,
+    });
+  }, [serverNotificationsEnabled]);
 
   useEffect(() => {
-    if (activeTab !== 'notifications') return;
+    if (!auth.token) {
+      seenNotificationIdsRef.current.clear();
+      welcomedUserIdRef.current = null;
+      notificationPreferenceHydratedRef.current = false;
+      notificationsOverrideRef.current = null;
+      return;
+    }
 
-    setNotifications((prev) => prev.map((notification) => (
-      notification.read ? notification : { ...notification, read: true }
-    )));
-  }, [activeTab]);
+    if (!notificationsLoaded) return;
+
+    if (seenNotificationIdsRef.current.size === 0) {
+      notifications.forEach((notification) => {
+        seenNotificationIdsRef.current.add(notification.id);
+      });
+      return;
+    }
+
+    notifications.forEach((notification) => {
+      if (seenNotificationIdsRef.current.has(notification.id)) return;
+      seenNotificationIdsRef.current.add(notification.id);
+
+      if (!notification.read && notificationsEnabled) {
+        triggerToastNotification(notification.title, notification.message);
+      }
+    });
+  }, [auth.token, notifications, notificationsEnabled, notificationsLoaded, triggerToastNotification]);
+
+  useEffect(() => {
+    if (!auth.token || !auth.currentUser || welcomedUserIdRef.current === auth.currentUser.id) return;
+
+    welcomedUserIdRef.current = auth.currentUser.id;
+    void createNotification({
+      title: 'Bem-vindo!',
+      message: `Ola, ${auth.currentUser.name}!`,
+      tone: 'success',
+      target: { type: 'notifications' },
+      dedupeKey: `user:${auth.currentUser.id}:welcome:${format(new Date(), 'yyyy-MM-dd')}`,
+    }).then((result) => {
+      if (!result.created) return;
+      seenNotificationIdsRef.current.add(result.notification.id);
+      triggerToastNotification('Bem-vindo!', `Ola, ${auth.currentUser.name}!`);
+    }).catch(() => {
+      triggerToastNotification('Bem-vindo!', `Ola, ${auth.currentUser.name}!`);
+    });
+  }, [auth.currentUser, auth.token, createNotification, triggerToastNotification]);
+
+  useEffect(() => {
+    const unreadCount = notifications.reduce((count, notification) => (
+      notification.read ? count : count + 1
+    ), 0);
+
+    if (activeTab !== 'notifications' || unreadCount === 0 || !auth.token) return;
+
+    void markAllRead().catch(() => {
+      // best effort sync for central open
+    });
+  }, [activeTab, auth.token, markAllRead, notifications]);
 
   useEffect(() => {
     const syncPathname = () => setPathname(window.location.pathname);
@@ -242,22 +383,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const tabOrder: Record<ViewTab, number> = {
+      dashboard: 0,
+      tasks: 1,
+      notifications: 2,
+    };
+
+    const previousTab = previousTabRef.current;
+    if (previousTab !== activeTab) {
+      setTabAnimationDirection(tabOrder[activeTab] >= tabOrder[previousTab] ? 1 : -1);
+      previousTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     const onUnauthorized = () => {
       if (!auth.token) return;
-
-      if (notificationsEnabled) {
-        setNotifications((prev) => [
-          {
-            id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-            title: 'Sessão encerrada',
-            message: 'Sua sessão expirou. Faça login novamente.',
-            tone: 'warning',
-            read: false,
-            createdAt: new Date().toISOString(),
-          },
-          ...prev,
-        ].slice(0, 80));
-      }
 
       triggerToastOnly('Sessão encerrada', 'Sua sessão expirou. Faça login novamente.');
       void auth.logout();
@@ -265,7 +406,7 @@ export default function App() {
 
     window.addEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
-  }, [auth.logout, auth.token, notificationsEnabled, triggerToastOnly]);
+  }, [auth.logout, auth.token, triggerToastOnly]);
 
   const saveConfig = useCallback((patch: AppConfigPatch) => {
     const persistedConfig = LS.getConfig();
@@ -325,39 +466,49 @@ export default function App() {
     tone: NotificationTone = 'info',
     options?: EmitNotificationOptions
   ) => {
-    if (!notificationsEnabled) return;
+    const notificationsAllowed = notificationsOverrideRef.current ?? notificationsEnabled;
+    if (!notificationsAllowed) return;
 
-    let wasAdded = false;
+    const notificationToken = options?.token ?? auth.token;
 
-    setNotifications((prev) => {
-      if (options?.dedupeKey && prev.some((notification) => notification.dedupeKey === options.dedupeKey)) {
-        return prev;
+    if (!notificationToken) {
+      if (!options?.skipToast) {
+        if (options?.toastOnly) {
+          triggerToastOnly(title, message);
+        } else {
+          triggerToastNotification(title, message);
+        }
       }
-
-      wasAdded = true;
-
-      const entry: AppNotification = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        title,
-        message,
-        tone,
-        read: false,
-        createdAt: new Date().toISOString(),
-        target: options?.target,
-        dedupeKey: options?.dedupeKey,
-      };
-
-      return [entry, ...prev].slice(0, 80);
-    });
-
-    if (!wasAdded || options?.skipToast) return;
-
-    if (options?.toastOnly) {
-      triggerToastOnly(title, message);
-    } else {
-      triggerToastNotification(title, message);
+      return;
     }
-  }, [notificationsEnabled, triggerToastNotification, triggerToastOnly]);
+
+    void createNotification({
+      title,
+      message,
+      tone,
+      token: notificationToken,
+      target: options?.target,
+      dedupeKey: options?.dedupeKey,
+    }).then((result) => {
+      if (!result.created || options?.skipToast) return;
+
+      seenNotificationIdsRef.current.add(result.notification.id);
+
+      if (options?.toastOnly) {
+        triggerToastOnly(title, message);
+      } else {
+        triggerToastNotification(title, message);
+      }
+    }).catch(() => {
+      if (!options?.skipToast) {
+        if (options?.toastOnly) {
+          triggerToastOnly(title, message);
+        } else {
+          triggerToastNotification(title, message);
+        }
+      }
+    });
+  }, [auth.token, createNotification, notificationsEnabled, triggerToastNotification, triggerToastOnly]);
 
   const resetTaskForm = useCallback(() => {
     setFormTitle('');
@@ -594,26 +745,37 @@ export default function App() {
   );
 
   const markAllNotificationsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((notification) => (
-      notification.read ? notification : { ...notification, read: true }
-    )));
-  }, []);
+    void markAllRead().catch(() => {
+      triggerToastOnly('Nao foi possivel atualizar', 'Tente marcar as notificacoes como lidas novamente.');
+    });
+  }, [markAllRead, triggerToastOnly]);
 
   const clearNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
+    void clearAll().catch(() => {
+      triggerToastOnly('Nao foi possivel limpar', 'Tente limpar o historico novamente.');
+    });
+  }, [clearAll, triggerToastOnly]);
 
   const handleToggleNotifications = useCallback(async () => {
     const nextValue = !notificationsEnabled;
+    notificationsOverrideRef.current = nextValue;
     saveConfig({ notifications: nextValue });
 
-    if (nextValue) {
-      await requestPermission();
-      triggerToastOnly('Notificações ativadas', 'Novos avisos voltarão a aparecer na central e na interface.');
-    } else {
-      triggerToastOnly('Notificações desativadas', 'A central deixará de registrar novos avisos até você reativar.');
+    try {
+      await updateNotificationsEnabled(nextValue);
+
+      if (nextValue) {
+        await requestPermission();
+        triggerToastOnly('Notificações ativadas', 'Novos avisos voltarão a aparecer na central e na interface.');
+      } else {
+        triggerToastOnly('Notificações desativadas', 'A central deixará de registrar novos avisos até você reativar.');
+      }
+    } catch {
+      notificationsOverrideRef.current = !nextValue;
+      saveConfig({ notifications: !nextValue });
+      triggerToastOnly('Nao foi possivel salvar', 'A preferencia de notificacoes nao foi atualizada.');
     }
-  }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly]);
+  }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly, updateNotificationsEnabled]);
 
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -822,11 +984,16 @@ export default function App() {
   }, [deleteTask, deletingTaskIds, emitNotification, pendingDeleteTask, selectedTask]);
 
   const openProfile = useCallback(() => {
+    if (profileCloseTimerRef.current) {
+      window.clearTimeout(profileCloseTimerRef.current);
+      profileCloseTimerRef.current = null;
+    }
     setShowNotificationsInbox(false);
     setProfName(auth.currentUser?.name || '');
     setProfEmail(auth.currentUser?.email || '');
     setProfPassword('');
     setProfAvatar(auth.currentUser?.avatar || null);
+    setProfileSaveSuccess(false);
     setShowProfileDrawer(true);
   }, [auth.currentUser]);
 
@@ -836,17 +1003,25 @@ export default function App() {
 
     try {
       setIsProfileSubmitting(true);
-      await auth.updateProfile({
+      setProfileSaveSuccess(false);
+      const updatedProfile = await auth.updateProfile({
         name: profName,
         email: profEmail,
         password: profPassword || undefined,
         avatar: profAvatar,
       });
       emitNotification('Perfil atualizado!', 'Suas informações foram salvas.', 'success', {
+        token: updatedProfile.token ?? auth.token,
         target: { type: 'profile' },
       });
-      setShowProfileDrawer(false);
+      setProfileSaveSuccess(true);
+      profileCloseTimerRef.current = window.setTimeout(() => {
+        setShowProfileDrawer(false);
+        setProfileSaveSuccess(false);
+        profileCloseTimerRef.current = null;
+      }, 1000);
     } catch (err: unknown) {
+      setProfileSaveSuccess(false);
       emitNotification('Erro', err instanceof Error ? err.message : 'Falha ao atualizar perfil.', 'error');
     } finally {
       setIsProfileSubmitting(false);
@@ -868,10 +1043,10 @@ export default function App() {
       (summary, task) => {
         try {
           const dueDate = parseISO(task.dueDate);
-          if (isToday(dueDate)) {
-            summary.todayCount += 1;
-          } else if (isPast(dueDate)) {
+          if (isPast(dueDate)) {
             summary.overdueCount += 1;
+          } else if (isToday(dueDate)) {
+            summary.todayCount += 1;
           }
         } catch {
           // ignore malformed dates in summary
@@ -886,7 +1061,8 @@ export default function App() {
   const todayTasks = useMemo(() => {
     return pendingTasks.filter((task) => {
       try {
-        return isToday(parseISO(task.dueDate));
+        const dueDate = parseISO(task.dueDate);
+        return isToday(dueDate) && !isPast(dueDate);
       } catch {
         return false;
       }
@@ -907,29 +1083,65 @@ export default function App() {
     return pendingTasks.filter((task) => {
       try {
         const dueDate = parseISO(task.dueDate);
-        return isPast(dueDate) && !isToday(dueDate);
+        return isPast(dueDate);
       } catch {
         return false;
       }
     });
   }, [pendingTasks]);
 
+  const timedPendingTasks = useMemo(() => {
+    return pendingTasks.filter((task) => Boolean(getTaskTimeLabel(task.dueDate)));
+  }, [pendingTasks]);
+
   useEffect(() => {
     if (!notificationsEnabled || overdueTasks.length === 0) return;
 
+    const now = new Date(notificationClock);
+
     overdueTasks.forEach((task) => {
+      const dueDate = parseISO(task.dueDate);
+      const minutesOverdue = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / 60000));
+      const overdueBucket = Math.floor(minutesOverdue / OVERDUE_REMINDER_INTERVAL_MINUTES);
+
       emitNotification(
         'Lembrete atrasado',
-        `"${task.title}" passou do prazo e precisa da sua atenção.`,
+        overdueBucket === 0
+          ? `"${task.title}" passou do prazo e precisa da sua atenção.`
+          : `"${task.title}" continua atrasado há ${minutesOverdue} minuto${minutesOverdue === 1 ? '' : 's'}.`,
         'warning',
         {
           target: { type: 'task', taskId: task.id },
-          dedupeKey: `overdue:${task.id}`,
-          skipToast: true,
+          dedupeKey: `overdue:${task.id}:${overdueBucket}`,
         },
       );
     });
-  }, [emitNotification, notificationsEnabled, overdueTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, overdueTasks]);
+
+  useEffect(() => {
+    if (!notificationsEnabled || timedPendingTasks.length === 0) return;
+
+    const now = new Date(notificationClock);
+
+    timedPendingTasks.forEach((task) => {
+      const dueDate = parseISO(task.dueDate);
+      const minutesUntil = getMinutesDifference(dueDate, now);
+
+      if (minutesUntil < 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
+
+      emitNotification(
+        minutesUntil === 0
+          ? 'Lembrete para agora'
+          : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
+        `"${task.title}" está chegando. Falta pouco para o horário definido.`,
+        minutesUntil <= 5 ? 'warning' : 'info',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `upcoming:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+        },
+      );
+    });
+  }, [emitNotification, notificationClock, notificationsEnabled, timedPendingTasks]);
 
   useEffect(() => {
     if (!notificationsEnabled || todayTasks.length === 0) return;
@@ -947,7 +1159,7 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationsEnabled, todayTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, todayTasks]);
 
   useEffect(() => {
     if (!notificationsEnabled || tomorrowTasks.length === 0) return;
@@ -965,7 +1177,7 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationsEnabled, tomorrowTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, tomorrowTasks]);
 
   const openSettings = useCallback(() => {
     setShowNotificationsInbox(false);
@@ -973,6 +1185,11 @@ export default function App() {
   }, []);
 
   const closeProfileDrawer = useCallback(() => {
+    if (profileCloseTimerRef.current) {
+      window.clearTimeout(profileCloseTimerRef.current);
+      profileCloseTimerRef.current = null;
+    }
+    setProfileSaveSuccess(false);
     setShowProfileDrawer(false);
   }, []);
 
@@ -1005,9 +1222,11 @@ export default function App() {
   }, []);
 
   const handleOpenNotification = useCallback((notification: AppNotification) => {
-    setNotifications((prev) => prev.map((item) => (
-      item.id === notification.id ? { ...item, read: true } : item
-    )));
+    if (!notification.read) {
+      void markNotificationRead(notification.id, true).catch(() => {
+        // keep navigation responsive even if read sync fails
+      });
+    }
 
     setShowNotificationsInbox(false);
     setShowSettings(false);
@@ -1040,7 +1259,7 @@ export default function App() {
     }
 
     setActiveTab('notifications');
-  }, [openProfile, openSettings, tasks, triggerToastOnly]);
+  }, [markNotificationRead, openProfile, openSettings, tasks, triggerToastOnly]);
 
   const dismissToast = useCallback(() => {
     setToastMsg(null);
@@ -1050,6 +1269,122 @@ export default function App() {
     if (!pendingDeleteTask || deletingTaskIds.has(pendingDeleteTask.id)) return;
     setPendingDeleteTask(null);
   }, [deletingTaskIds, pendingDeleteTask]);
+
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tagName = target.tagName;
+      return (
+        target.isContentEditable ||
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        tagName === 'SELECT'
+      );
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isDeleteConfirming = Boolean(
+        pendingDeleteTask && deletingTaskIds.has(pendingDeleteTask.id),
+      );
+
+      if (event.key === 'Escape') {
+        if (pendingDeleteTask && !isDeleteConfirming) {
+          event.preventDefault();
+          cancelDelete();
+          return;
+        }
+
+        if (showTaskDetails) {
+          event.preventDefault();
+          closeTaskDetails();
+          return;
+        }
+
+        if (dashboardMetricDialog) {
+          event.preventDefault();
+          closeDashboardMetric();
+          return;
+        }
+
+        if (showTaskDrawer) {
+          event.preventDefault();
+          resetTaskForm();
+          return;
+        }
+
+        if (showProfileDrawer) {
+          event.preventDefault();
+          closeProfileDrawer();
+          return;
+        }
+
+        if (showSettings) {
+          event.preventDefault();
+          closeSettingsDrawer();
+          return;
+        }
+
+        if (showNotificationsInbox) {
+          event.preventDefault();
+          closeNotificationsInbox();
+        }
+      }
+
+      if (event.key.toLowerCase() === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const hasOverlayOpen =
+          showTaskDrawer ||
+          showTaskDetails ||
+          showProfileDrawer ||
+          showSettings ||
+          showNotificationsInbox ||
+          Boolean(pendingDeleteTask) ||
+          Boolean(dashboardMetricDialog);
+
+        if (!auth.currentUser || !auth.token || hasOverlayOpen || isTypingTarget(event.target)) return;
+
+        event.preventDefault();
+        openNewTask();
+      }
+
+      if (event.key === 'Enter' && pendingDeleteTask && !isDeleteConfirming) {
+        const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+        const activeElement = document.activeElement;
+
+        if (
+          dialog &&
+          activeElement instanceof HTMLElement &&
+          dialog.contains(activeElement) &&
+          activeElement.tagName !== 'TEXTAREA'
+        ) {
+          event.preventDefault();
+          void handleConfirmDelete();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    auth.currentUser,
+    auth.token,
+    cancelDelete,
+    closeDashboardMetric,
+    closeNotificationsInbox,
+    closeProfileDrawer,
+    closeSettingsDrawer,
+    closeTaskDetails,
+    dashboardMetricDialog,
+    deletingTaskIds,
+    handleConfirmDelete,
+    openNewTask,
+    pendingDeleteTask,
+    resetTaskForm,
+    showNotificationsInbox,
+    showProfileDrawer,
+    showSettings,
+    showTaskDetails,
+    showTaskDrawer,
+  ]);
 
   const navigateTo = useCallback((nextPath: string) => {
     if (window.location.pathname !== nextPath) {
@@ -1127,6 +1462,7 @@ export default function App() {
         filterCategory={filterCategory}
         setFilterCategory={setFilterCategory}
         pendingTasks={pendingTasks}
+        overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
         onLogout={auth.logout}
@@ -1228,52 +1564,60 @@ export default function App() {
             )}
           </div>
 
-          <AnimatePresence mode="wait">
-            {activeTab === 'dashboard' && (
-              <DashboardPage
-                tasks={tasks}
-                pendingTasks={pendingTasks}
-                completedTasks={completedTasks}
-                todayCount={pendingSummary.todayCount}
-                overdueCount={pendingSummary.overdueCount}
-                onViewAll={openTasksTab}
-                onOpenCompleted={() => openDashboardMetric('completed')}
-                onOpenToday={() => openDashboardMetric('today')}
-                onOpenOverdue={() => openDashboardMetric('overdue')}
-                onNewTask={openNewTask}
-                onApplyTemplate={openTaskFromTemplate}
-                onToggle={handleToggle}
-                onDelete={handleDelete}
-                onEdit={openTaskDetails}
-                deletingTaskIds={deletingTaskIds}
-                togglingTaskIds={togglingTaskIds}
-              />
-            )}
-            {activeTab === 'tasks' && (
-              <TasksPage
-                pendingTasks={pendingTasks}
-                completedTasks={completedTasks}
-                filterCategory={filterCategory}
-                setFilterCategory={setFilterCategory}
-                search={search}
-                setSearch={setSearch}
-                showCompleted={configShowCompleted}
-                onNewTask={openNewTask}
-                onToggle={handleToggle}
-                onDelete={handleDelete}
-                onEdit={openTaskDetails}
-                deletingTaskIds={deletingTaskIds}
-                togglingTaskIds={togglingTaskIds}
-              />
-            )}
-            {activeTab === 'notifications' && (
-              <NotificationsPage
-                notifications={notifications}
-                onMarkAllRead={markAllNotificationsRead}
-                onClearAll={clearNotifications}
-                onOpenNotification={handleOpenNotification}
-              />
-            )}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeTab}
+              initial={isMobileViewport ? { opacity: 0, x: tabAnimationDirection * 28 } : { opacity: 0, y: 10 }}
+              animate={isMobileViewport ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
+              exit={isMobileViewport ? { opacity: 0, x: tabAnimationDirection * -28 } : { opacity: 0, y: -10 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
+              {activeTab === 'dashboard' && (
+                <DashboardPage
+                  tasks={tasks}
+                  pendingTasks={pendingTasks}
+                  completedTasks={completedTasks}
+                  todayCount={pendingSummary.todayCount}
+                  overdueCount={pendingSummary.overdueCount}
+                  onViewAll={openTasksTab}
+                  onOpenCompleted={() => openDashboardMetric('completed')}
+                  onOpenToday={() => openDashboardMetric('today')}
+                  onOpenOverdue={() => openDashboardMetric('overdue')}
+                  onNewTask={openNewTask}
+                  onApplyTemplate={openTaskFromTemplate}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onEdit={openTaskDetails}
+                  deletingTaskIds={deletingTaskIds}
+                  togglingTaskIds={togglingTaskIds}
+                />
+              )}
+              {activeTab === 'tasks' && (
+                <TasksPage
+                  pendingTasks={pendingTasks}
+                  completedTasks={completedTasks}
+                  filterCategory={filterCategory}
+                  setFilterCategory={setFilterCategory}
+                  search={search}
+                  setSearch={setSearch}
+                  showCompleted={configShowCompleted}
+                  onNewTask={openNewTask}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onEdit={openTaskDetails}
+                  deletingTaskIds={deletingTaskIds}
+                  togglingTaskIds={togglingTaskIds}
+                />
+              )}
+              {activeTab === 'notifications' && (
+                <NotificationsPage
+                  notifications={notifications}
+                  onMarkAllRead={markAllNotificationsRead}
+                  onClearAll={clearNotifications}
+                  onOpenNotification={handleOpenNotification}
+                />
+              )}
+            </motion.div>
           </AnimatePresence>
         </div>
       </main>
@@ -1308,8 +1652,10 @@ export default function App() {
             )}
           >
             <ListTodo size={24} />
-            {pendingTasks.length > 0 && (
-              <span className="absolute right-3 top-3 h-2.5 w-2.5 rounded-full border-2 border-white bg-rose-500 dark:border-[#040814]" />
+            {pendingSummary.overdueCount > 0 && (
+              <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
+                {Math.min(pendingSummary.overdueCount, 99)}
+              </span>
             )}
           </button>
         </div>
@@ -1393,6 +1739,7 @@ export default function App() {
         onLogout={auth.logout}
         currentUser={auth.currentUser}
         isSubmitting={isProfileSubmitting}
+        saveSuccess={profileSaveSuccess}
         name={profName}
         setName={setProfName}
         email={profEmail}

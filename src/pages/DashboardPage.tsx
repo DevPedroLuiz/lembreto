@@ -79,7 +79,7 @@ function getTaskSortValue(task: Task): Date {
 function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
   try {
     const dueDate = parseISO(task.dueDate);
-    if (isPast(dueDate) && !isToday(dueDate)) return 'overdue';
+    if (isPast(dueDate)) return 'overdue';
     if (isToday(dueDate)) return 'today';
   } catch {
     // keep default

@@ -129,7 +129,7 @@ export function useAuth() {
       await persistTokenCookie(data.token);
     }
 
-    return data.user;
+    return data;
   };
 
   return {

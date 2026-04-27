@@ -7,10 +7,19 @@ interface SidebarItemProps {
   icon: React.ReactNode;
   label: string;
   badge?: number;
+  badgeTone?: 'default' | 'alert';
   testId?: string;
 }
 
-export function SidebarItem({ active, onClick, icon, label, badge, testId }: SidebarItemProps) {
+export function SidebarItem({
+  active,
+  onClick,
+  icon,
+  label,
+  badge,
+  badgeTone = 'default',
+  testId,
+}: SidebarItemProps) {
   return (
     <button
       onClick={onClick}
@@ -52,9 +61,13 @@ export function SidebarItem({ active, onClick, icon, label, badge, testId }: Sid
         <span
           className={cn(
             'inline-flex min-w-8 items-center justify-center rounded-full px-2.5 py-1 text-xs font-bold',
-            active
-              ? 'bg-white/15 text-white'
-              : 'bg-slate-200 text-slate-700 dark:bg-white/[0.08] dark:text-slate-200',
+            badgeTone === 'alert'
+              ? active
+                ? 'bg-rose-500/20 text-white'
+                : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'
+              : active
+                ? 'bg-white/15 text-white'
+                : 'bg-slate-200 text-slate-700 dark:bg-white/[0.08] dark:text-slate-200',
           )}
         >
           {badge}

@@ -1,7 +1,8 @@
 import React, { useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Camera, Loader2, LogOut, UserIcon as User, X } from 'lucide-react';
+import { Camera, CheckCircle2, Loader2, LogOut, UserIcon as User, X } from 'lucide-react';
 import type { User as UserType } from '../types';
+import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { MAX_AVATAR_BYTES, isAllowedAvatarMimeType } from '../../lib/avatar';
 
 export { User as UserIcon };
@@ -13,6 +14,7 @@ interface ProfileDrawerProps {
   onLogout: () => void;
   currentUser: UserType;
   isSubmitting?: boolean;
+  saveSuccess?: boolean;
   name: string;
   setName: (value: string) => void;
   email: string;
@@ -30,6 +32,7 @@ export function ProfileDrawer({
   onLogout,
   currentUser,
   isSubmitting = false,
+  saveSuccess = false,
   name,
   setName,
   email,
@@ -41,6 +44,12 @@ export function ProfileDrawer({
 }: ProfileDrawerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarError, setAvatarError] = React.useState('');
+  const swipe = useSwipeToClose({
+    enabled: open,
+    direction: 'right',
+    onClose,
+    locked: isSubmitting,
+  });
 
   const openAvatarPicker = () => {
     if (!isSubmitting) fileInputRef.current?.click();
@@ -92,14 +101,24 @@ export function ProfileDrawer({
 
           <motion.aside
             initial={{ x: '100%' }}
-            animate={{ x: 0 }}
+            animate={{ x: swipe.offset }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+            transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 220 }}
             className="fixed right-0 top-0 z-[101] flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white/96 shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
             role="dialog"
             aria-modal="true"
             aria-labelledby="profile-drawer-title"
           >
+            {swipe.mobileEnabled && (
+              <div
+                className="flex justify-center border-b border-slate-200/70 px-4 py-3 dark:border-white/10"
+                aria-hidden="true"
+                {...swipe.bind}
+              >
+                <span className="h-1.5 w-14 rounded-full bg-slate-300/90 dark:bg-slate-700" />
+              </div>
+            )}
+
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -125,6 +144,21 @@ export function ProfileDrawer({
 
             <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
               <form id="profile-form" onSubmit={onSubmit} className="space-y-6" aria-busy={isSubmitting}>
+                {saveSuccess && (
+                  <div
+                    data-testid="profile-save-success"
+                    className="flex items-center gap-3 rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+                  >
+                    <CheckCircle2 size={18} />
+                    <div>
+                      <p className="font-semibold">Perfil salvo com sucesso</p>
+                      <p className="mt-0.5 text-xs text-emerald-600/90 dark:text-emerald-300/90">
+                        As alterações já foram aplicadas à sua conta.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <section className="surface-soft p-5">
                   <div className="mb-5 flex items-center gap-4">
                     <div
@@ -173,9 +207,7 @@ export function ProfileDrawer({
                     </div>
 
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                        {currentUser.name}
-                      </h3>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{currentUser.name}</h3>
                       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{currentUser.email}</p>
                       <p className="mt-3 text-xs uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
                         Toque na imagem para alterar o avatar
@@ -258,13 +290,18 @@ export function ProfileDrawer({
                   form="profile-form"
                   type="submit"
                   data-testid="profile-submit-button"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || saveSuccess}
                   className="action-primary w-full rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
                       Salvando alterações...
+                    </>
+                  ) : saveSuccess ? (
+                    <>
+                      <CheckCircle2 size={18} />
+                      Salvo com sucesso
                     </>
                   ) : (
                     'Salvar perfil'

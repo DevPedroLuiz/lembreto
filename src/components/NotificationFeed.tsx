@@ -37,6 +37,13 @@ function getToneLabel(tone: AppNotification['tone']): string {
   return 'Informação';
 }
 
+function getActionLabel(notification: AppNotification): string {
+  if (notification.target?.type === 'task') return 'Abrir lembrete';
+  if (notification.target?.type === 'profile') return 'Abrir perfil';
+  if (notification.target?.type === 'settings') return 'Abrir configurações';
+  return 'Abrir';
+}
+
 export function NotificationFeed({
   notifications,
   onOpenNotification,
@@ -119,7 +126,7 @@ export function NotificationFeed({
                     }}
                     className="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
                   >
-                    Abrir
+                    {getActionLabel(notification)}
                     <ChevronRight size={14} />
                   </button>
                 )}

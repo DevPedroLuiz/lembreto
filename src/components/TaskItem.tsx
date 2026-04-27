@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Circle, Clock3, Loader2, Tag, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Clock3, Loader2, PencilLine, Tag, Trash2 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
@@ -54,7 +54,7 @@ function TaskItemComponent({
   };
 
   const date = safeDate();
-  const isOverdue = isPast(date) && !isToday(date) && task.status !== 'completed';
+  const isOverdue = isPast(date) && task.status !== 'completed';
   const isCompleted = task.status === 'completed';
   const isBusy = isDeleting || isToggling;
   const timeLabel = getTaskTimeLabel(task.dueDate);
@@ -144,16 +144,24 @@ function TaskItemComponent({
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3
-              className={cn(
-                'truncate text-base font-semibold',
-                isCompleted
-                  ? 'text-slate-400 line-through dark:text-slate-500'
-                  : 'text-slate-900 dark:text-white',
-              )}
-            >
-              {task.title}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3
+                className={cn(
+                  'truncate text-base font-semibold',
+                  isCompleted
+                    ? 'text-slate-400 line-through dark:text-slate-500'
+                    : 'text-slate-900 dark:text-white',
+                )}
+              >
+                {task.title}
+              </h3>
+              <span
+                aria-hidden="true"
+                className="icon-slot h-7 w-7 rounded-xl border border-slate-200 bg-white text-slate-400 transition-colors group-hover:border-blue-200 group-hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:text-blue-300"
+              >
+                <PencilLine size={14} />
+              </span>
+            </div>
             {!compact && task.description && (
               <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                 {task.description}

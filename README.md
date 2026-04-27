@@ -29,6 +29,7 @@ DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 JWT_SECRET=uma_chave_longa_e_aleatoria_com_pelo_menos_32_caracteres
 RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
+CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 ```
 
 Notas:
@@ -36,6 +37,7 @@ Notas:
 - `JWT_SECRET` e obrigatoria em desenvolvimento e producao.
 - `RESEND_API_KEY` e necessaria para envio real do email de recuperacao.
 - `APP_URL` deve apontar para a URL publica do app em producao.
+- `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
 ## Setup local
 
@@ -114,6 +116,43 @@ Secrets necessarios para deploy na Vercel:
 - `VERCEL_PROJECT_ID`
 
 Se quiser uma camada extra de seguranca, configure o ambiente `production` no GitHub com aprovacao obrigatoria antes do deploy.
+
+## Scheduler externo para lembretes
+
+O projeto inclui um scheduler externo em [`.github/workflows/reminder-scheduler.yml`](.github/workflows/reminder-scheduler.yml).
+Ele chama `GET /api/cron/notifications` a cada 15 minutos para:
+
+- avisar minutos antes do horario definido no lembrete;
+- repetir alertas de lembretes atrasados em intervalos regulares;
+- persistir esses avisos na central de notificacoes.
+
+Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento fica no GitHub Actions, nao no cron nativo da Vercel.
+
+### Secrets necessarios
+
+No GitHub Actions, configure:
+
+- `APP_URL`
+- `CRON_SECRET`
+
+Na Vercel, configure o mesmo `CRON_SECRET` nas variaveis de ambiente do projeto.
+
+Exemplo:
+
+- `APP_URL=https://seu-projeto.vercel.app`
+- `CRON_SECRET=<valor-aleatorio-longo>`
+
+### Como funciona
+
+O workflow roda nos minutos `7, 22, 37 e 52` de cada hora para evitar concentracao no topo da hora.
+Cada execucao faz uma chamada autenticada para:
+
+```text
+GET {APP_URL}/api/cron/notifications
+Authorization: Bearer {CRON_SECRET}
+```
+
+Se quiser testar manualmente, abra a aba `Actions` no GitHub e rode `Reminder Scheduler` com `workflow_dispatch`.
 
 ## Operacao
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Lock, Mail, ShieldCheck, Target, User as UserIcon } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
 import { LS } from '../lib/storage';
@@ -6,6 +6,51 @@ import { LS } from '../lib/storage';
 interface AuthPageProps {
   auth: ReturnType<typeof useAuth>;
   toastNotify: (title: string, message: string) => void;
+}
+
+type PasswordStrength = 'weak' | 'medium' | 'strong';
+
+function getPasswordStrength(password: string): {
+  level: PasswordStrength;
+  label: string;
+  width: string;
+  tone: string;
+  helper: string;
+} {
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  if (score >= 5) {
+    return {
+      level: 'strong',
+      label: 'Senha forte',
+      width: '100%',
+      tone: 'bg-emerald-500',
+      helper: 'Boa combinação de tamanho e variedade de caracteres.',
+    };
+  }
+
+  if (score >= 3) {
+    return {
+      level: 'medium',
+      label: 'Senha média',
+      width: '68%',
+      tone: 'bg-amber-500',
+      helper: 'Já está melhor. Vale adicionar mais variedade para ficar mais segura.',
+    };
+  }
+
+  return {
+    level: 'weak',
+    label: 'Senha fraca',
+    width: '34%',
+    tone: 'bg-rose-500',
+    helper: 'Use pelo menos 8 caracteres com letras maiúsculas, números e símbolos.',
+  };
 }
 
 export function AuthPage({ auth, toastNotify }: AuthPageProps) {
@@ -20,6 +65,11 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const [recoverEmail, setRecoverEmail] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(authPassword),
+    [authPassword],
+  );
 
   useEffect(() => {
     const rememberedEmail = LS.loadRememberedEmail();
@@ -319,6 +369,28 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       className="field-control field-control-with-icon"
                     />
                   </div>
+
+                  {!isLogin && authPassword.trim().length > 0 && (
+                    <div data-testid="password-strength-indicator" className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {passwordStrength.label}
+                        </p>
+                        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                          Segurança da senha
+                        </span>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                        <div
+                          className={`h-full rounded-full transition-all ${passwordStrength.tone}`}
+                          style={{ width: passwordStrength.width }}
+                        />
+                      </div>
+                      <p className="mt-3 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                        {passwordStrength.helper}
+                      </p>
+                    </div>
+                  )}
 
                   {isLogin && (
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

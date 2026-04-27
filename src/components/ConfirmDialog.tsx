@@ -77,6 +77,7 @@ export function ConfirmDialog({
               <button
                 type="button"
                 data-testid="confirm-dialog-confirm"
+                autoFocus
                 disabled={isConfirming}
                 onClick={onConfirm}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-rose-700 disabled:cursor-wait disabled:opacity-70"

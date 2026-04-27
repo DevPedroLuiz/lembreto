@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
+import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { getRecurrenceSuggestion, type RecurrenceMode, type RecurrenceSuggestion } from '../lib/taskRecurrence';
 import type { Priority, Task } from '../types';
 import { CATEGORIES } from '../types';
@@ -259,12 +260,16 @@ export function TaskDrawer({
 }: TaskDrawerProps) {
   const isEditing = Boolean(editingTask);
   const [activeTab, setActiveTab] = React.useState<TaskDrawerTab>('details');
+  const swipe = useSwipeToClose({
+    enabled: open,
+    direction: 'down',
+    onClose,
+    locked: isSubmitting,
+  });
 
   React.useEffect(() => {
-    if (open) {
-      setActiveTab('details');
-    }
-  }, [open, editingTask]);
+    if (open) setActiveTab('details');
+  }, [editingTask, open]);
 
   const titleCount = title.trim().length;
   const summaryDue = date || 'Defina a data';
@@ -298,14 +303,24 @@ export function TaskDrawer({
           <div className="fixed inset-0 z-[101] flex items-center justify-center p-3 sm:p-5">
             <motion.div
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
+              animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
-              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
               className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[34px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-drawer-title"
             >
+              {swipe.mobileEnabled && (
+                <div
+                  className="flex justify-center border-b border-slate-200/70 px-4 py-3 dark:border-white/10"
+                  aria-hidden="true"
+                  {...swipe.bind}
+                >
+                  <span className="h-1.5 w-14 rounded-full bg-slate-300/90 dark:bg-slate-700" />
+                </div>
+              )}
+
               <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-5 py-5 text-white dark:border-white/10 md:px-7">
                 <div className="flex items-start justify-between gap-4">
                   <div className="max-w-3xl">
@@ -610,7 +625,9 @@ export function TaskDrawer({
                                     className="text-sm font-semibold text-slate-900 dark:text-white"
                                   >
                                     {recurrencePreviewCount > 0
-                                      ? `${recurrencePreviewCount} lembrete${recurrencePreviewCount === 1 ? '' : 's'} será${recurrencePreviewCount === 1 ? '' : 'ão'} criado${recurrencePreviewCount === 1 ? '' : 's'}`
+                                      ? recurrencePreviewCount === 1
+                                        ? '1 lembrete será criado'
+                                        : `${recurrencePreviewCount} lembretes serão criados`
                                       : 'Defina o intervalo para gerar seus lembretes'}
                                   </p>
                                   <p
