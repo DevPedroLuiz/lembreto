@@ -1,7 +1,13 @@
 import sql from '../../api/_db';
 import { buildTokenJti } from '../../lib/auth';
+import {
+  createNotification,
+  generateScheduledNotifications,
+  type NotificationTarget,
+} from '../../lib/notifications';
 import { verifyToken } from '../../lib/jwt';
 import { createPasswordResetToken } from '../../lib/password-reset';
+import type { NotificationTone } from '../../lib/contracts';
 
 export interface E2ETestUser {
   name: string;
@@ -141,4 +147,26 @@ export async function blacklistToken(token: string): Promise<void> {
     )
     ON CONFLICT (token_jti) DO NOTHING
   `;
+}
+
+export async function seedNotificationForUser(
+  email: string,
+  input: {
+    title: string;
+    message: string;
+    tone: NotificationTone;
+    target?: NotificationTarget | { type: 'notifications' | 'profile' | 'settings' };
+    dedupeKey?: string;
+  },
+): Promise<void> {
+  const userId = await getUserIdByEmail(email);
+
+  await createNotification(sql, {
+    userId,
+    ...input,
+  });
+}
+
+export async function runScheduledNotifications(): Promise<void> {
+  await generateScheduledNotifications(sql);
 }

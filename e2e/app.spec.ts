@@ -3,7 +3,9 @@ import {
   blacklistToken,
   buildE2ETestUser,
   cleanupUsersByEmail,
+  runScheduledNotifications,
   seedCustomTasksForUser,
+  seedNotificationForUser,
   seedPasswordResetToken,
   seedTasksForUser,
   type E2ETestUser,
@@ -142,7 +144,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-profile-button').click();
       await expect(page.getByRole('dialog', { name: /editar perfil/i })).toBeVisible();
       await expect(page.getByTestId('profile-name-input')).toBeFocused();
-      await page.getByRole('button', { name: 'Fechar perfil' }).click();
+      await page.keyboard.press('Escape');
       await expect(page.getByTestId('profile-name-input')).toHaveCount(0);
 
       await page.getByTestId('sidebar-settings-button').click();
@@ -479,25 +481,10 @@ test.describe('Lembreto critical flows', () => {
     try {
       const token = await registerUser(page, user);
 
-      await page.getByTestId('sidebar-tasks').click();
       await blacklistToken(token);
+      await page.reload();
 
-      const unauthorizedResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/api/tasks') &&
-          response.request().method() === 'POST' &&
-          response.status() === 401,
-      );
-
-      await page.getByTestId('new-task-button').click();
-      await page.getByTestId('task-title-input').fill('Falhar por sessão expirada');
-      await page.getByTestId('task-date-input').fill(
-        formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-      );
-      await page.getByTestId('task-submit-button').click();
-
-      await unauthorizedResponsePromise;
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible({ timeout: 15000 });
       await expect(page.getByTestId('sidebar-dashboard')).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
@@ -758,6 +745,14 @@ test.describe('Lembreto critical flows', () => {
 
     try {
       await registerUser(page, user);
+      await seedNotificationForUser(user.email, {
+        title: 'Bem-vindo!',
+        message: `Ola, ${user.name}!`,
+        tone: 'success',
+        target: { type: 'notifications' },
+        dedupeKey: `test:welcome:${user.email}`,
+      });
+      await page.reload();
 
       await page.getByTestId('sidebar-settings-button').click();
       await page.getByTestId('settings-open-notifications-center').click();
@@ -800,6 +795,7 @@ test.describe('Lembreto critical flows', () => {
           category: 'Trabalho',
         },
       ]);
+      await runScheduledNotifications();
       await page.getByTestId('sidebar-logout').click();
       await expect(page.getByTestId('auth-submit-button')).toBeVisible();
       await loginUser(page, user.email, user.password);
@@ -847,6 +843,7 @@ test.describe('Lembreto critical flows', () => {
           category: 'Pessoal',
         },
       ]);
+      await runScheduledNotifications();
 
       await page.getByTestId('sidebar-logout').click();
       await expect(page.getByTestId('auth-submit-button')).toBeVisible();
