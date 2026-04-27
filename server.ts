@@ -5,6 +5,8 @@ import { createServer as createViteServer } from 'vite';
 import { neon } from '@neondatabase/serverless';
 import { logError, logInfo } from './lib/logger.js';
 import {
+  type HandlerContext,
+  type HandlerResult,
   buildHandlerRequest,
   sendHandlerResult,
 } from './lib/handlers/core.js';
@@ -55,7 +57,7 @@ function withRequestMeta(req: express.Request, res: express.Response, next: expr
 }
 
 function createHandlerRunner(defaultAppUrl?: string) {
-  return (handler: (context: { sql: any; request: ReturnType<typeof buildHandlerRequest>; defaultAppUrl?: string }) => Promise<any>) =>
+  return (handler: (context: HandlerContext) => Promise<HandlerResult>) =>
     async (req: express.Request, res: express.Response) => {
       const result = await handler({
         sql,

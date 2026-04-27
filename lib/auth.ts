@@ -1,4 +1,5 @@
 import { extractBearerToken, verifyToken, type JwtPayload } from './jwt.js';
+import type { SqlClient } from './handlers/core.js';
 
 export interface SafeUser {
   id: string;
@@ -27,7 +28,7 @@ export function buildTokenJti(payload: Pick<JwtPayload, 'sub' | 'iat'>): string 
 }
 
 export async function isTokenBlacklisted(
-  sql: any,
+  sql: SqlClient,
   payload: Pick<JwtPayload, 'sub' | 'iat'>,
 ): Promise<boolean> {
   const rows = await sql`
@@ -40,18 +41,18 @@ export async function isTokenBlacklisted(
   return rows.length > 0;
 }
 
-export async function getSafeUserById(sql: any, userId: string): Promise<SafeUser | null> {
+export async function getSafeUserById(sql: SqlClient, userId: string): Promise<SafeUser | null> {
   const rows = await sql`
     SELECT id, name, email, avatar
     FROM users
     WHERE id = ${userId}
   `;
 
-  return (rows[0] as SafeUser | undefined) ?? null;
+  return (rows[0] as unknown as SafeUser | undefined) ?? null;
 }
 
 export async function requireAuthFromToken(
-  sql: any,
+  sql: SqlClient,
   token: string,
   options?: { checkBlacklist?: boolean },
 ): Promise<{ payload: JwtPayload; user: SafeUser; token: string }> {
@@ -75,7 +76,7 @@ export async function requireAuthFromToken(
 }
 
 export async function requireAuthFromAuthorizationHeader(
-  sql: any,
+  sql: SqlClient,
   authHeader: string | undefined,
   options?: { checkBlacklist?: boolean },
 ): Promise<{ payload: JwtPayload; user: SafeUser; token: string }> {

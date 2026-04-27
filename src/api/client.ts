@@ -20,7 +20,18 @@ function emitUnauthorizedIfNeeded(status: number, token?: string) {
 }
 
 async function parseJsonSafe(res: Response) {
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => ({})) as Promise<unknown>;
+}
+
+function getApiErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === 'object' && data !== null && 'error' in data) {
+    const error = (data as { error?: unknown }).error;
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return error;
+    }
+  }
+
+  return fallback;
 }
 
 export async function apiPost<T = unknown>(
@@ -35,7 +46,7 @@ export async function apiPost<T = unknown>(
   });
   const data = await parseJsonSafe(res);
   emitUnauthorizedIfNeeded(res.status, token);
-  if (!res.ok) throw new ApiError((data as any).error || 'Erro desconhecido', res.status);
+  if (!res.ok) throw new ApiError(getApiErrorMessage(data, 'Erro desconhecido'), res.status);
   return data as T;
 }
 
@@ -51,7 +62,7 @@ export async function apiPut<T = unknown>(
   });
   const data = await parseJsonSafe(res);
   emitUnauthorizedIfNeeded(res.status, token);
-  if (!res.ok) throw new ApiError((data as any).error || 'Erro desconhecido', res.status);
+  if (!res.ok) throw new ApiError(getApiErrorMessage(data, 'Erro desconhecido'), res.status);
   return data as T;
 }
 
@@ -62,7 +73,7 @@ export async function apiGet<T = unknown>(
   const res = await fetch(path, { headers: buildHeaders(token) });
   const data = await parseJsonSafe(res);
   emitUnauthorizedIfNeeded(res.status, token);
-  if (!res.ok) throw new ApiError((data as any).error || 'Erro desconhecido', res.status);
+  if (!res.ok) throw new ApiError(getApiErrorMessage(data, 'Erro desconhecido'), res.status);
   return data as T;
 }
 
@@ -73,7 +84,7 @@ export async function apiDelete(path: string, token: string): Promise<void> {
   });
   emitUnauthorizedIfNeeded(res.status, token);
   if (res.status !== 204 && !res.ok) {
-    const d = await parseJsonSafe(res);
-    throw new ApiError((d as any).error || 'Erro ao deletar', res.status);
+    const data = await parseJsonSafe(res);
+    throw new ApiError(getApiErrorMessage(data, 'Erro ao deletar'), res.status);
   }
 }

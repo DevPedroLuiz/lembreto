@@ -1,3 +1,10 @@
+export interface SqlClient {
+  (
+    strings: TemplateStringsArray,
+    ...params: unknown[]
+  ): Promise<Array<Record<string, unknown>>>;
+}
+
 export interface HandlerRequest {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
@@ -9,7 +16,7 @@ export interface HandlerRequest {
 }
 
 export interface HandlerContext {
-  sql: any;
+  sql: SqlClient;
   request: HandlerRequest;
   defaultAppUrl?: string;
 }
@@ -18,6 +25,26 @@ export interface HandlerResult {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
+}
+
+interface ResponseLike {
+  setHeader: (name: string, value: string) => void;
+  status: (status: number) => {
+    send: (body: string) => unknown;
+    end: () => unknown;
+    json: (body: unknown) => unknown;
+  };
+}
+
+interface RequestLike {
+  method?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  body?: unknown;
+  query?: Record<string, unknown>;
+  params?: Record<string, string | undefined>;
+  ip?: string;
+  socket?: { remoteAddress?: string };
+  requestId?: string;
 }
 
 export function json(
@@ -36,7 +63,7 @@ export function empty(
 }
 
 export function methodNotAllowed(): HandlerResult {
-  return json(405, { error: 'Metodo nao permitido' });
+  return json(405, { error: 'Método não permitido' });
 }
 
 export function getRequestIp(request: HandlerRequest): string {
@@ -58,7 +85,7 @@ export function getRequestMeta(
   };
 }
 
-export function sendHandlerResult(res: any, result: HandlerResult) {
+export function sendHandlerResult(res: ResponseLike, result: HandlerResult) {
   if (result.headers) {
     for (const [name, value] of Object.entries(result.headers)) {
       res.setHeader(name, value);
@@ -76,7 +103,7 @@ export function sendHandlerResult(res: any, result: HandlerResult) {
   return res.status(result.status).json(result.body);
 }
 
-export function buildHandlerRequest(req: any): HandlerRequest {
+export function buildHandlerRequest(req: RequestLike): HandlerRequest {
   return {
     method: req.method,
     headers: req.headers ?? {},

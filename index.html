@@ -10,6 +10,25 @@
 
     <!-- PWA -->
     <meta name="theme-color" content="#040814" />
+    <script>
+      (() => {
+        try {
+          const rawConfig = localStorage.getItem('tm_config');
+          const parsedConfig = rawConfig ? JSON.parse(rawConfig) : {};
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const darkMode = typeof parsedConfig.darkMode === 'boolean'
+            ? parsedConfig.darkMode
+            : prefersDark;
+
+          document.documentElement.classList.toggle('dark', darkMode);
+        } catch {
+          document.documentElement.classList.toggle(
+            'dark',
+            window.matchMedia('(prefers-color-scheme: dark)').matches,
+          );
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

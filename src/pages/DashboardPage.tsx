@@ -4,14 +4,18 @@ import {
   Bell,
   CalendarDays,
   CheckCircle2,
+  Clock3,
   ListTodo,
   Plus,
   Sparkles,
   Target,
 } from 'lucide-react';
+import { compareAsc, format, isPast, isToday, parseISO } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { MetricCard } from '../components/MetricCard';
 import { TaskItem } from '../components/TaskItem';
+import { getTaskTimeLabel } from '../lib/taskDueDate';
 import type { Priority, Task } from '../types';
 
 export interface QuickStartTemplate {
@@ -58,6 +62,32 @@ const QUICK_START_TEMPLATES: QuickStartTemplate[] = [
   },
 ];
 
+const PRIORITY_WEIGHT: Record<Priority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+function getTaskSortValue(task: Task): Date {
+  try {
+    return parseISO(task.dueDate);
+  } catch {
+    return new Date(8640000000000000);
+  }
+}
+
+function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
+  try {
+    const dueDate = parseISO(task.dueDate);
+    if (isPast(dueDate) && !isToday(dueDate)) return 'overdue';
+    if (isToday(dueDate)) return 'today';
+  } catch {
+    // keep default
+  }
+
+  return 'upcoming';
+}
+
 interface DashboardPageProps {
   tasks: Task[];
   pendingTasks: Task[];
@@ -100,6 +130,37 @@ export function DashboardPage({
     : Math.round((completedTasks.length / tasks.length) * 100);
 
   const nextTasks = pendingTasks.slice(0, 5);
+  const sortedPendingTasks = [...pendingTasks].sort((left, right) => {
+    const dateOrder = compareAsc(getTaskSortValue(left), getTaskSortValue(right));
+    if (dateOrder !== 0) return dateOrder;
+    return PRIORITY_WEIGHT[left.priority] - PRIORITY_WEIGHT[right.priority];
+  });
+  const assistantTask = sortedPendingTasks[0] ?? null;
+  const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
+  const assistantDueLabel = assistantTask
+    ? format(getTaskSortValue(assistantTask), "dd 'de' MMMM", { locale: ptBR })
+    : '';
+  const assistantTimeLabel = assistantTask ? getTaskTimeLabel(assistantTask.dueDate) : null;
+  const assistantPrimaryCopy = assistantContext === 'overdue'
+    ? 'Seu próximo passo é recuperar este atraso.'
+    : assistantContext === 'today'
+      ? 'Este é o lembrete que mais merece atenção hoje.'
+      : 'Este é o próximo compromisso que vale manter no radar.';
+  const assistantSecondaryCopy = assistantContext === 'overdue'
+    ? 'Abra o lembrete, ajuste o prazo ou conclua o que já está fora da janela ideal.'
+    : assistantContext === 'today'
+      ? 'Tudo indica que esse é o item com melhor retorno para avançar hoje com clareza.'
+      : 'Mantendo esse lembrete sob controle, sua agenda continua leve e previsível.';
+  const assistantContextAction = assistantContext === 'overdue'
+    ? onOpenOverdue
+    : assistantContext === 'today'
+      ? onOpenToday
+      : onViewAll;
+  const assistantContextLabel = assistantContext === 'overdue'
+    ? 'Ver atrasados'
+    : assistantContext === 'today'
+      ? 'Ver agenda de hoje'
+      : 'Ver agenda completa';
 
   return (
     <motion.div
@@ -219,6 +280,112 @@ export function DashboardPage({
           </button>
         </aside>
       </section>
+
+      {assistantTask && (
+        <section
+          data-testid="assistant-focus-card"
+          className="surface-panel overflow-hidden p-6 md:p-7"
+        >
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-3xl">
+              <span className="section-eyebrow">
+                <span className="icon-slot h-4 w-4">
+                  <Sparkles size={14} />
+                </span>
+                Assistente do dia
+              </span>
+              <h4 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-[2rem]">
+                {assistantPrimaryCopy}
+              </h4>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+                {assistantSecondaryCopy}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                data-testid="assistant-open-focus"
+                onClick={() => onEdit(assistantTask)}
+                className="action-primary min-h-[52px] whitespace-nowrap px-5"
+              >
+                <span className="icon-slot h-[18px] w-[18px]">
+                  <Target size={18} />
+                </span>
+                Abrir lembrete
+              </button>
+              <button
+                type="button"
+                data-testid="assistant-open-context"
+                onClick={assistantContextAction}
+                className="action-secondary min-h-[52px] whitespace-nowrap px-5"
+              >
+                <span className="icon-slot h-[18px] w-[18px]">
+                  <ArrowRight size={18} />
+                </span>
+                {assistantContextLabel}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,0.55fr))]">
+            <div className="rounded-[28px] border border-slate-200/80 bg-slate-50/70 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                    Lembrete em foco
+                  </p>
+                  <h5 className="mt-3 text-lg font-semibold text-slate-950 dark:text-white">
+                    {assistantTask.title}
+                  </h5>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    {assistantTask.description?.trim() || 'Sem detalhes extras, pronto para uma ação objetiva.'}
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+                  {assistantContext === 'overdue' ? 'Atrasado' : assistantContext === 'today' ? 'Hoje' : 'Próximo'}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                <CalendarDays size={18} />
+              </div>
+              <p className="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                Prazo
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">{assistantDueLabel}</p>
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="icon-slot h-10 w-10 rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                <Clock3 size={18} />
+              </div>
+              <p className="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                Horário
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">{assistantTimeLabel || 'Dia todo'}</p>
+            </div>
+
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="icon-slot h-10 w-10 rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                <Target size={18} />
+              </div>
+              <p className="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                Prioridade
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">
+                {assistantTask.priority === 'high'
+                  ? 'Alta'
+                  : assistantTask.priority === 'medium'
+                    ? 'Média'
+                    : 'Baixa'}
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
         <div className="surface-panel p-5 md:p-6">

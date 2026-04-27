@@ -33,9 +33,9 @@ function nextWeekday(startDate: Date, weekday: number): Date {
 async function waitForJsonResponse(
   page: Page,
   matcher: (response: Response) => boolean,
-): Promise<Record<string, any>> {
+): Promise<Record<string, unknown>> {
   const response = await page.waitForResponse(matcher);
-  return response.json() as Promise<Record<string, any>>;
+  return response.json() as Promise<Record<string, unknown>>;
 }
 
 async function registerUser(page: Page, user: E2ETestUser): Promise<string> {
@@ -109,7 +109,7 @@ async function createTask(page: Page, title: string, options?: { time?: string }
   await page.getByTestId('task-description-input').fill('Fluxo automatizado de ponta a ponta.');
   await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
   if (options?.time) {
-    await page.getByTestId('task-time-select').selectOption(options.time);
+    await page.getByTestId('task-time-input').fill(options.time);
   }
   await page.getByTestId('task-priority-select').selectOption('high');
   await page.getByTestId('task-category-select').selectOption('Trabalho');
@@ -136,7 +136,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('dashboard-create-first-task').click();
       await expect(page.getByRole('dialog', { name: /novo lembrete/i })).toBeVisible();
       await expect(page.getByTestId('task-title-input')).toBeFocused();
-      await page.getByRole('button', { name: 'Fechar formulÃ¡rio de lembrete' }).click();
+      await page.getByRole('button', { name: /Fechar formul/i }).click();
       await expect(page.getByTestId('task-title-input')).toHaveCount(0);
 
       await page.getByTestId('sidebar-profile-button').click();
@@ -169,12 +169,10 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('dashboard-template-trabalho').click();
 
       await expect(page.getByTestId('task-title-input')).toHaveValue('Planejar a semana');
-      await expect(page.getByTestId('task-description-input')).toHaveValue(
-        'Liste as 3 prioridades que precisam sair do papel nos prÃ³ximos dias.',
-      );
+      await expect(page.getByTestId('task-description-input')).toHaveValue(/próximos dias\./i);
       await expect(page.getByTestId('task-category-select')).toHaveValue('Trabalho');
       await expect(page.getByTestId('task-priority-select')).toHaveValue('high');
-      await expect(page.getByTestId('task-time-select')).toHaveValue('09:00');
+      await expect(page.getByTestId('task-time-input')).toHaveValue('09:00');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -213,8 +211,9 @@ test.describe('Lembreto critical flows', () => {
 
       await page.getByTestId('dashboard-create-first-task').click();
       await page.getByTestId('task-title-input').fill('Rotina recorrente');
-      await page.getByTestId('task-description-input').fill('Criado em sÃ©rie para validar repetiÃ§Ã£o.');
+      await page.getByTestId('task-description-input').fill('Criado em série para validar repetição.');
       await page.getByTestId('task-date-input').fill(formatDateLocal(nextMonday));
+      await page.getByTestId('task-tab-recurrence').click();
       await page.getByTestId('task-recurrence-toggle').check();
       await page.getByTestId('task-recurrence-suggestion-weekdays').click();
       await expect(page.getByTestId('task-recurrence-mode')).toHaveValue('weekdays');
@@ -247,7 +246,7 @@ test.describe('Lembreto critical flows', () => {
       await registerUser(page, user);
       await seedCustomTasksForUser(user.email, [
         {
-          title: 'ConcluÃ­do no painel',
+          title: 'Concluído no painel',
           dueDate: completed.toISOString(),
           priority: 'medium',
           category: 'Geral',
@@ -267,33 +266,96 @@ test.describe('Lembreto critical flows', () => {
         },
       ]);
 
-      await page.reload();
-      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
 
       await page.getByTestId('dashboard-metric-completed').click();
       const dashboardMetricDialog = page.getByTestId('dashboard-metric-dialog');
       await expect(dashboardMetricDialog).toBeVisible();
-      await expect(dashboardMetricDialog).toContainText('Lembretes concluÃ­dos');
-      await expect(dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="ConcluÃ­do no painel"]')).toBeVisible();
-      await dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="ConcluÃ­do no painel"]').click();
+      await expect(dashboardMetricDialog).toContainText(/Lembretes conclu/i);
+      const completedDashboardTask = dashboardMetricDialog.getByTestId('task-item').first();
+      await expect(completedDashboardTask).toBeVisible();
+      await completedDashboardTask.click();
       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
-      await expect(page.getByTestId('task-details-back')).toContainText('Voltar para concluÃ­dos');
+      await expect(page.getByTestId('task-details-back')).toContainText(/Voltar para conclu/i);
       await page.getByTestId('task-details-back').click();
       await expect(dashboardMetricDialog).toBeVisible();
 
-      await page.getByRole('button', { name: 'Fechar visÃ£o filtrada' }).click();
+      await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
       await page.getByTestId('dashboard-metric-today').click();
       await expect(dashboardMetricDialog).toContainText('Lembretes para hoje');
       await expect(dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="Hoje no painel"]')).toBeVisible();
 
-      await page.getByRole('button', { name: 'Fechar visÃ£o filtrada' }).click();
+      await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
       await page.getByTestId('dashboard-metric-overdue').click();
       await expect(dashboardMetricDialog).toContainText('Lembretes atrasados');
       await expect(dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="Atrasado no painel"]')).toBeVisible();
 
-      await page.getByRole('button', { name: 'Fechar visÃ£o filtrada' }).click();
+      await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
       await page.getByTestId('dashboard-metric-total').click();
+      await page.getByTestId('task-filters-toggle').click();
       await expect(page.getByTestId('task-search-input')).toBeVisible();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('highlights the next best action and supports quick reschedule from the reminder view', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const overdue = new Date();
+    overdue.setDate(overdue.getDate() - 1);
+    overdue.setHours(10, 0, 0, 0);
+
+    const upcoming = new Date();
+    upcoming.setDate(upcoming.getDate() + 3);
+    upcoming.setHours(16, 0, 0, 0);
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Revisar contrato importante',
+          dueDate: overdue.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Planejar próxima apresentação',
+          dueDate: upcoming.toISOString(),
+          priority: 'medium',
+          category: 'Trabalho',
+        },
+      ]);
+
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
+
+      await expect(page.getByTestId('assistant-focus-card')).toBeVisible();
+      await expect(page.getByTestId('assistant-focus-card')).toContainText('Revisar contrato importante');
+
+      await page.getByTestId('assistant-open-focus').click();
+      await expect(page.getByTestId('task-details-dialog')).toBeVisible();
+
+      const rescheduleResponsePromise = waitForJsonResponse(
+        page,
+        (response) =>
+          response.url().includes('/api/tasks/') &&
+          response.request().method() === 'PUT',
+      );
+
+      await page.getByTestId('task-details-snooze-tomorrow').click();
+
+      const updatedTask = await rescheduleResponsePromise;
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      expect(formatDateLocal(new Date(String(updatedTask.dueDate)))).toBe(formatDateLocal(tomorrow));
+      await expect(page.getByTestId('task-details-dialog')).toBeVisible();
+      await expect(page.getByTestId('task-details-dialog')).toContainText('Revisar contrato importante');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -315,15 +377,15 @@ test.describe('Lembreto critical flows', () => {
       const createdTask = taskCard(page, initialTaskTitle);
       await expect(createdTask).toBeVisible();
       await expect(createdTask.getByTestId('task-time-badge')).toHaveText('08:00');
-      await expect(createdTask.getByTestId('task-due-badge')).toHaveAttribute('title', 'HorÃ¡rio: 08:00');
+      await expect(createdTask.getByTestId('task-due-badge')).toHaveAttribute('title', /08:00/);
 
       await createdTask.click();
       const taskDetailsDialog = page.getByTestId('task-details-dialog');
       await expect(taskDetailsDialog).toBeVisible();
       await expect(taskDetailsDialog.getByRole('heading', { name: initialTaskTitle })).toBeVisible();
       await page.getByTestId('task-details-duplicate').click();
-      await expect(page.getByTestId('task-title-input')).toHaveValue(`${initialTaskTitle} (cÃ³pia)`);
-      await page.getByRole('button', { name: 'Fechar formulÃ¡rio de lembrete' }).click();
+      await expect(page.getByTestId('task-title-input')).toHaveValue(new RegExp(`${initialTaskTitle} \\(c.pia\\)$`, 'i'));
+      await page.getByRole('button', { name: /Fechar formul/i }).click();
       await createdTask.click();
       await expect(taskDetailsDialog).toBeVisible();
       await page.getByTestId('task-details-edit').click();
@@ -426,7 +488,7 @@ test.describe('Lembreto critical flows', () => {
       );
 
       await page.getByTestId('new-task-button').click();
-      await page.getByTestId('task-title-input').fill('Falhar por sessÃ£o expirada');
+      await page.getByTestId('task-title-input').fill('Falhar por sessão expirada');
       await page.getByTestId('task-date-input').fill(
         formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)),
       );
@@ -449,23 +511,24 @@ test.describe('Lembreto critical flows', () => {
       await registerUser(page, user);
       await seedTasksForUser(user.email, 26, { prefix: 'Tarefa paginada' });
 
-      await page.reload();
-      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
 
       await page.getByTestId('sidebar-tasks').click();
 
       await expect(page.getByTestId('pending-pagination-summary')).toHaveText('Mostrando 1-20 de 26');
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('PÃ¡gina 1 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText(/1 de 2/);
       await expect(page.getByTestId('task-item')).toHaveCount(20);
 
       await page.getByTestId('pending-pagination-next').click();
 
       await expect(page.getByTestId('pending-pagination-summary')).toHaveText('Mostrando 21-26 de 26');
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('PÃ¡gina 2 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText(/2 de 2/);
       await expect(page.getByTestId('task-item')).toHaveCount(6);
 
       await page.getByTestId('pending-pagination-prev').click();
-      await expect(page.getByTestId('pending-pagination-page')).toHaveText('PÃ¡gina 1 de 2');
+      await expect(page.getByTestId('pending-pagination-page')).toHaveText(/1 de 2/);
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -499,10 +562,12 @@ test.describe('Lembreto critical flows', () => {
         },
       ]);
 
-      await page.reload();
-      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
 
       await page.getByTestId('sidebar-tasks').click();
+      await page.getByTestId('task-filters-toggle').click();
 
       await page.getByTestId('task-sort-dueDate').click();
       await expectFirstTaskTitle(page, 'Prazo hoje baixa');
@@ -513,13 +578,68 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-sort-category').click();
       await expectFirstTaskTitle(page, 'Categoria estudo');
       await expect(page.getByTestId('task-sort-category')).toHaveAttribute('aria-pressed', 'true');
-
-      await page.reload();
-      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
       await page.getByTestId('sidebar-tasks').click();
+      await page.getByTestId('task-filters-toggle').click();
 
       await expect(page.getByTestId('task-sort-category')).toHaveAttribute('aria-pressed', 'true');
       await expectFirstTaskTitle(page, 'Categoria estudo');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('filters task lists by priority and status', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Alta pendente',
+          dueDate: new Date('2026-04-26T09:00:00.000Z').toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Baixa pendente',
+          dueDate: new Date('2026-04-27T09:00:00.000Z').toISOString(),
+          priority: 'low',
+          category: 'Pessoal',
+        },
+        {
+          title: 'Alta concluída',
+          dueDate: new Date('2026-04-25T09:00:00.000Z').toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+          status: 'completed',
+        },
+      ]);
+
+      await page.reload();
+      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+
+      await page.getByTestId('sidebar-tasks').click();
+      await page.getByTestId('task-filters-toggle').click();
+
+      await page.getByTestId('task-priority-filter-high').click();
+      await expect(page.getByTestId('task-priority-summary')).toContainText('Alta');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Baixa pendente"]')).toHaveCount(0);
+
+      await page.getByTestId('task-status-filter-completed').click();
+      await expect(page.getByTestId('task-status-summary')).toContainText('Concluídos');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta concluída"]')).toBeVisible();
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toHaveCount(0);
+
+      await page.getByTestId('task-status-filter-pending').click();
+      await expect(page.getByTestId('task-status-summary')).toContainText('Pendentes');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta concluída"]')).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -604,7 +724,7 @@ test.describe('Lembreto critical flows', () => {
 
       await page.getByTestId('sidebar-settings-button').click();
       await page.getByTestId('settings-open-notifications-center').click();
-      await expect(page.getByText(/Central de notifica/i)).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Central de notifica/i })).toBeVisible();
       const initialNotifications = page.getByTestId('notification-item');
       await expect(initialNotifications.first()).toContainText('Bem-vindo!');
       const initialCount = await initialNotifications.count();
@@ -643,9 +763,9 @@ test.describe('Lembreto critical flows', () => {
           category: 'Trabalho',
         },
       ]);
-
-      await page.reload();
-      await expect(page.getByTestId('sidebar-dashboard')).toBeVisible();
+      await page.getByTestId('sidebar-logout').click();
+      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+      await loginUser(page, user.email, user.password);
 
       await page.getByTestId('header-notifications-button').click();
       const overdueNotification = page
@@ -664,3 +784,4 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 });
+

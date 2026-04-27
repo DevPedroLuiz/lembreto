@@ -1,4 +1,6 @@
-export async function cleanupDatabase(sql: any) {
+import type { SqlClient } from './handlers/core.js';
+
+export async function cleanupDatabase(sql: SqlClient) {
   const [blacklist, rateLimit, resetTokens] = await Promise.all([
     sql`DELETE FROM token_blacklist WHERE expires_at < NOW() RETURNING token_jti`,
     sql`DELETE FROM auth_rate_limit WHERE attempted_at < NOW() - INTERVAL '1 hour' RETURNING id`,

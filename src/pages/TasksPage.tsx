@@ -2,9 +2,16 @@ import React from 'react';
 import {
   ArrowDownAZ,
   ArrowUpDown,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Circle,
+  CircleDot,
+  Flag,
+  RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -17,12 +24,27 @@ import type { Priority, Task } from '../types';
 const PAGE_SIZE = 20;
 
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
+type PriorityFilter = 'all' | Priority;
+type StatusFilter = 'all' | 'pending' | 'completed';
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: 'created', label: 'Recentes' },
   { value: 'dueDate', label: 'Prazo' },
   { value: 'priority', label: 'Prioridade' },
   { value: 'category', label: 'Categoria' },
+];
+
+const PRIORITY_FILTER_OPTIONS: Array<{ value: PriorityFilter; label: string }> = [
+  { value: 'all', label: 'Todas as prioridades' },
+  { value: 'high', label: 'Alta' },
+  { value: 'medium', label: 'Média' },
+  { value: 'low', label: 'Baixa' },
+];
+
+const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
+  { value: 'all', label: 'Todos' },
+  { value: 'pending', label: 'Pendentes' },
+  { value: 'completed', label: 'Concluídos' },
 ];
 
 const PRIORITY_ORDER: Record<Priority, number> = {
@@ -35,10 +57,17 @@ function isSortMode(value: unknown): value is SortMode {
   return value === 'created' || value === 'dueDate' || value === 'priority' || value === 'category';
 }
 
+function isPriorityFilter(value: unknown): value is PriorityFilter {
+  return value === 'all' || value === 'high' || value === 'medium' || value === 'low';
+}
+
+function isStatusFilter(value: unknown): value is StatusFilter {
+  return value === 'all' || value === 'pending' || value === 'completed';
+}
+
 interface TasksPageProps {
   pendingTasks: Task[];
   completedTasks: Task[];
-  filteredTasks: Task[];
   filterCategory: string;
   setFilterCategory: (category: string) => void;
   search: string;
@@ -104,6 +133,35 @@ function sortTasks(tasks: Task[], sortMode: SortMode): Task[] {
   return sortedTasks;
 }
 
+function matchesTaskFilters(
+  task: Task,
+  normalizedSearch: string,
+  categoryFilter: string,
+  priorityFilter: PriorityFilter,
+): boolean {
+  const matchesSearch = task.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch);
+  const matchesCategory = categoryFilter === 'Todas' || task.category === categoryFilter;
+  const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
+
+  return matchesSearch && matchesCategory && matchesPriority;
+}
+
+function hasStoredCustomFilters(
+  search: string,
+  filterCategory: string,
+  sortMode: SortMode,
+  priorityFilter: PriorityFilter,
+  statusFilter: StatusFilter,
+) {
+  return (
+    search.trim().length > 0 ||
+    filterCategory !== 'Todas' ||
+    sortMode !== 'created' ||
+    priorityFilter !== 'all' ||
+    statusFilter !== 'all'
+  );
+}
+
 function PaginationControls({
   totalItems,
   currentPage,
@@ -160,8 +218,30 @@ function PaginationControls({
   );
 }
 
+function ControlButton({
+  active,
+  children,
+  className = '',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active: boolean }) {
+  return (
+    <button
+      {...props}
+      className={[
+        'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-all',
+        active
+          ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.7)]'
+          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
+        className,
+      ].join(' ')}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function TasksPage({
-  filteredTasks,
+  pendingTasks,
   completedTasks,
   filterCategory,
   setFilterCategory,
@@ -175,30 +255,80 @@ export function TasksPage({
   deletingTaskIds,
   togglingTaskIds,
 }: TasksPageProps) {
+  const config = React.useMemo(() => LS.getConfig(), []);
+  const initialSortMode = isSortMode(config.taskSortMode) ? config.taskSortMode : 'created';
+  const initialPriorityFilter = isPriorityFilter(config.taskPriorityFilter) ? config.taskPriorityFilter : 'all';
+  const initialStatusFilter = isStatusFilter(config.taskStatusFilter) ? config.taskStatusFilter : 'all';
+
   const [pendingPage, setPendingPage] = React.useState(1);
   const [completedPage, setCompletedPage] = React.useState(1);
-  const [sortMode, setSortMode] = React.useState<SortMode>(() => {
-    const config = LS.getConfig();
-    return isSortMode(config.taskSortMode) ? config.taskSortMode : 'created';
-  });
+  const [sortMode, setSortMode] = React.useState<SortMode>(initialSortMode);
+  const [priorityFilter, setPriorityFilter] = React.useState<PriorityFilter>(initialPriorityFilter);
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatusFilter);
+  const [filtersOpen, setFiltersOpen] = React.useState(() =>
+    hasStoredCustomFilters(search, filterCategory, initialSortMode, initialPriorityFilter, initialStatusFilter),
+  );
 
   const handleSortChange = React.useCallback((nextSortMode: SortMode) => {
     setSortMode(nextSortMode);
-    const config = LS.getConfig();
+    const currentConfig = LS.getConfig();
     LS.saveConfig({
-      ...config,
+      ...currentConfig,
       taskSortMode: nextSortMode,
     });
   }, []);
 
+  const handlePriorityFilterChange = React.useCallback((nextPriorityFilter: PriorityFilter) => {
+    setPriorityFilter(nextPriorityFilter);
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskPriorityFilter: nextPriorityFilter,
+    });
+  }, []);
+
+  const handleStatusFilterChange = React.useCallback((nextStatusFilter: StatusFilter) => {
+    setStatusFilter(nextStatusFilter);
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskStatusFilter: nextStatusFilter,
+    });
+  }, []);
+
+  const normalizedSearch = React.useMemo(
+    () => search.trim().toLocaleLowerCase('pt-BR'),
+    [search],
+  );
+
+  const locallyFilteredPendingTasks = React.useMemo(
+    () => pendingTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter)),
+    [filterCategory, normalizedSearch, pendingTasks, priorityFilter],
+  );
+
+  const locallyFilteredCompletedTasks = React.useMemo(
+    () => completedTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter)),
+    [completedTasks, filterCategory, normalizedSearch, priorityFilter],
+  );
+
+  const visiblePendingTasks = React.useMemo(
+    () => (statusFilter === 'completed' ? [] : locallyFilteredPendingTasks),
+    [locallyFilteredPendingTasks, statusFilter],
+  );
+
+  const visibleCompletedTasks = React.useMemo(
+    () => (statusFilter === 'pending' ? [] : locallyFilteredCompletedTasks),
+    [locallyFilteredCompletedTasks, statusFilter],
+  );
+
   const sortedPendingTasks = React.useMemo(
-    () => sortTasks(filteredTasks, sortMode),
-    [filteredTasks, sortMode],
+    () => sortTasks(visiblePendingTasks, sortMode),
+    [sortMode, visiblePendingTasks],
   );
 
   const sortedCompletedTasks = React.useMemo(
-    () => sortTasks(completedTasks, sortMode),
-    [completedTasks, sortMode],
+    () => sortTasks(visibleCompletedTasks, sortMode),
+    [sortMode, visibleCompletedTasks],
   );
 
   const pendingTotalPages = Math.max(1, Math.ceil(sortedPendingTasks.length / PAGE_SIZE));
@@ -206,11 +336,11 @@ export function TasksPage({
 
   React.useEffect(() => {
     setPendingPage(1);
-  }, [filterCategory, search, sortMode]);
+  }, [filterCategory, priorityFilter, search, sortMode, statusFilter]);
 
   React.useEffect(() => {
     setCompletedPage(1);
-  }, [sortMode]);
+  }, [filterCategory, priorityFilter, search, sortMode, statusFilter]);
 
   React.useEffect(() => {
     if (pendingPage > pendingTotalPages) {
@@ -239,6 +369,42 @@ export function TasksPage({
     [sortMode],
   );
 
+  const activePriorityLabel = React.useMemo(
+    () => PRIORITY_FILTER_OPTIONS.find((option) => option.value === priorityFilter)?.label ?? 'Todas as prioridades',
+    [priorityFilter],
+  );
+
+  const activeStatusLabel = React.useMemo(
+    () => STATUS_FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label ?? 'Todos',
+    [statusFilter],
+  );
+
+  const totalVisibleTasks = sortedPendingTasks.length + sortedCompletedTasks.length;
+  const hasCustomFilters = hasStoredCustomFilters(
+    search,
+    filterCategory,
+    sortMode,
+    priorityFilter,
+    statusFilter,
+  );
+
+  const handleResetFilters = React.useCallback(() => {
+    setSearch('');
+    setFilterCategory('Todas');
+    setSortMode('created');
+    setPriorityFilter('all');
+    setStatusFilter('all');
+    setFiltersOpen(false);
+
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskSortMode: 'created',
+      taskPriorityFilter: 'all',
+      taskStatusFilter: 'all',
+    });
+  }, [setFilterCategory, setSearch]);
+
   return (
     <motion.div
       key="tasks"
@@ -248,7 +414,7 @@ export function TasksPage({
       className="space-y-6"
     >
       <section className="surface-panel p-5 md:p-6">
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-5">
           <div>
             <span className="section-eyebrow">
               <ArrowUpDown size={14} />
@@ -258,55 +424,182 @@ export function TasksPage({
               Filtre, ordene e acompanhe cada entrega com clareza.
             </h3>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-              Use pesquisa, categorias e ordenação para localizar rapidamente o que precisa ser feito agora.
+              Use pesquisa, categorias, prioridade e status para localizar rapidamente o que precisa ser feito agora.
             </p>
           </div>
 
-          <div className="surface-soft p-4">
-            <div className="relative">
-              <Search className="field-icon" size={18} />
-              <input
-                type="text"
-                data-testid="task-search-input"
-                placeholder="Buscar lembretes por título"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="field-control field-control-with-icon"
-              />
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                data-testid="task-filters-toggle"
+                onClick={() => setFiltersOpen((current) => !current)}
+                aria-expanded={filtersOpen}
+                aria-controls="tasks-filters-panel"
+                className="action-secondary h-11 justify-center rounded-2xl px-4 py-0 text-sm sm:justify-start"
+              >
+                <SlidersHorizontal size={16} />
+                {filtersOpen ? 'Ocultar filtros' : 'Abrir filtros'}
+                {filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {totalVisibleTasks} lembrete{totalVisibleTasks === 1 ? '' : 's'} encontrado
+                {totalVisibleTasks === 1 ? '' : 's'} com a seleção atual.
+              </p>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {SORT_OPTIONS.map((option) => {
-                const isActive = sortMode === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    data-testid={`task-sort-${option.value}`}
-                    onClick={() => handleSortChange(option.value)}
-                    aria-pressed={isActive}
-                    className={[
-                      'inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-all',
-                      isActive
-                        ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.7)]'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
-                    ].join(' ')}
-                  >
-                    {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 flex items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <span
                 data-testid="task-sort-summary"
                 className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Ordenado por {activeSortLabel}
               </span>
+              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+                Categoria: {filterCategory}
+              </span>
+              <span
+                data-testid="task-priority-summary"
+                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+              >
+                Prioridade: {activePriorityLabel}
+              </span>
+              <span
+                data-testid="task-status-summary"
+                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+              >
+                Status: {activeStatusLabel}
+              </span>
             </div>
+
+            <AnimatePresence initial={false}>
+              {filtersOpen && (
+                <motion.div
+                  id="tasks-filters-panel"
+                  initial={{ opacity: 0, height: 0, y: -8 }}
+                  animate={{ opacity: 1, height: 'auto', y: 0 }}
+                  exit={{ opacity: 0, height: 0, y: -8 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="surface-soft max-w-5xl p-4 sm:p-5">
+                    <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 dark:border-white/10 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Controles da lista</p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          Ajuste a visualização para encontrar exatamente o que precisa.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        disabled={!hasCustomFilters}
+                        className="action-ghost h-10 justify-center rounded-xl border border-transparent px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        <RotateCcw size={15} />
+                        Limpar filtros
+                      </button>
+                    </div>
+
+                    <div className="relative mt-4">
+                      <Search className="field-icon" size={18} />
+                      <input
+                        type="text"
+                        data-testid="task-search-input"
+                        placeholder="Buscar lembretes por título"
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        className="field-control field-control-with-icon"
+                      />
+                    </div>
+
+                    <div className="mt-5 space-y-5">
+                      <div>
+                        <div className="mb-3 flex items-center gap-2">
+                          <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                            <SlidersHorizontal size={15} />
+                          </span>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ordenação</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Escolha como os lembretes aparecem na lista.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {SORT_OPTIONS.map((option) => {
+                            const isActive = sortMode === option.value;
+                            return (
+                              <ControlButton
+                                key={option.value}
+                                type="button"
+                                data-testid={`task-sort-${option.value}`}
+                                onClick={() => handleSortChange(option.value)}
+                                aria-pressed={isActive}
+                                active={isActive}
+                              >
+                                {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
+                                {option.label}
+                              </ControlButton>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                        <div>
+                          <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Prioridade</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {PRIORITY_FILTER_OPTIONS.map((option) => {
+                              const isActive = priorityFilter === option.value;
+                              return (
+                                <ControlButton
+                                  key={option.value}
+                                  type="button"
+                                  data-testid={`task-priority-filter-${option.value}`}
+                                  onClick={() => handlePriorityFilterChange(option.value)}
+                                  aria-pressed={isActive}
+                                  active={isActive}
+                                  className={option.value === 'all' ? 'sm:col-span-2' : ''}
+                                >
+                                  <Flag size={14} />
+                                  {option.label}
+                                </ControlButton>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Status</p>
+                          <div className="grid gap-2">
+                            {STATUS_FILTER_OPTIONS.map((option) => {
+                              const isActive = statusFilter === option.value;
+                              return (
+                                <ControlButton
+                                  key={option.value}
+                                  type="button"
+                                  data-testid={`task-status-filter-${option.value}`}
+                                  onClick={() => handleStatusFilterChange(option.value)}
+                                  aria-pressed={isActive}
+                                  active={isActive}
+                                >
+                                  {option.value === 'completed' ? <CircleDot size={14} /> : <Circle size={14} />}
+                                  {option.label}
+                                </ControlButton>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
@@ -327,58 +620,60 @@ export function TasksPage({
         </div>
       </section>
 
-      <section className="surface-panel p-5 md:p-6">
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <div>
-            <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Lembretes pendentes</h4>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {sortedPendingTasks.length} lembrete{sortedPendingTasks.length === 1 ? '' : 's'} em aberto
-            </p>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {sortedPendingTasks.length > 0 ? (
-            <div className="space-y-3">
-              {paginatedPendingTasks.map((task) => (
-                <TaskItem
-                  key={task.id}
-                  task={task}
-                  onToggle={onToggle}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  isDeleting={deletingTaskIds?.has(task.id)}
-                  isToggling={togglingTaskIds?.has(task.id)}
-                />
-              ))}
-
-              <PaginationControls
-                totalItems={sortedPendingTasks.length}
-                currentPage={pendingPage}
-                onPageChange={setPendingPage}
-                testIdPrefix="pending-pagination"
-              />
-            </div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]"
-            >
-              <Sparkles size={34} className="mx-auto mb-4 text-slate-400" />
-              <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nada por aqui</h4>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Não encontramos lembretes com os filtros atuais.
+      {statusFilter !== 'completed' && (
+        <section className="surface-panel p-5 md:p-6">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Lembretes pendentes</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                {sortedPendingTasks.length} lembrete{sortedPendingTasks.length === 1 ? '' : 's'} em aberto
               </p>
-              <button onClick={onNewTask} className="action-primary mt-6">
-                Criar lembrete
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </section>
+            </div>
+          </div>
 
-      {showCompleted && filterCategory === 'Todas' && !search && sortedCompletedTasks.length > 0 && (
+          <AnimatePresence>
+            {sortedPendingTasks.length > 0 ? (
+              <div className="space-y-3">
+                {paginatedPendingTasks.map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    onToggle={onToggle}
+                    onDelete={onDelete}
+                    onEdit={onEdit}
+                    isDeleting={deletingTaskIds?.has(task.id)}
+                    isToggling={togglingTaskIds?.has(task.id)}
+                  />
+                ))}
+
+                <PaginationControls
+                  totalItems={sortedPendingTasks.length}
+                  currentPage={pendingPage}
+                  onPageChange={setPendingPage}
+                  testIdPrefix="pending-pagination"
+                />
+              </div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]"
+              >
+                <Sparkles size={34} className="mx-auto mb-4 text-slate-400" />
+                <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nada por aqui</h4>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  Não encontramos lembretes com os filtros atuais.
+                </p>
+                <button onClick={onNewTask} className="action-primary mt-6">
+                  Criar lembrete
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+      )}
+
+      {showCompleted && statusFilter !== 'pending' && sortedCompletedTasks.length > 0 && (
         <section className="surface-panel p-5 opacity-90 md:p-6">
           <div className="mb-5">
             <h4 className="text-lg font-semibold text-slate-900 dark:text-white">

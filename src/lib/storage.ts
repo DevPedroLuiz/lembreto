@@ -4,6 +4,17 @@
 import type { User } from '../types';
 import type { AppNotification } from '../types';
 
+export interface AppConfig {
+  darkMode?: boolean;
+  notifications?: boolean;
+  sound?: boolean;
+  confirmDelete?: boolean;
+  showCompleted?: boolean;
+  taskSortMode?: string;
+  taskPriorityFilter?: string;
+  taskStatusFilter?: string;
+}
+
 export const LS = {
   saveUser: (user: User) =>
     localStorage.setItem('tm_user', JSON.stringify(user)),
@@ -26,15 +37,15 @@ export const LS = {
 
   clearRememberedEmail: () => localStorage.removeItem('tm_remembered_email'),
 
-  getConfig: (): Record<string, unknown> => {
+  getConfig: (): AppConfig => {
     try {
-      return JSON.parse(localStorage.getItem('tm_config') || '{}');
+      return JSON.parse(localStorage.getItem('tm_config') || '{}') as AppConfig;
     } catch {
       return {};
     }
   },
 
-  saveConfig: (cfg: object) =>
+  saveConfig: (cfg: AppConfig) =>
     localStorage.setItem('tm_config', JSON.stringify(cfg)),
 
   saveNotifications: (notifications: AppNotification[]) =>

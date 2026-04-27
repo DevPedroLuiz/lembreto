@@ -37,12 +37,14 @@ interface TaskDetailsDialogProps {
   task: Task | null;
   isDeleting?: boolean;
   isToggling?: boolean;
+  isRescheduling?: boolean;
   backLabel?: string;
   onClose: () => void;
   onBack?: () => void;
   onEdit: (task: Task) => void;
   onDuplicate: (task: Task) => void;
   onShare: (task: Task) => void;
+  onQuickReschedule: (task: Task, preset: 'laterToday' | 'tomorrowMorning' | 'nextWeek') => void;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
 }
@@ -68,12 +70,14 @@ export function TaskDetailsDialog({
   task,
   isDeleting = false,
   isToggling = false,
+  isRescheduling = false,
   backLabel,
   onClose,
   onBack,
   onEdit,
   onDuplicate,
   onShare,
+  onQuickReschedule,
   onToggle,
   onDelete,
 }: TaskDetailsDialogProps) {
@@ -82,7 +86,7 @@ export function TaskDetailsDialog({
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const isCompleted = task.status === 'completed';
-  const isBusy = isDeleting || isToggling;
+  const isBusy = isDeleting || isToggling || isRescheduling;
 
   return (
     <AnimatePresence>
@@ -294,6 +298,57 @@ export function TaskDetailsDialog({
                       </div>
                     </div>
                   </section>
+
+                  {!isCompleted && (
+                    <section className="surface-soft p-5">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Ajustes rápidos</h3>
+                      <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                        Quando a rotina muda, você consegue adiar este lembrete sem entrar na edição completa.
+                      </p>
+
+                      <div className="mt-4 grid gap-3">
+                        <button
+                          type="button"
+                          data-testid="task-details-snooze-later"
+                          onClick={() => onQuickReschedule(task, 'laterToday')}
+                          disabled={isBusy}
+                          className="action-secondary w-full justify-between disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Clock3 size={18} />
+                            Mais tarde hoje
+                          </span>
+                          <span className="text-xs text-slate-400 dark:text-slate-500">
+                            +2 horas
+                          </span>
+                        </button>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            data-testid="task-details-snooze-tomorrow"
+                            onClick={() => onQuickReschedule(task, 'tomorrowMorning')}
+                            disabled={isBusy}
+                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <CalendarDays size={18} />
+                            Amanhã cedo
+                          </button>
+
+                          <button
+                            type="button"
+                            data-testid="task-details-snooze-next-week"
+                            onClick={() => onQuickReschedule(task, 'nextWeek')}
+                            disabled={isBusy}
+                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <CalendarClock size={18} />
+                            Próxima semana
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  )}
 
                   <section className="surface-soft p-5">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Ações</h3>

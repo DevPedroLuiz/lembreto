@@ -97,6 +97,11 @@ function TaskItemComponent({
       className={cn(
         'surface-soft group relative flex items-start gap-4 p-4 md:p-5',
         isBusy && 'opacity-75',
+        isOverdue && !isCompleted && (
+          overdueKind === 'timed'
+            ? 'border-rose-200 bg-rose-50/85 shadow-[0_22px_42px_-32px_rgba(244,63,94,0.45)] dark:border-rose-500/25 dark:bg-rose-500/[0.08]'
+            : 'border-amber-200 bg-amber-50/80 shadow-[0_22px_42px_-32px_rgba(245,158,11,0.4)] dark:border-amber-500/25 dark:bg-amber-500/[0.08]'
+        ),
         !isBusy && 'cursor-pointer hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
         isCompleted && 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.03]',
       )}

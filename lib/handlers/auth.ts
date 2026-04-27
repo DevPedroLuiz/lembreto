@@ -40,6 +40,34 @@ const GENERIC_RECOVER_RESPONSE = {
   message: 'Se este e-mail estiver cadastrado, voce recebera um link em breve.',
 };
 
+interface UserRow {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+}
+
+interface LoginUserRow extends UserRow {
+  password_hash: string;
+}
+
+interface RecoverUserRow {
+  id: string;
+  name: string;
+}
+
+interface ResetTokenRow {
+  token_id: string;
+  user_id: string;
+}
+
+interface ProfileCurrentUserRow {
+  name: string;
+  email: string;
+  password: string;
+  avatar: string | null;
+}
+
 export async function handleAuthRegister(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
   if (request.method !== 'POST') return methodNotAllowed();
@@ -80,7 +108,7 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
       RETURNING id, name, email, avatar
     `;
 
-    const user = rows[0];
+    const user = rows[0] as unknown as UserRow;
     await clearRateLimit(ip, 'register');
 
     const token = signToken({ sub: user.id, email: user.email });
@@ -129,7 +157,7 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
       return json(401, { error: 'Email ou senha incorretos' });
     }
 
-    const user = rows[0];
+    const user = rows[0] as unknown as LoginUserRow;
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
       return json(401, { error: 'Email ou senha incorretos' });
@@ -137,7 +165,7 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
 
     await clearRateLimit(ip, 'login');
 
-    const { password_hash: _passwordHash, ...safeUser } = user;
+      const { password_hash: _passwordHash, ...safeUser } = user;
     const token = signToken({ sub: safeUser.id, email: safeUser.email });
     logInfo('auth_login_success', getRequestMeta(request, { userId: safeUser.id, ip }));
 
@@ -260,7 +288,7 @@ export async function handleAuthRecover(context: HandlerContext): Promise<Handle
     `;
 
     if (rows.length > 0) {
-      const user = rows[0];
+      const user = rows[0] as unknown as RecoverUserRow;
 
       await sql`
         UPDATE password_reset_tokens
@@ -319,7 +347,7 @@ export async function handleAuthResetPassword(context: HandlerContext): Promise<
       });
     }
 
-    const { token_id, user_id } = rows[0];
+    const { token_id, user_id } = rows[0] as unknown as ResetTokenRow;
     const passwordHash = await bcrypt.hash(password, 12);
 
     await sql`UPDATE users SET password = ${passwordHash} WHERE id = ${user_id}`;
@@ -378,7 +406,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
       return json(404, { error: 'Usuario nao encontrado' });
     }
 
-    const cur = current[0];
+    const cur = current[0] as unknown as ProfileCurrentUserRow;
     let newPasswordHash = cur.password;
     if (password && password.trim()) {
       newPasswordHash = await bcrypt.hash(password.trim(), 12);
@@ -398,7 +426,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
       RETURNING id, name, email, avatar
     `;
 
-    const user = rows[0];
+    const user = rows[0] as unknown as UserRow;
 
     if (shouldRotateToken) {
       await sql`

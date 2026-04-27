@@ -1,6 +1,5 @@
 ﻿import React, {
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useState,
@@ -14,18 +13,19 @@ import {
   Settings,
   User as UserIcon,
 } from 'lucide-react';
-import { format, isPast, isToday, parseISO } from 'date-fns';
+import { addDays, addHours, format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
-import { LS } from './lib/storage';
+import { LS, type AppConfig } from './lib/storage';
 import { cn } from './lib/cn';
 import { AUTH_UNAUTHORIZED_EVENT } from './lib/authEvents';
 import {
   buildDueDateFromForm,
+  formatDateInputValue,
   getTaskTimeLabel,
   parseDueDateToForm,
 } from './lib/taskDueDate';
@@ -53,6 +53,7 @@ import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
 
 type AppConfigPatch = Partial<{
+  darkMode: boolean;
   notifications: boolean;
   sound: boolean;
   confirmDelete: boolean;
@@ -62,6 +63,7 @@ type AppConfigPatch = Partial<{
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
+type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
 
 type EmitNotificationOptions = {
   toastOnly?: boolean;
@@ -110,6 +112,43 @@ function buildTaskShareMessage(task: Task): string {
     .join('\n');
 }
 
+function roundToNextHalfHour(date: Date): Date {
+  const next = new Date(date);
+  next.setSeconds(0, 0);
+
+  const remainder = next.getMinutes() % 30;
+  const offset = remainder === 0 ? 30 : 30 - remainder;
+  next.setMinutes(next.getMinutes() + offset);
+
+  return next;
+}
+
+function buildQuickRescheduleDate(task: Task, preset: QuickReschedulePreset): string {
+  const dueDateForm = parseDueDateToForm(task.dueDate);
+
+  if (preset === 'tomorrowMorning') {
+    const tomorrow = addDays(new Date(), 1);
+    return buildDueDateFromForm(formatDateInputValue(tomorrow), '09:00');
+  }
+
+  if (preset === 'nextWeek') {
+    const nextWeek = addDays(new Date(), 7);
+    return buildDueDateFromForm(formatDateInputValue(nextWeek), dueDateForm.time);
+  }
+
+  const laterToday = roundToNextHalfHour(addHours(new Date(), 2));
+
+  if (formatDateInputValue(laterToday) !== formatDateInputValue(new Date())) {
+    const tomorrow = addDays(new Date(), 1);
+    return buildDueDateFromForm(formatDateInputValue(tomorrow), '09:00');
+  }
+
+  return buildDueDateFromForm(
+    formatDateInputValue(laterToday),
+    `${`${laterToday.getHours()}`.padStart(2, '0')}:${`${laterToday.getMinutes()}`.padStart(2, '0')}`,
+  );
+}
+
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const isResetPasswordRoute = pathname === '/reset-password';
@@ -124,11 +163,10 @@ export default function App() {
     requestPermission,
   } = useToast();
 
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notifications'>('dashboard');
   const [filterCategory, setFilterCategory] = useState('Todas');
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
 
   const [showTaskDrawer, setShowTaskDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
@@ -157,6 +195,7 @@ export default function App() {
   const [taskDetailsReturnMetric, setTaskDetailsReturnMetric] = useState<DashboardMetricKey | null>(null);
   const [deletingTaskIds, setDeletingTaskIds] = useState<Set<string>>(new Set());
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
+  const [reschedulingTaskIds, setReschedulingTaskIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTask, setPendingDeleteTask] = useState<{
     id: string;
     title: string;
@@ -172,14 +211,12 @@ export default function App() {
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
   useEffect(() => {
-    const cfg = LS.getConfig() as Record<string, unknown>;
+    const cfg = LS.getConfig();
+    if (typeof cfg.darkMode === 'boolean') setDarkMode(cfg.darkMode);
     if (typeof cfg.notifications === 'boolean') setNotificationsEnabled(cfg.notifications);
     if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
     if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
     if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
-    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-      setDarkMode(true);
-    }
   }, []);
 
   useEffect(() => {
@@ -232,20 +269,26 @@ export default function App() {
 
   const saveConfig = useCallback((patch: AppConfigPatch) => {
     const persistedConfig = LS.getConfig();
-    const next = {
+    const next: AppConfig = {
       ...persistedConfig,
+      darkMode,
       notifications: notificationsEnabled,
       sound: configSound,
       confirmDelete: configConfirmDelete,
       showCompleted: configShowCompleted,
       ...patch,
     };
+    if (typeof next.darkMode === 'boolean') setDarkMode(next.darkMode);
     setNotificationsEnabled(Boolean(next.notifications));
-    setConfigSound(next.sound);
-    setConfigConfirmDelete(next.confirmDelete);
-    setConfigShowCompleted(next.showCompleted);
+    setConfigSound(Boolean(next.sound));
+    setConfigConfirmDelete(Boolean(next.confirmDelete));
+    setConfigShowCompleted(Boolean(next.showCompleted));
     LS.saveConfig(next);
-  }, [configConfirmDelete, configShowCompleted, configSound, notificationsEnabled]);
+  }, [configConfirmDelete, configShowCompleted, configSound, darkMode, notificationsEnabled]);
+
+  const toggleDarkMode = useCallback(() => {
+    saveConfig({ darkMode: !darkMode });
+  }, [darkMode, saveConfig]);
 
   const playSuccessSound = useCallback(() => {
     if (!configSound) return;
@@ -466,6 +509,46 @@ export default function App() {
       emitNotification('Não foi possível compartilhar', 'Tente novamente em outro navegador ou aplicativo.', 'error');
     }
   }, [emitNotification]);
+
+  const handleQuickReschedule = useCallback(async (task: Task, preset: QuickReschedulePreset) => {
+    if (reschedulingTaskIds.has(task.id)) return;
+
+    const presetLabel = preset === 'laterToday'
+      ? 'para mais tarde hoje'
+      : preset === 'tomorrowMorning'
+        ? 'para amanhã cedo'
+        : 'para a próxima semana';
+
+    try {
+      setReschedulingTaskIds((prev) => new Set(prev).add(task.id));
+      const updated = await updateTask(task.id, {
+        dueDate: buildQuickRescheduleDate(task, preset),
+        status: 'pending',
+      });
+
+      setSelectedTask(updated);
+      emitNotification(
+        'Lembrete reagendado',
+        `"${task.title}" foi ajustado ${presetLabel}.`,
+        'success',
+        {
+          target: { type: 'task', taskId: task.id },
+        },
+      );
+    } catch (error) {
+      emitNotification(
+        'Não foi possível reagendar',
+        error instanceof Error ? error.message : 'Tente novamente em instantes.',
+        'error',
+      );
+    } finally {
+      setReschedulingTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  }, [emitNotification, reschedulingTaskIds, updateTask]);
 
   const taskDueDateError = useMemo(() => {
     if (!formDate) return '';
@@ -770,8 +853,6 @@ export default function App() {
     }
   }, [auth.updateProfile, emitNotification, isProfileSubmitting, profAvatar, profEmail, profName, profPassword]);
 
-  const normalizedSearch = deferredSearch.trim().toLowerCase();
-
   const pendingTasks = useMemo(
     () => tasks.filter((task) => task.status === 'pending'),
     [tasks]
@@ -781,14 +862,6 @@ export default function App() {
     () => tasks.filter((task) => task.status === 'completed'),
     [tasks]
   );
-
-  const filteredTasks = useMemo(() => {
-    return pendingTasks.filter((task) => {
-      const matchesSearch = task.title.toLowerCase().includes(normalizedSearch);
-      const matchesCategory = filterCategory === 'Todas' || task.category === filterCategory;
-      return matchesSearch && matchesCategory;
-    });
-  }, [filterCategory, normalizedSearch, pendingTasks]);
 
   const pendingSummary = useMemo(() => {
     return pendingTasks.reduce(
@@ -814,6 +887,16 @@ export default function App() {
     return pendingTasks.filter((task) => {
       try {
         return isToday(parseISO(task.dueDate));
+      } catch {
+        return false;
+      }
+    });
+  }, [pendingTasks]);
+
+  const tomorrowTasks = useMemo(() => {
+    return pendingTasks.filter((task) => {
+      try {
+        return isTomorrow(parseISO(task.dueDate));
       } catch {
         return false;
       }
@@ -847,6 +930,42 @@ export default function App() {
       );
     });
   }, [emitNotification, notificationsEnabled, overdueTasks]);
+
+  useEffect(() => {
+    if (!notificationsEnabled || todayTasks.length === 0) return;
+
+    todayTasks.forEach((task) => {
+      const dueDate = parseISO(task.dueDate);
+      emitNotification(
+        'Lembrete para hoje',
+        `"${task.title}" está no radar de hoje.`,
+        'info',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `today:${task.id}:${format(dueDate, 'yyyy-MM-dd')}`,
+          skipToast: true,
+        },
+      );
+    });
+  }, [emitNotification, notificationsEnabled, todayTasks]);
+
+  useEffect(() => {
+    if (!notificationsEnabled || tomorrowTasks.length === 0) return;
+
+    tomorrowTasks.forEach((task) => {
+      const dueDate = parseISO(task.dueDate);
+      emitNotification(
+        'Lembrete vindo amanhã',
+        `"${task.title}" vence amanhã, então já vale se planejar.`,
+        'info',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `tomorrow:${task.id}:${format(dueDate, 'yyyy-MM-dd')}`,
+          skipToast: true,
+        },
+      );
+    });
+  }, [emitNotification, notificationsEnabled, tomorrowTasks]);
 
   const openSettings = useCallback(() => {
     setShowNotificationsInbox(false);
@@ -894,7 +1013,8 @@ export default function App() {
     setShowSettings(false);
 
     if (notification.target?.type === 'task') {
-      const relatedTask = tasks.find((task) => task.id === notification.target.taskId);
+      const taskTarget = notification.target;
+      const relatedTask = tasks.find((task) => task.id === taskTarget.taskId);
       setActiveTab('tasks');
 
       if (relatedTask) {
@@ -1041,7 +1161,7 @@ export default function App() {
             </motion.button>
             <button
               onClick={openSettings}
-              aria-label="Abrir configuraÃ§Ãµes"
+              aria-label="Abrir configurações"
               className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
             >
               <Settings size={20} />
@@ -1065,7 +1185,7 @@ export default function App() {
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <span className="section-eyebrow">
-                  {activeTab === 'dashboard' ? 'Painel principal' : 'GestÃ£o de lembretes'}
+                  {activeTab === 'dashboard' ? 'Painel principal' : 'Gestão de lembretes'}
                 </span>
                 <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
                   {pageTitle}
@@ -1133,7 +1253,6 @@ export default function App() {
               <TasksPage
                 pendingTasks={pendingTasks}
                 completedTasks={completedTasks}
-                filteredTasks={filteredTasks}
                 filterCategory={filterCategory}
                 setFilterCategory={setFilterCategory}
                 search={search}
@@ -1201,12 +1320,14 @@ export default function App() {
         task={selectedTask}
         isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
         isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
+        isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
         backLabel={taskDetailsBackLabel || undefined}
         onClose={closeTaskDetails}
         onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
         onEdit={openEditTask}
         onDuplicate={openDuplicateTask}
         onShare={handleShareTask}
+        onQuickReschedule={handleQuickReschedule}
         onToggle={handleToggleFromDetails}
         onDelete={handleDeleteFromDetails}
       />
@@ -1286,7 +1407,7 @@ export default function App() {
         open={showSettings}
         onClose={closeSettingsDrawer}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode((value) => !value)}
+        onToggleDarkMode={toggleDarkMode}
         notificationsEnabled={notificationsEnabled}
         onToggleNotifications={() => {
           void handleToggleNotifications();
@@ -1316,7 +1437,7 @@ export default function App() {
         title="Excluir lembrete?"
         message={
           pendingDeleteTask
-            ? `VocÃª estÃ¡ prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
+            ? `Você está prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
             : ''
         }
         confirmLabel="Excluir lembrete"
