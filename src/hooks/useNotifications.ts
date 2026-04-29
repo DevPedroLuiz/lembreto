@@ -67,7 +67,7 @@ export function useNotifications(token: string | null) {
     const requestToken = payload.token ?? token;
 
     if (!requestToken) {
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     const { token: _token, ...requestPayload } = payload;
@@ -79,7 +79,7 @@ export function useNotifications(token: string | null) {
 
   const markNotificationRead = useCallback(async (id: string, read: boolean) => {
     if (!token) {
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     const data = await apiPut<{ notification: AppNotification }>(`/api/notifications/${id}`, { read }, token);
@@ -91,7 +91,7 @@ export function useNotifications(token: string | null) {
 
   const markAllRead = useCallback(async () => {
     if (!token) {
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     await apiPost('/api/notifications/mark-all-read', {}, token);
@@ -102,7 +102,7 @@ export function useNotifications(token: string | null) {
 
   const clearAll = useCallback(async () => {
     if (!token) {
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     await apiDelete('/api/notifications', token);
@@ -111,7 +111,7 @@ export function useNotifications(token: string | null) {
 
   const updateNotificationsEnabled = useCallback(async (enabled: boolean) => {
     if (!token) {
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     requestSequenceRef.current += 1;

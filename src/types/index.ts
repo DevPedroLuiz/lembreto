@@ -1,7 +1,8 @@
-import type { TaskPriority, TaskStatus } from '../../lib/contracts';
+import type { NoteMode as NoteModeContract, TaskPriority, TaskStatus } from '../../lib/contracts';
 
 export type Priority = TaskPriority;
 export type Status = TaskStatus;
+export type NoteMode = NoteModeContract;
 
 export interface User {
   id: string;
@@ -18,8 +19,28 @@ export interface Task {
   dueDate: string;
   priority: Priority;
   category: string;
+  tags: string[];
   status: Status;
   createdAt: string;
+}
+
+export interface TaskTaxonomy {
+  categories: string[];
+  tags: string[];
+}
+
+export interface Note {
+  id: string;
+  userId: string;
+  taskId: string | null;
+  title: string;
+  content: string;
+  priority: Priority;
+  category: string;
+  tags: string[];
+  mode: NoteMode;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type NotificationTarget =
@@ -39,5 +60,4 @@ export interface AppNotification {
   dedupeKey?: string;
 }
 
-export const CATEGORIES = ['Geral', 'Trabalho', 'Pessoal', 'Estudos'] as const;
-export type Category = (typeof CATEGORIES)[number];
+export const DEFAULT_CATEGORIES = ['Geral', 'Trabalho', 'Pessoal', 'Estudos'] as const;

@@ -31,6 +31,57 @@ CREATE TABLE IF NOT EXISTS tasks (
 -- Índices para consultas frequentes
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+
+CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin ON tasks USING GIN(tags);
+
+CREATE TABLE IF NOT EXISTS user_categories (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_categories_unique_name
+  ON user_categories(user_id, lower(name));
+
+CREATE TABLE IF NOT EXISTS user_tags (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tags_unique_name
+  ON user_tags(user_id, lower(name));
+
+-- Tabela de notas
+CREATE TABLE IF NOT EXISTS notes (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  task_id     UUID        REFERENCES tasks(id) ON DELETE SET NULL,
+  title       TEXT        NOT NULL,
+  content     TEXT        NOT NULL DEFAULT '',
+  priority    TEXT        NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  category    TEXT        NOT NULL DEFAULT 'Geral',
+  tags        TEXT[]      NOT NULL DEFAULT ARRAY[]::TEXT[],
+  mode        TEXT        NOT NULL DEFAULT 'temporary' CHECK (mode IN ('temporary', 'fixed')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_user_created
+  ON notes(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notes_user_mode
+  ON notes(user_id, mode, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notes_task_id
+  ON notes(task_id);
+
+CREATE INDEX IF NOT EXISTS idx_notes_tags_gin
+  ON notes USING GIN(tags);
 
 -- ============================================================
 -- Blacklist de tokens JWT (logout antecipado)

@@ -11,6 +11,7 @@ interface NotificationsInboxDrawerProps {
   unreadCount: number;
   onClose: () => void;
   onOpenNotification: (notification: AppNotification) => void;
+  onPreviewNotification: (notification: AppNotification) => void;
   onOpenCenter: () => void;
 }
 
@@ -20,6 +21,7 @@ export function NotificationsInboxDrawer({
   unreadCount,
   onClose,
   onOpenNotification,
+  onPreviewNotification,
   onOpenCenter,
 }: NotificationsInboxDrawerProps) {
   const recentNotifications = notifications.slice(0, 6);
@@ -66,7 +68,7 @@ export function NotificationsInboxDrawer({
                 <div>
                   <span className="section-eyebrow">
                     <BellRing size={14} />
-                    Atualizações recentes
+                    Atualizacoes recentes
                   </span>
                   <h2
                     id="notifications-inbox-title"
@@ -75,14 +77,14 @@ export function NotificationsInboxDrawer({
                     Notificações
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    Veja os avisos mais recentes e abra cada contexto com um clique.
+                    Veja os avisos mais recentes.
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label="Fechar notificações"
+                  aria-label="Fechar notificacoes"
                   className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
                 >
                   <X size={20} />
@@ -103,8 +105,9 @@ export function NotificationsInboxDrawer({
               <NotificationFeed
                 notifications={recentNotifications}
                 onOpenNotification={onOpenNotification}
-                emptyTitle="Sua caixa está tranquila"
-                emptyDescription="Quando o sistema tiver novos avisos, eles vão aparecer primeiro aqui."
+                onPreviewNotification={onPreviewNotification}
+                emptyTitle="Sua caixa esta tranquila"
+                emptyDescription="Quando o sistema tiver novos avisos, eles vao aparecer primeiro aqui."
                 itemTestId="recent-notification-item"
               />
             </div>
@@ -116,7 +119,7 @@ export function NotificationsInboxDrawer({
                 className="action-secondary ml-auto"
                 data-testid="notifications-open-center"
               >
-                Ir para a central de notificações
+                Ir para a central de notificacoes
                 <span className="icon-slot h-4 w-4">
                   <ArrowRight size={16} />
                 </span>

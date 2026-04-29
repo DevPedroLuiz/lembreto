@@ -224,7 +224,7 @@ export function DashboardPage({
               testId="dashboard-metric-completed"
             />
             <MetricCard
-              title="Para hoje"
+              title="Hoje"
               value={todayCount}
               icon={<CalendarDays size={20} />}
               tone="violet"
@@ -237,6 +237,7 @@ export function DashboardPage({
               value={overdueCount}
               icon={<Bell size={20} />}
               error
+              pulse={overdueCount > 0}
               onClick={onOpenOverdue}
               ariaLabel="Abrir lembretes atrasados"
               testId="dashboard-metric-overdue"
@@ -265,11 +266,26 @@ export function DashboardPage({
                 style={{ width: `${completedPercentage}%` }}
               />
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
-              {pendingTasks.length === 0
-                ? 'Sua lista está limpa no momento. Aproveite para planejar os próximos passos.'
-                : `${pendingTasks.length} lembrete${pendingTasks.length === 1 ? '' : 's'} ainda requer atenção.`}
-            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="inline-flex min-h-[34px] items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200">
+                <span
+                  className={[
+                    'h-2.5 w-2.5 rounded-full',
+                    pendingTasks.length === 0
+                      ? 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]'
+                      : 'bg-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.14)] animate-pulse',
+                  ].join(' ')}
+                />
+                {pendingTasks.length === 0
+                  ? 'Tudo em dia'
+                  : `${pendingTasks.length} pendente${pendingTasks.length === 1 ? '' : 's'}`}
+              </span>
+              <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {pendingTasks.length === 0
+                  ? 'Sua agenda está sob controle.'
+                  : 'Ainda vale revisar os próximos passos.'}
+              </p>
+            </div>
           </div>
 
           <button type="button" onClick={onNewTask} className="action-secondary mt-auto w-full">

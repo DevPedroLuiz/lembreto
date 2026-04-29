@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+    <script type="module" src="/@vite/client"></script>
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lembreto App</title>
+     <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+
+    <!-- PWA -->
+    <meta name="theme-color" content="#040814" />
+    <script>
+      (() => {
+        try {
+          const rawConfig = localStorage.getItem('tm_config');
+          const parsedConfig = rawConfig ? JSON.parse(rawConfig) : {};
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const darkMode = typeof parsedConfig.darkMode === 'boolean'
+            ? parsedConfig.darkMode
+            : prefersDark;
+
+          document.documentElement.classList.toggle('dark', darkMode);
+        } catch {
+          document.documentElement.classList.toggle(
+            'dark',
+            window.matchMedia('(prefers-color-scheme: dark)').matches,
+          );
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx?t=1777435362979"></script>
+  </body>
+</html>

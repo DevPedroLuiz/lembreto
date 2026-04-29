@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   CalendarDays,
@@ -8,13 +8,13 @@ import {
   Loader2,
   Repeat,
   Sparkles,
+  Tag,
   X,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { getRecurrenceSuggestion, type RecurrenceMode, type RecurrenceSuggestion } from '../lib/taskRecurrence';
 import type { Priority, Task } from '../types';
-import { CATEGORIES } from '../types';
 
 const RECURRENCE_MODE_OPTIONS: Array<{ value: RecurrenceMode; label: string }> = [
   { value: 'daily', label: 'Todos os dias' },
@@ -51,7 +51,7 @@ const RECURRENCE_SUGGESTIONS: Array<{
   {
     key: 'next7Days',
     label: 'Próximos 7 dias',
-    description: 'Perfeito para um ciclo curto de acompanhamento.',
+    description: 'Ideal para um acompanhamento curto.',
   },
 ];
 
@@ -84,6 +84,10 @@ interface TaskDrawerProps {
   setPriority: (value: Priority) => void;
   category: string;
   setCategory: (value: string) => void;
+  categoryOptions: string[];
+  tags: string[];
+  setTags: (value: string[]) => void;
+  tagOptions: string[];
   recurrenceEnabled: boolean;
   setRecurrenceEnabled: (value: boolean) => void;
   recurrenceMode: RecurrenceMode;
@@ -93,6 +97,10 @@ interface TaskDrawerProps {
   recurrenceError?: string;
   recurrencePreviewCount?: number;
   onApplyRecurrenceSuggestion: (suggestion: RecurrenceSuggestion) => void;
+}
+
+function normalizeTaxonomyValue(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -248,6 +256,10 @@ export function TaskDrawer({
   setPriority,
   category,
   setCategory,
+  categoryOptions,
+  tags,
+  setTags,
+  tagOptions,
   recurrenceEnabled,
   setRecurrenceEnabled,
   recurrenceMode,
@@ -260,6 +272,8 @@ export function TaskDrawer({
 }: TaskDrawerProps) {
   const isEditing = Boolean(editingTask);
   const [activeTab, setActiveTab] = React.useState<TaskDrawerTab>('details');
+  const [tagDraft, setTagDraft] = React.useState('');
+  const [tagFeedback, setTagFeedback] = React.useState('');
   const swipe = useSwipeToClose({
     enabled: open,
     direction: 'down',
@@ -268,13 +282,21 @@ export function TaskDrawer({
   });
 
   React.useEffect(() => {
-    if (open) setActiveTab('details');
+    if (open) {
+      setActiveTab('details');
+      setTagDraft('');
+      setTagFeedback('');
+    }
   }, [editingTask, open]);
 
   const titleCount = title.trim().length;
   const summaryDue = date || 'Defina a data';
   const summaryTime = time || 'Dia todo';
   const summaryPriority = PRIORITY_LABELS[priority];
+  const availableTagSuggestions = React.useMemo(
+    () => tagOptions.filter((item) => !tags.includes(item)),
+    [tagOptions, tags],
+  );
 
   const isSuggestionActive = React.useCallback(
     (suggestionKey: RecurrenceSuggestion) => {
@@ -284,6 +306,37 @@ export function TaskDrawer({
       return suggestion.mode === recurrenceMode && suggestion.until === recurrenceUntil;
     },
     [date, recurrenceEnabled, recurrenceMode, recurrenceUntil],
+  );
+
+  const addTag = React.useCallback(
+    (value: string) => {
+      const normalized = normalizeTaxonomyValue(value);
+      if (!normalized || tags.includes(normalized)) return;
+      setTags([...tags, normalized]);
+      setTagDraft('');
+      setTagFeedback('');
+    },
+    [setTags, tags],
+  );
+
+  const handleAddExistingTag = React.useCallback(() => {
+    const normalized = normalizeTaxonomyValue(tagDraft);
+    if (!normalized) return;
+
+    if (!tagOptions.includes(normalized)) {
+      setTagFeedback('Cadastre novas tags em Configurações antes de usá-las nos lembretes.');
+      return;
+    }
+
+    addTag(normalized);
+  }, [addTag, tagDraft, tagOptions]);
+
+  const removeTag = React.useCallback(
+    (value: string) => {
+      setTags(tags.filter((item) => item !== value));
+      setTagFeedback('');
+    },
+    [setTags, tags],
   );
 
   return (
@@ -331,7 +384,7 @@ export function TaskDrawer({
                       {isEditing ? 'Editar lembrete' : 'Novo lembrete'}
                     </h2>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-50/88">
-                      Organize um lembrete com contexto, prazo e prioridade sem perder o ritmo da sua agenda.
+                      Organize o essencial do lembrete em um só lugar.
                     </p>
                   </div>
 
@@ -380,7 +433,7 @@ export function TaskDrawer({
                       <section className="surface-soft p-5">
                         <SectionHeader
                           title="Informações principais"
-                          description="Defina com clareza o que precisa ser lembrado."
+                          description="Defina o que precisa ser lembrado."
                           icon={<Sparkles size={18} />}
                         />
 
@@ -423,7 +476,7 @@ export function TaskDrawer({
                       <section className="surface-soft p-5">
                         <SectionHeader
                           title="Prazo e organização"
-                          description="Ajuste quando o lembrete acontece e como ele deve aparecer na lista."
+                          description="Defina quando o lembrete acontece e como ele aparece."
                           icon={<CalendarDays size={18} />}
                         />
 
@@ -485,7 +538,7 @@ export function TaskDrawer({
                               )}
                               data-testid="task-date-help"
                             >
-                              {dueDateError || 'O horário é opcional e pode ser digitado livremente. Sem horário, o lembrete vale durante todo o dia.'}
+                              {dueDateError || 'O horário é opcional. Sem horário, o lembrete vale para o dia todo.'}
                             </p>
                           </div>
 
@@ -514,13 +567,105 @@ export function TaskDrawer({
                                 onChange={(event) => setCategory(event.target.value)}
                                 className="field-control cursor-pointer"
                               >
-                                {CATEGORIES.map((item) => (
+                                {categoryOptions.map((item) => (
                                   <option key={item} value={item}>
                                     {item}
                                   </option>
                                 ))}
                               </select>
                             </div>
+                          </div>
+
+                          <div>
+                            <FieldLabel>Tags</FieldLabel>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={tagDraft}
+                                list="task-tag-options"
+                                disabled={isSubmitting}
+                                onChange={(event) => setTagDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    handleAddExistingTag();
+                                  }
+                                }}
+                                placeholder={tagOptions.length > 0 ? 'Selecione uma tag já cadastrada' : 'Cadastre tags em Configurações'}
+                                data-testid="task-tag-input"
+                                className="field-control"
+                              />
+                              <datalist id="task-tag-options">
+                                {tagOptions.map((item) => (
+                                  <option key={item} value={item} />
+                                ))}
+                              </datalist>
+                              <button
+                                type="button"
+                                data-testid="task-tag-add-button"
+                                onClick={handleAddExistingTag}
+                                disabled={isSubmitting || !normalizeTaxonomyValue(tagDraft)}
+                                className="action-secondary min-w-[120px] justify-center rounded-xl px-4 py-0 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Adicionar
+                              </button>
+                            </div>
+
+                            {availableTagSuggestions.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {availableTagSuggestions.slice(0, 8).map((item) => (
+                                  <button
+                                    key={item}
+                                    type="button"
+                                    data-testid={`task-tag-suggestion-${item.toLowerCase().replace(/\s+/g, '-')}`}
+                                    disabled={isSubmitting}
+                                    onClick={() => addTag(item)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                                  >
+                                    <Tag size={12} />
+                                    {item}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="mt-3 flex min-h-[44px] flex-wrap gap-2">
+                              {tags.length > 0 ? (
+                                tags.map((item) => (
+                                  <span
+                                    key={item}
+                                    data-testid="task-tag-chip"
+                                    className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+                                  >
+                                    <Tag size={12} />
+                                    {item}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTag(item)}
+                                      disabled={isSubmitting}
+                                      aria-label={`Remover tag ${item}`}
+                                      className="text-blue-500 transition-colors hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:text-blue-100"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </span>
+                                ))
+                              ) : (
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                  Use tags já cadastradas para marcar o tipo do lembrete e encontrar itens com mais rapidez.
+                                </p>
+                              )}
+                            </div>
+
+                            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                              Categorias e novas tags são cadastradas em Configurações, junto com as demais personalizações do sistema.
+                            </p>
+
+                            {tagFeedback && (
+                              <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                                {tagFeedback}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </section>
@@ -530,8 +675,8 @@ export function TaskDrawer({
                   {!isEditing && activeTab === 'recurrence' && (
                     <section className="surface-soft p-5">
                       <SectionHeader
-                        title="Repetição"
-                        description="Crie séries de lembretes com as mesmas informações em vários dias."
+                          title="Repetição"
+                          description="Repita o mesmo lembrete em vários dias."
                         icon={<Repeat size={18} />}
                       />
 
@@ -540,7 +685,7 @@ export function TaskDrawer({
                           <div>
                             <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar repetição</p>
                             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                              Use esta opção para gerar vários lembretes no mesmo envio.
+                              Gere vários lembretes em um único envio.
                             </p>
                           </div>
 
@@ -561,7 +706,7 @@ export function TaskDrawer({
                           <div className="space-y-5">
                             <div>
                               <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                                Presets de repetição
+                                Sugestões de repetição
                               </p>
                               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {RECURRENCE_SUGGESTIONS.map((suggestion) => (
@@ -637,7 +782,7 @@ export function TaskDrawer({
                                       recurrenceError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
                                     )}
                                   >
-                                    {recurrenceError || 'Você pode ajustar o tipo de repetição e a data final antes de criar tudo de uma vez.'}
+                                    {recurrenceError || 'Ajuste a repetição e a data final antes de criar tudo de uma vez.'}
                                   </p>
                                 </div>
                               </div>

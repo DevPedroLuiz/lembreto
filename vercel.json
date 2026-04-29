@@ -6,9 +6,15 @@
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
   ],
   "rewrites": [
+    { "source": "/api/tasks/metadata", "destination": "/api/tasks?action=metadata" },
+    { "source": "/api/tasks/categories", "destination": "/api/tasks?action=categories" },
+    { "source": "/api/tasks/tags", "destination": "/api/tasks?action=tags" },
+    { "source": "/api/tasks/notes", "destination": "/api/notes" },
+    { "source": "/api/tasks/notes/:id", "destination": "/api/notes?id=:id" },
     { "source": "/api/cron/:job", "destination": "/api/cron?job=:job" },
     { "source": "/api/auth/:action", "destination": "/api/auth?action=:action" },
     { "source": "/api/tasks/:id", "destination": "/api/tasks?id=:id" },
+    { "source": "/api/notes/:id", "destination": "/api/notes?id=:id" },
     { "source": "/api/notifications/settings", "destination": "/api/notifications?action=settings" },
     { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications?action=mark-all-read" },
     { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },

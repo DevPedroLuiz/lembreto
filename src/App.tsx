@@ -10,6 +10,7 @@ import {
   BellRing,
   LayoutDashboard,
   ListTodo,
+  NotebookPen,
   Plus,
   Settings,
   User as UserIcon,
@@ -19,6 +20,7 @@ import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
+import { useNotes } from './hooks/useNotes';
 import { useNotifications } from './hooks/useNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
@@ -37,8 +39,17 @@ import {
   type RecurrenceMode,
   type RecurrenceSuggestion,
 } from './lib/taskRecurrence';
-import { type AppNotification, type NotificationTarget, type Priority, type Task } from './types';
+import {
+  DEFAULT_CATEGORIES,
+  type AppNotification,
+  type Note,
+  type NoteMode,
+  type NotificationTarget,
+  type Priority,
+  type Task,
+} from './types';
 import { LoadingScreen } from './components/LoadingScreen';
+import { NoteDrawer } from './components/NoteDrawer';
 import { Sidebar } from './components/Sidebar';
 import { TaskDrawer } from './components/TaskDrawer';
 import { TaskDetailsDialog } from './components/TaskDetailsDialog';
@@ -49,6 +60,7 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AuthPage } from './pages/AuthPage';
+import { NotesPage } from './pages/NotesPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { ResetPage } from './pages/ResetPage';
 import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
@@ -63,7 +75,7 @@ type AppConfigPatch = Partial<{
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
-type ViewTab = 'dashboard' | 'tasks' | 'notifications';
+type ViewTab = 'dashboard' | 'tasks' | 'notes' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -113,6 +125,7 @@ function buildTaskShareMessage(task: Task): string {
     `Horário: ${timeLabel || 'Dia todo'}`,
     `Prioridade: ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}`,
     `Categoria: ${task.category || 'Geral'}`,
+    task.tags?.length ? `Tags: ${task.tags.join(', ')}` : null,
     `Status: ${statusLabel}`,
   ]
     .filter(Boolean)
@@ -165,7 +178,24 @@ export default function App() {
   const isResetPasswordRoute = pathname === '/reset-password';
 
   const auth = useAuth();
-  const { tasks, createTask, updateTask, deleteTask, toggleStatus } = useTasks(isResetPasswordRoute ? null : auth.token);
+  const {
+    tasks,
+    categories,
+    tags,
+    createTask,
+    updateTask,
+    deleteTask,
+    toggleStatus,
+    createCategory,
+    createTag,
+  } = useTasks(isResetPasswordRoute ? null : auth.token);
+  const {
+    notes,
+    notesByTask,
+    createNote,
+    updateNote,
+    deleteNote,
+  } = useNotes(isResetPasswordRoute ? null : auth.token);
   const {
     notifications,
     serverEnabled: serverNotificationsEnabled,
@@ -191,6 +221,7 @@ export default function App() {
   const [search, setSearch] = useState('');
 
   const [showTaskDrawer, setShowTaskDrawer] = useState(false);
+  const [showNoteDrawer, setShowNoteDrawer] = useState(false);
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
@@ -206,15 +237,20 @@ export default function App() {
   const [formTime, setFormTime] = useState('');
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formCategory, setFormCategory] = useState('Geral');
+  const [formTags, setFormTags] = useState<string[]>([]);
   const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
   const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
   const [formRecurrenceUntil, setFormRecurrenceUntil] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [noteContextTaskId, setNoteContextTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
+  const [isNoteSubmitting, setIsNoteSubmitting] = useState(false);
   const [showTaskDetails, setShowTaskDetails] = useState(false);
   const [dashboardMetricDialog, setDashboardMetricDialog] = useState<DashboardMetricKey | null>(null);
   const [taskDetailsReturnMetric, setTaskDetailsReturnMetric] = useState<DashboardMetricKey | null>(null);
+  const [pendingNotificationTaskId, setPendingNotificationTaskId] = useState<string | null>(null);
   const [deletingTaskIds, setDeletingTaskIds] = useState<Set<string>>(new Set());
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
   const [reschedulingTaskIds, setReschedulingTaskIds] = useState<Set<string>>(new Set());
@@ -222,7 +258,19 @@ export default function App() {
     id: string;
     title: string;
   } | null>(null);
+  const [pendingDeleteNote, setPendingDeleteNote] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [notificationClock, setNotificationClock] = useState(() => Date.now());
+
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteContent, setNoteContent] = useState('');
+  const [notePriority, setNotePriority] = useState<Priority>('medium');
+  const [noteCategory, setNoteCategory] = useState('Geral');
+  const [noteTags, setNoteTags] = useState<string[]>([]);
+  const [noteMode, setNoteMode] = useState<NoteMode>('temporary');
+  const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
 
   const [profName, setProfName] = useState('');
   const [profEmail, setProfEmail] = useState('');
@@ -238,11 +286,20 @@ export default function App() {
   const profileCloseTimerRef = useRef<number | null>(null);
   const previousTabRef = useRef<ViewTab>(activeTab);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const previewedNotificationIdsRef = useRef<Set<string>>(new Set());
   const welcomedUserIdRef = useRef<string | null>(null);
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+  const categoryOptions = useMemo(
+    () => (categories.length > 0 ? categories : [...DEFAULT_CATEGORIES]),
+    [categories],
+  );
+  const noteContextTask = useMemo(
+    () => (noteContextTaskId ? tasks.find((task) => task.id === noteContextTaskId) ?? null : null),
+    [noteContextTaskId, tasks],
+  );
 
   useEffect(() => {
     const cfg = LS.getConfig();
@@ -320,6 +377,7 @@ export default function App() {
   useEffect(() => {
     if (!auth.token) {
       seenNotificationIdsRef.current.clear();
+      previewedNotificationIdsRef.current.clear();
       welcomedUserIdRef.current = null;
       notificationPreferenceHydratedRef.current = false;
       notificationsOverrideRef.current = null;
@@ -386,7 +444,8 @@ export default function App() {
     const tabOrder: Record<ViewTab, number> = {
       dashboard: 0,
       tasks: 1,
-      notifications: 2,
+      notes: 2,
+      notifications: 3,
     };
 
     const previousTab = previousTabRef.current;
@@ -517,11 +576,25 @@ export default function App() {
     setFormTime('');
     setFormPriority('medium');
     setFormCategory('Geral');
+    setFormTags([]);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
     setEditingTask(null);
     setShowTaskDrawer(false);
+  }, []);
+
+  const resetNoteForm = useCallback(() => {
+    setNoteTitle('');
+    setNoteContent('');
+    setNotePriority('medium');
+    setNoteCategory('Geral');
+    setNoteTags([]);
+    setNoteMode('temporary');
+    setNoteTaskId(null);
+    setNoteContextTaskId(null);
+    setEditingNote(null);
+    setShowNoteDrawer(false);
   }, []);
 
   useEffect(() => {
@@ -539,6 +612,19 @@ export default function App() {
     }
   }, [selectedTask, tasks]);
 
+  useEffect(() => {
+    if (!pendingNotificationTaskId) return;
+
+    const relatedTask = tasks.find((task) => task.id === pendingNotificationTaskId);
+    if (!relatedTask) return;
+
+    setDashboardMetricDialog(null);
+    setTaskDetailsReturnMetric(null);
+    setSelectedTask(relatedTask);
+    setShowTaskDetails(true);
+    setPendingNotificationTaskId(null);
+  }, [pendingNotificationTaskId, tasks]);
+
   const openNewTask = useCallback(() => {
     resetTaskForm();
     setShowNotificationsInbox(false);
@@ -547,6 +633,18 @@ export default function App() {
     setTaskDetailsReturnMetric(null);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
+
+  const openNewNote = useCallback((task?: Task | null) => {
+    resetNoteForm();
+    setShowNotificationsInbox(false);
+    if (task) {
+      setNoteCategory(task.category || 'Geral');
+      setNotePriority(task.priority);
+      setNoteTaskId(task.id);
+      setNoteContextTaskId(task.id);
+    }
+    setShowNoteDrawer(true);
+  }, [resetNoteForm]);
 
   const openTaskFromTemplate = useCallback((template: QuickStartTemplate) => {
     resetTaskForm();
@@ -557,6 +655,7 @@ export default function App() {
     setFormTime(template.time ?? '');
     setFormPriority(template.priority);
     setFormCategory(template.category);
+    setFormTags([]);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
@@ -569,6 +668,7 @@ export default function App() {
     setFormTime(dueDateForm.time);
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
+    setFormTags(task.tags ?? []);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -588,6 +688,7 @@ export default function App() {
     setFormTime(dueDateForm.time);
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
+    setFormTags(task.tags ?? []);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -606,6 +707,20 @@ export default function App() {
     setShowTaskDetails(true);
   }, []);
 
+  const openEditNote = useCallback((note: Note, options?: { taskContextId?: string | null }) => {
+    setShowNotificationsInbox(false);
+    setEditingNote(note);
+    setNoteTitle(note.title);
+    setNoteContent(note.content);
+    setNotePriority(note.priority);
+    setNoteCategory(note.category || 'Geral');
+    setNoteTags(note.tags ?? []);
+    setNoteMode(note.mode);
+    setNoteTaskId(note.taskId ?? null);
+    setNoteContextTaskId(options?.taskContextId ?? null);
+    setShowNoteDrawer(true);
+  }, []);
+
   const openTaskDetailsFromMetric = useCallback((task: Task, metric: DashboardMetricKey) => {
     setShowNotificationsInbox(false);
     setDashboardMetricDialog(null);
@@ -618,6 +733,7 @@ export default function App() {
     setShowTaskDetails(false);
     setSelectedTask(null);
     setTaskDetailsReturnMetric(null);
+    setPendingNotificationTaskId(null);
   }, []);
 
   const openDashboardMetric = useCallback((metric: DashboardMetricKey) => {
@@ -746,13 +862,13 @@ export default function App() {
 
   const markAllNotificationsRead = useCallback(() => {
     void markAllRead().catch(() => {
-      triggerToastOnly('Nao foi possivel atualizar', 'Tente marcar as notificacoes como lidas novamente.');
+      triggerToastOnly('Não foi possível atualizar', 'Tente marcar as notificações como lidas novamente.');
     });
   }, [markAllRead, triggerToastOnly]);
 
   const clearNotifications = useCallback(() => {
     void clearAll().catch(() => {
-      triggerToastOnly('Nao foi possivel limpar', 'Tente limpar o historico novamente.');
+      triggerToastOnly('Não foi possível limpar', 'Tente limpar o histórico novamente.');
     });
   }, [clearAll, triggerToastOnly]);
 
@@ -773,7 +889,7 @@ export default function App() {
     } catch {
       notificationsOverrideRef.current = !nextValue;
       saveConfig({ notifications: !nextValue });
-      triggerToastOnly('Nao foi possivel salvar', 'A preferencia de notificacoes nao foi atualizada.');
+      triggerToastOnly('Não foi possível salvar', 'A preferência de notificações não foi atualizada.');
     }
   }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly, updateNotificationsEnabled]);
 
@@ -800,6 +916,7 @@ export default function App() {
       dueDate,
       priority: formPriority,
       category: formCategory,
+      tags: formTags,
     };
 
       try {
@@ -848,6 +965,7 @@ export default function App() {
     formPriority,
     formTime,
     formTitle,
+    formTags,
       isTaskSubmitting,
       resetTaskForm,
       recurringDates,
@@ -857,6 +975,57 @@ export default function App() {
       taskDueDateError,
       updateTask,
     ]);
+
+  const handleSubmitNote = useCallback(async () => {
+    if (!noteTitle.trim() || isNoteSubmitting) return;
+
+    const payload = {
+      title: noteTitle,
+      content: noteContent,
+      priority: notePriority,
+      category: noteCategory,
+      tags: noteTags,
+      mode: noteMode,
+      taskId: noteContextTaskId ?? noteTaskId,
+    };
+
+    try {
+      setIsNoteSubmitting(true);
+
+      if (editingNote) {
+        await updateNote(editingNote.id, payload);
+        emitNotification('Nota atualizada', 'As informacoes da nota foram salvas.', 'success', {
+          target: payload.taskId ? { type: 'task', taskId: payload.taskId } : { type: 'notifications' },
+        });
+      } else {
+        await createNote(payload);
+        emitNotification('Nota criada', 'A nota foi adicionada ao seu caderno.', 'success', {
+          target: payload.taskId ? { type: 'task', taskId: payload.taskId } : { type: 'notifications' },
+        });
+      }
+
+      resetNoteForm();
+    } catch (error) {
+      emitNotification('Erro', error instanceof Error ? error.message : 'Falha ao salvar a nota.', 'error');
+    } finally {
+      setIsNoteSubmitting(false);
+    }
+  }, [
+    createNote,
+    editingNote,
+    emitNotification,
+    isNoteSubmitting,
+    noteCategory,
+    noteContent,
+    noteContextTaskId,
+    noteMode,
+    notePriority,
+    noteTags,
+    noteTaskId,
+    noteTitle,
+    resetNoteForm,
+    updateNote,
+  ]);
 
   const handleToggle = useCallback(async (task: Task) => {
     if (togglingTaskIds.has(task.id)) return;
@@ -958,6 +1127,13 @@ export default function App() {
     }
   }, [configConfirmDelete, deleteTask, deletingTaskIds, emitNotification]);
 
+  const handleDeleteNote = useCallback((note: Note) => {
+    setPendingDeleteNote({
+      id: note.id,
+      title: note.title,
+    });
+  }, []);
+
   const handleConfirmDelete = useCallback(async () => {
     if (!pendingDeleteTask || deletingTaskIds.has(pendingDeleteTask.id)) return;
 
@@ -982,6 +1158,23 @@ export default function App() {
       });
     }
   }, [deleteTask, deletingTaskIds, emitNotification, pendingDeleteTask, selectedTask]);
+
+  const handleConfirmDeleteNote = useCallback(async () => {
+    if (!pendingDeleteNote) return;
+
+    const noteToDelete = pendingDeleteNote;
+
+    try {
+      await deleteNote(noteToDelete.id);
+      emitNotification('Nota removida', 'A nota foi excluida com sucesso.', 'info', { toastOnly: true });
+      if (editingNote?.id === noteToDelete.id) {
+        resetNoteForm();
+      }
+      setPendingDeleteNote(null);
+    } catch {
+      emitNotification('Erro', 'Falha ao excluir a nota.', 'error');
+    }
+  }, [deleteNote, editingNote?.id, emitNotification, pendingDeleteNote, resetNoteForm]);
 
   const openProfile = useCallback(() => {
     if (profileCloseTimerRef.current) {
@@ -1197,21 +1390,40 @@ export default function App() {
     setShowSettings(false);
   }, []);
 
-  const openTasksTab = useCallback(() => {
-    setShowNotificationsInbox(false);
-    setActiveTab('tasks');
-  }, []);
-
-  const openDashboardTab = useCallback(() => {
-    setShowNotificationsInbox(false);
-    setActiveTab('dashboard');
-  }, []);
-
-  const openNotificationsCenter = useCallback(() => {
+  const closeFloatingSurfacesForNavigation = useCallback(() => {
     setShowNotificationsInbox(false);
     setShowSettings(false);
+    setShowProfileDrawer(false);
+    setDashboardMetricDialog(null);
+    setTaskDetailsReturnMetric(null);
+    setSelectedTask(null);
+    setShowTaskDetails(false);
+    setPendingNotificationTaskId(null);
+    setPendingDeleteTask(null);
+    setPendingDeleteNote(null);
+    resetTaskForm();
+    resetNoteForm();
+  }, [resetNoteForm, resetTaskForm]);
+
+  const openTasksTab = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
+    setActiveTab('tasks');
+  }, [closeFloatingSurfacesForNavigation]);
+
+  const openNotesTab = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
+    setActiveTab('notes');
+  }, [closeFloatingSurfacesForNavigation]);
+
+  const openDashboardTab = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
+    setActiveTab('dashboard');
+  }, [closeFloatingSurfacesForNavigation]);
+
+  const openNotificationsCenter = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
     setActiveTab('notifications');
-  }, []);
+  }, [closeFloatingSurfacesForNavigation]);
 
   const openNotificationsInbox = useCallback(() => {
     setShowNotificationsInbox(true);
@@ -1220,6 +1432,15 @@ export default function App() {
   const closeNotificationsInbox = useCallback(() => {
     setShowNotificationsInbox(false);
   }, []);
+
+  const handlePreviewNotification = useCallback((notification: AppNotification) => {
+    if (notification.read || previewedNotificationIdsRef.current.has(notification.id)) return;
+
+    previewedNotificationIdsRef.current.add(notification.id);
+    void markNotificationRead(notification.id, true).catch(() => {
+      previewedNotificationIdsRef.current.delete(notification.id);
+    });
+  }, [markNotificationRead]);
 
   const handleOpenNotification = useCallback((notification: AppNotification) => {
     if (!notification.read) {
@@ -1233,17 +1454,8 @@ export default function App() {
 
     if (notification.target?.type === 'task') {
       const taskTarget = notification.target;
-      const relatedTask = tasks.find((task) => task.id === taskTarget.taskId);
       setActiveTab('tasks');
-
-      if (relatedTask) {
-        setDashboardMetricDialog(null);
-        setTaskDetailsReturnMetric(null);
-        setSelectedTask(relatedTask);
-        setShowTaskDetails(true);
-      } else {
-        triggerToastOnly('Lembrete indisponível', 'Esse lembrete pode ter sido removido ou alterado desde a notificação.');
-      }
+      setPendingNotificationTaskId(taskTarget.taskId);
 
       return;
     }
@@ -1259,7 +1471,7 @@ export default function App() {
     }
 
     setActiveTab('notifications');
-  }, [markNotificationRead, openProfile, openSettings, tasks, triggerToastOnly]);
+  }, [markNotificationRead, openProfile, openSettings]);
 
   const dismissToast = useCallback(() => {
     setToastMsg(null);
@@ -1269,6 +1481,11 @@ export default function App() {
     if (!pendingDeleteTask || deletingTaskIds.has(pendingDeleteTask.id)) return;
     setPendingDeleteTask(null);
   }, [deletingTaskIds, pendingDeleteTask]);
+
+  const cancelDeleteNote = useCallback(() => {
+    if (!pendingDeleteNote) return;
+    setPendingDeleteNote(null);
+  }, [pendingDeleteNote]);
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -1288,6 +1505,12 @@ export default function App() {
       );
 
       if (event.key === 'Escape') {
+        if (pendingDeleteNote) {
+          event.preventDefault();
+          cancelDeleteNote();
+          return;
+        }
+
         if (pendingDeleteTask && !isDeleteConfirming) {
           event.preventDefault();
           cancelDelete();
@@ -1312,6 +1535,12 @@ export default function App() {
           return;
         }
 
+        if (showNoteDrawer) {
+          event.preventDefault();
+          resetNoteForm();
+          return;
+        }
+
         if (showProfileDrawer) {
           event.preventDefault();
           closeProfileDrawer();
@@ -1333,6 +1562,7 @@ export default function App() {
       if (event.key.toLowerCase() === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const hasOverlayOpen =
           showTaskDrawer ||
+          showNoteDrawer ||
           showTaskDetails ||
           showProfileDrawer ||
           showSettings ||
@@ -1360,6 +1590,21 @@ export default function App() {
           void handleConfirmDelete();
         }
       }
+
+      if (event.key === 'Enter' && pendingDeleteNote) {
+        const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+        const activeElement = document.activeElement;
+
+        if (
+          dialog &&
+          activeElement instanceof HTMLElement &&
+          dialog.contains(activeElement) &&
+          activeElement.tagName !== 'TEXTAREA'
+        ) {
+          event.preventDefault();
+          void handleConfirmDeleteNote();
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -1368,6 +1613,7 @@ export default function App() {
     auth.currentUser,
     auth.token,
     cancelDelete,
+    cancelDeleteNote,
     closeDashboardMetric,
     closeNotificationsInbox,
     closeProfileDrawer,
@@ -1376,10 +1622,14 @@ export default function App() {
     dashboardMetricDialog,
     deletingTaskIds,
     handleConfirmDelete,
+    handleConfirmDeleteNote,
     openNewTask,
+    pendingDeleteNote,
     pendingDeleteTask,
     resetTaskForm,
+    resetNoteForm,
     showNotificationsInbox,
+    showNoteDrawer,
     showProfileDrawer,
     showSettings,
     showTaskDetails,
@@ -1417,11 +1667,15 @@ export default function App() {
     ? `Olá, ${greetingName}`
     : activeTab === 'tasks'
       ? 'Sua agenda'
+      : activeTab === 'notes'
+        ? 'Suas notas'
       : 'Notificações';
   const pageDescription = activeTab === 'dashboard'
-    ? 'Aqui está uma visão clara do que pede atenção hoje.'
+    ? ''
     : activeTab === 'tasks'
       ? 'Organize lembretes, refine prioridades e avance com tranquilidade.'
+      : activeTab === 'notes'
+        ? 'Guarde contexto, ideias e apontamentos vinculados aos seus lembretes.'
       : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
   const dashboardMetricContent = dashboardMetricDialog === 'completed'
     ? {
@@ -1461,6 +1715,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         filterCategory={filterCategory}
         setFilterCategory={setFilterCategory}
+        categories={categoryOptions}
         pendingTasks={pendingTasks}
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
@@ -1521,14 +1776,20 @@ export default function App() {
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <span className="section-eyebrow">
-                  {activeTab === 'dashboard' ? 'Painel principal' : 'Gestão de lembretes'}
+                  {activeTab === 'dashboard'
+                    ? 'Painel principal'
+                    : activeTab === 'notes'
+                      ? 'Caderno pessoal'
+                      : 'Gestão de lembretes'}
                 </span>
                 <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
                   {pageTitle}
                 </h2>
-                <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
-                  {pageDescription}
-                </p>
+                {pageDescription && (
+                  <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+                    {pageDescription}
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -1560,6 +1821,15 @@ export default function App() {
                 className="action-primary hidden md:inline-flex"
               >
                 <Plus size={20} /> Novo lembrete
+              </button>
+            )}
+            {activeTab === 'notes' && (
+              <button
+                onClick={() => openNewNote()}
+                data-testid="new-note-header-button"
+                className="action-primary hidden md:inline-flex"
+              >
+                <Plus size={20} /> Nova nota
               </button>
             )}
           </div>
@@ -1596,6 +1866,7 @@ export default function App() {
                 <TasksPage
                   pendingTasks={pendingTasks}
                   completedTasks={completedTasks}
+                  categories={categoryOptions}
                   filterCategory={filterCategory}
                   setFilterCategory={setFilterCategory}
                   search={search}
@@ -1607,6 +1878,16 @@ export default function App() {
                   onEdit={openTaskDetails}
                   deletingTaskIds={deletingTaskIds}
                   togglingTaskIds={togglingTaskIds}
+                />
+              )}
+              {activeTab === 'notes' && (
+                <NotesPage
+                  notes={notes}
+                  tasks={tasks}
+                  categories={categoryOptions}
+                  onNewNote={() => openNewNote()}
+                  onEditNote={(note) => openEditNote(note)}
+                  onDeleteNote={handleDeleteNote}
                 />
               )}
               {activeTab === 'notifications' && (
@@ -1623,7 +1904,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 md:hidden">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 p-2">
+        <div className="grid grid-cols-[1fr_1fr_auto_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -1634,6 +1915,16 @@ export default function App() {
             >
               <LayoutDashboard size={24} />
             </button>
+          <button
+            onClick={openNotesTab}
+            aria-label="Abrir notas"
+            className={cn(
+              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              activeTab === 'notes' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
+            )}
+          >
+            <NotebookPen size={24} />
+          </button>
           <div className="relative -top-6">
             <button
               onClick={openNewTask}
@@ -1664,6 +1955,7 @@ export default function App() {
       <TaskDetailsDialog
         open={showTaskDetails && Boolean(selectedTask)}
         task={selectedTask}
+        linkedNotes={selectedTask ? notesByTask.get(selectedTask.id) ?? [] : []}
         isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
         isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
         isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
@@ -1676,6 +1968,9 @@ export default function App() {
         onQuickReschedule={handleQuickReschedule}
         onToggle={handleToggleFromDetails}
         onDelete={handleDeleteFromDetails}
+        onCreateLinkedNote={openNewNote}
+        onEditLinkedNote={(note, task) => openEditNote(note, { taskContextId: task.id })}
+        onDeleteLinkedNote={handleDeleteNote}
       />
 
       <DashboardMetricDialog
@@ -1721,6 +2016,10 @@ export default function App() {
         setPriority={setFormPriority}
         category={formCategory}
         setCategory={setFormCategory}
+        categoryOptions={categoryOptions}
+        tags={formTags}
+        setTags={setFormTags}
+        tagOptions={tags}
         recurrenceEnabled={formRecurrenceEnabled}
         setRecurrenceEnabled={setFormRecurrenceEnabled}
         recurrenceMode={formRecurrenceMode}
@@ -1730,6 +2029,32 @@ export default function App() {
         recurrenceError={recurrenceError}
         recurrencePreviewCount={recurringDates.length}
         onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}
+      />
+
+      <NoteDrawer
+        open={showNoteDrawer}
+        onClose={resetNoteForm}
+        onSubmit={handleSubmitNote}
+        editingNote={editingNote}
+        isSubmitting={isNoteSubmitting}
+        title={noteTitle}
+        setTitle={setNoteTitle}
+        content={noteContent}
+        setContent={setNoteContent}
+        priority={notePriority}
+        setPriority={setNotePriority}
+        category={noteCategory}
+        setCategory={setNoteCategory}
+        categoryOptions={categoryOptions}
+        tags={noteTags}
+        setTags={setNoteTags}
+        tagOptions={tags}
+        mode={noteMode}
+        setMode={setNoteMode}
+        taskId={noteTaskId}
+        setTaskId={setNoteTaskId}
+        tasks={tasks}
+        lockedTask={noteContextTask}
       />
 
       <ProfileDrawer
@@ -1760,12 +2085,17 @@ export default function App() {
           void handleToggleNotifications();
         }}
         onOpenNotificationsCenter={openNotificationsCenter}
+        onOpenProfile={openProfile}
         sound={configSound}
         onToggleSound={() => saveConfig({ sound: !configSound })}
         confirmDelete={configConfirmDelete}
         onToggleConfirmDelete={() => saveConfig({ confirmDelete: !configConfirmDelete })}
         showCompleted={configShowCompleted}
         onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
+        categories={categoryOptions}
+        tags={tags}
+        onCreateCategory={createCategory}
+        onCreateTag={createTag}
       />
 
       <NotificationsInboxDrawer
@@ -1774,26 +2104,33 @@ export default function App() {
         unreadCount={unreadNotifications}
         onClose={closeNotificationsInbox}
         onOpenNotification={handleOpenNotification}
+        onPreviewNotification={handlePreviewNotification}
         onOpenCenter={openNotificationsCenter}
       />
 
       <Toast toast={toastMsg} onDismiss={dismissToast} />
 
       <ConfirmDialog
-        open={Boolean(pendingDeleteTask)}
-        title="Excluir lembrete?"
+        open={Boolean(pendingDeleteTask || pendingDeleteNote)}
+        title={pendingDeleteTask ? 'Excluir lembrete?' : 'Excluir nota?'}
         message={
           pendingDeleteTask
             ? `Você está prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
-            : ''
+            : pendingDeleteNote
+              ? `Você está prestes a excluir "${pendingDeleteNote.title}" permanentemente.`
+              : ''
         }
-        confirmLabel="Excluir lembrete"
-        cancelLabel="Manter lembrete"
+        confirmLabel={pendingDeleteTask ? 'Excluir lembrete' : 'Excluir nota'}
+        cancelLabel={pendingDeleteTask ? 'Manter lembrete' : 'Manter nota'}
         isConfirming={pendingDeleteTask ? deletingTaskIds.has(pendingDeleteTask.id) : false}
         onConfirm={() => {
-          void handleConfirmDelete();
+          if (pendingDeleteTask) {
+            void handleConfirmDelete();
+            return;
+          }
+          void handleConfirmDeleteNote();
         }}
-        onCancel={cancelDelete}
+        onCancel={pendingDeleteTask ? cancelDelete : cancelDeleteNote}
       />
     </div>
   );

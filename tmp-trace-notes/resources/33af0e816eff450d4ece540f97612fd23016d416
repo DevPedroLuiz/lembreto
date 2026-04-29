@@ -1,0 +1,579 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: app.spec.ts >> Lembreto critical flows >> creates, edits and deletes linked notes from inside a reminder
+- Location: e2e\app.spec.ts:282:3
+
+# Error details
+
+```
+Error: expect(locator).toHaveCount(expected) failed
+
+Locator:  getByRole('dialog', { name: /nova nota/i })
+Expected: 0
+Received: 1
+Timeout:  10000ms
+
+Call log:
+  - Expect "toHaveCount" with timeout 10000ms
+  - waiting for getByRole('dialog', { name: /nova nota/i })
+    14 × locator resolved to 1 element
+       - unexpected value "1"
+
+```
+
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - img [ref=e9]
+          - generic [ref=e13]:
+            - paragraph [ref=e14]: Organização pessoal
+            - heading "Lembreto" [level=1] [ref=e15]
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - paragraph [ref=e18]: Pendentes
+            - paragraph [ref=e19]: "1"
+          - generic [ref=e20]:
+            - paragraph [ref=e21]: Categorias
+            - paragraph [ref=e22]: "5"
+      - navigation [ref=e23]:
+        - button "Painel Acesse rapidamente" [ref=e24]:
+          - generic [ref=e25]:
+            - img [ref=e28]
+            - generic [ref=e33]:
+              - generic [ref=e34]: Painel
+              - generic [ref=e35]: Acesse rapidamente
+        - button "Meus lembretes Acesse rapidamente" [ref=e36]:
+          - generic [ref=e37]:
+            - img [ref=e40]
+            - generic [ref=e43]:
+              - generic [ref=e44]: Meus lembretes
+              - generic [ref=e45]: Acesse rapidamente
+        - button "Minhas notas Acesse rapidamente" [ref=e46]:
+          - generic [ref=e47]:
+            - img [ref=e50]
+            - generic [ref=e53]:
+              - generic [ref=e54]: Minhas notas
+              - generic [ref=e55]: Acesse rapidamente
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - heading "Categorias" [level=2] [ref=e58]
+          - generic [ref=e59]: Filtro rápido
+        - generic [ref=e60]:
+          - button "Todas 1" [ref=e61]:
+            - generic [ref=e62]: Todas
+            - generic [ref=e63]: "1"
+          - button "Geral 0" [ref=e64]:
+            - generic [ref=e65]:
+              - img [ref=e67]
+              - text: Geral
+            - generic [ref=e70]: "0"
+          - button "Trabalho 1" [ref=e71]:
+            - generic [ref=e72]:
+              - img [ref=e74]
+              - text: Trabalho
+            - generic [ref=e77]: "1"
+          - button "Pessoal 0" [ref=e78]:
+            - generic [ref=e79]:
+              - img [ref=e81]
+              - text: Pessoal
+            - generic [ref=e84]: "0"
+          - button "Estudos 0" [ref=e85]:
+            - generic [ref=e86]:
+              - img [ref=e88]
+              - text: Estudos
+            - generic [ref=e91]: "0"
+          - button "Referencias 0" [ref=e92]:
+            - generic [ref=e93]:
+              - img [ref=e95]
+              - text: Referencias
+            - generic [ref=e98]: "0"
+      - generic [ref=e99]:
+        - button "Abrir perfil" [ref=e100]:
+          - generic [ref=e101]:
+            - img [ref=e103]
+            - generic [ref=e106]:
+              - paragraph [ref=e107]: Teste E2E
+              - paragraph [ref=e108]: teste-e2e-1777435814678-237fea@example.com
+            - button "Sair da conta" [ref=e109]:
+              - img [ref=e110]
+        - button "Configurações" [ref=e113]:
+          - generic [ref=e114]:
+            - img [ref=e115]
+            - text: Configurações
+          - img [ref=e118]
+  - main [ref=e120]:
+    - generic [ref=e121]:
+      - generic [ref=e123]:
+        - generic [ref=e124]:
+          - generic [ref=e125]: Gestão de lembretes
+          - heading "Sua agenda" [level=2] [ref=e126]
+          - paragraph [ref=e127]: Organize lembretes, refine prioridades e avance com tranquilidade.
+        - button "Abrir notificações recentes" [ref=e129]:
+          - img [ref=e131]
+          - generic [ref=e136]: "4"
+      - button "Novo lembrete" [ref=e138]:
+        - img [ref=e139]
+        - text: Novo lembrete
+      - generic [ref=e141]:
+        - generic [ref=e143]:
+          - generic [ref=e144]:
+            - generic [ref=e145]:
+              - img [ref=e146]
+              - text: Organização da agenda
+            - heading "Filtre, ordene e acompanhe cada entrega com clareza." [level=3] [ref=e149]
+            - paragraph [ref=e150]: Use pesquisa, categorias, prioridade e status para localizar rapidamente o que precisa ser feito agora.
+          - generic [ref=e151]:
+            - generic [ref=e152]:
+              - button "Abrir filtros" [ref=e153]:
+                - img [ref=e154]
+                - text: Abrir filtros
+                - img [ref=e155]
+              - paragraph [ref=e157]: 1 lembrete encontrado com a seleção atual.
+            - generic [ref=e158]:
+              - generic [ref=e159]: Ordenado por Recentes
+              - generic [ref=e160]: "Categoria: Todas"
+              - generic [ref=e161]: "Prioridade: Todas as prioridades"
+              - generic [ref=e162]: "Status: Todos"
+        - generic [ref=e163]:
+          - generic [ref=e165]:
+            - heading "Lembretes pendentes" [level=4] [ref=e166]
+            - paragraph [ref=e167]: 1 lembrete em aberto
+          - button "Abrir lembrete Reuniao com cliente" [ref=e169] [cursor=pointer]:
+            - button "Concluir lembrete Reuniao com cliente" [ref=e171]:
+              - img [ref=e172]
+            - generic [ref=e174]:
+              - generic [ref=e175]:
+                - generic [ref=e176]:
+                  - generic [ref=e177]:
+                    - heading "Reuniao com cliente" [level=3] [ref=e178]
+                    - img [ref=e180]
+                  - paragraph [ref=e183]: Fluxo automatizado de ponta a ponta.
+                - button "Excluir lembrete Reuniao com cliente" [ref=e184]:
+                  - img [ref=e185]
+              - generic [ref=e188]:
+                - generic [ref=e189]: Alta
+                - generic [ref=e190]:
+                  - img [ref=e191]
+                  - text: Trabalho
+                - generic "Amanhã - Dia todo" [ref=e194]:
+                  - img [ref=e195]
+                  - text: Amanhã
+  - dialog "Reuniao com cliente" [ref=e199]:
+    - generic [ref=e201]:
+      - generic [ref=e202]:
+        - generic [ref=e204]:
+          - img [ref=e206]
+          - text: Visão do lembrete
+        - heading "Reuniao com cliente" [level=2] [ref=e208]
+        - paragraph [ref=e209]: Criado em 29 de abr às 01:10
+      - button "Fechar visualização do lembrete" [ref=e210]:
+        - img [ref=e211]
+    - generic [ref=e215]:
+      - generic [ref=e216]:
+        - generic [ref=e217]:
+          - generic [ref=e218]: Alta
+          - generic [ref=e219]:
+            - img [ref=e220]
+            - text: Trabalho
+          - generic [ref=e223]:
+            - img [ref=e224]
+            - text: Pendente
+        - generic [ref=e226]:
+          - generic [ref=e227]:
+            - heading "Descrição" [level=3] [ref=e228]
+            - paragraph [ref=e229]: Fluxo automatizado de ponta a ponta.
+          - generic [ref=e230]:
+            - generic [ref=e231]:
+              - img [ref=e233]
+              - generic [ref=e237]:
+                - heading "Histórico rápido" [level=3] [ref=e238]
+                - paragraph [ref=e239]: Um resumo objetivo para situar este lembrete.
+            - generic [ref=e240]:
+              - generic [ref=e241]:
+                - img [ref=e243]
+                - generic [ref=e246]:
+                  - paragraph [ref=e247]: Registro criado
+                  - paragraph [ref=e248]: 29 de abr às 01:10
+              - generic [ref=e249]:
+                - img [ref=e251]
+                - generic [ref=e253]:
+                  - paragraph [ref=e254]: Prazo definido
+                  - paragraph [ref=e255]: quinta-feira, 30 de abril
+                  - paragraph [ref=e256]: Dia todo
+              - generic [ref=e257]:
+                - img [ref=e259]
+                - generic [ref=e261]:
+                  - paragraph [ref=e262]: Situação atual
+                  - paragraph [ref=e263]: Pendente e pronto para receber uma ação
+      - complementary [ref=e264]:
+        - generic [ref=e265]:
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - heading "Notas vinculadas" [level=3] [ref=e268]
+              - paragraph [ref=e269]: Centralize observacoes e contexto que pertencem exclusivamente a este lembrete.
+            - button "Nova nota" [ref=e270]:
+              - img [ref=e271]
+              - text: Nova nota
+          - generic [ref=e275]: Ainda nao existe nenhuma nota vinculada a este lembrete.
+        - generic [ref=e276]:
+          - heading "Prazo" [level=3] [ref=e277]
+          - generic [ref=e278]:
+            - generic [ref=e279]:
+              - img [ref=e281]
+              - generic [ref=e283]:
+                - paragraph [ref=e284]: Data
+                - paragraph [ref=e285]: quinta-feira, 30 de abril
+            - generic [ref=e286]:
+              - img [ref=e288]
+              - generic [ref=e291]:
+                - paragraph [ref=e292]: Horário
+                - paragraph [ref=e293]: Dia todo
+                - paragraph [ref=e294]: Dia todo
+        - generic [ref=e295]:
+          - heading "Ajustes rápidos" [level=3] [ref=e296]
+          - paragraph [ref=e297]: Quando a rotina muda, você consegue adiar este lembrete sem entrar na edição completa.
+          - generic [ref=e298]:
+            - button "Mais tarde hoje +2 horas" [ref=e299]:
+              - generic [ref=e300]:
+                - img [ref=e301]
+                - text: Mais tarde hoje
+              - generic [ref=e304]: +2 horas
+            - generic [ref=e305]:
+              - button "Amanhã cedo" [ref=e306]:
+                - img [ref=e307]
+                - text: Amanhã cedo
+              - button "Próxima semana" [ref=e309]:
+                - img [ref=e310]
+                - text: Próxima semana
+        - generic [ref=e314]:
+          - heading "Ações" [level=3] [ref=e315]
+          - generic [ref=e316]:
+            - button "Editar lembrete" [ref=e317]:
+              - img [ref=e318]
+              - text: Editar lembrete
+            - generic [ref=e321]:
+              - button "Duplicar" [ref=e322]:
+                - img [ref=e323]
+                - text: Duplicar
+              - button "Compartilhar" [ref=e326]:
+                - img [ref=e327]
+                - text: Compartilhar
+            - button "Marcar como concluído" [ref=e333]:
+              - img [ref=e334]
+              - text: Marcar como concluído
+            - button "Excluir lembrete" [ref=e337]:
+              - img [ref=e338]
+              - text: Excluir lembrete
+  - dialog "Nova nota" [ref=e343]:
+    - generic [ref=e344]:
+      - generic [ref=e345]:
+        - generic [ref=e346]:
+          - generic [ref=e347]: Anotacao
+          - heading "Nova nota" [level=2] [ref=e348]
+          - paragraph [ref=e349]: Registre contexto, ideias e informacoes auxiliares sem perder a ligacao com os seus lembretes.
+        - button "Fechar formulario de nota" [ref=e350]:
+          - img [ref=e351]
+      - generic [ref=e354]:
+        - generic [ref=e355]:
+          - generic [ref=e356]:
+            - img [ref=e357]
+            - text: Prioridade
+          - paragraph [ref=e359]: Alta
+        - generic [ref=e360]:
+          - generic [ref=e361]:
+            - img [ref=e362]
+            - text: Tipo
+          - paragraph [ref=e364]: Fixa
+        - generic [ref=e365]:
+          - generic [ref=e366]:
+            - img [ref=e367]
+            - text: Vinculo
+          - paragraph [ref=e370]: Reuniao com cliente
+    - generic [ref=e371]:
+      - generic [ref=e373]:
+        - generic [ref=e374]:
+          - generic [ref=e375]:
+            - img [ref=e377]
+            - generic [ref=e380]:
+              - heading "Conteudo da nota" [level=3] [ref=e381]
+              - paragraph [ref=e382]: Escreva apenas o contexto que ajuda voce a agir melhor depois.
+          - generic [ref=e383]:
+            - generic [ref=e384]:
+              - generic [ref=e385]:
+                - generic [ref=e386]: Titulo
+                - generic [ref=e387]: 11/80
+              - 'textbox "Ex.: Pontos para a reuniao de alinhamento" [ref=e388]': Ata inicial
+            - generic [ref=e389]:
+              - generic [ref=e390]: Conteudo
+              - textbox "Escreva aqui observacoes, ideias, contexto ou proximos passos." [ref=e391]: Registrar pontos de alinhamento e proximos passos.
+        - generic [ref=e392]:
+          - generic [ref=e393]:
+            - img [ref=e395]
+            - generic [ref=e398]:
+              - heading "Classificacao" [level=3] [ref=e399]
+              - paragraph [ref=e400]: Relacione essa nota com a mesma taxonomia que voce ja usa nos lembretes.
+          - generic [ref=e401]:
+            - generic [ref=e402]:
+              - generic [ref=e403]: Prioridade
+              - combobox [ref=e404] [cursor=pointer]:
+                - option "Baixa"
+                - option "Media"
+                - option "Alta" [selected]
+            - generic [ref=e405]:
+              - generic [ref=e406]: Categoria
+              - combobox [ref=e407] [cursor=pointer]:
+                - option "Geral"
+                - option "Trabalho"
+                - option "Pessoal"
+                - option "Estudos"
+                - option "Referencias" [selected]
+          - generic [ref=e408]:
+            - generic [ref=e409]:
+              - generic [ref=e410]: Tipo da nota
+              - generic [ref=e411]:
+                - button "Temporaria" [ref=e412]:
+                  - img [ref=e413]
+                  - text: Temporaria
+                - button "Fixa" [pressed] [ref=e416]:
+                  - img [ref=e417]
+                  - text: Fixa
+            - generic [ref=e419]:
+              - generic [ref=e420]: Vincular a lembrete
+              - combobox [disabled] [ref=e421]:
+                - option "Sem vinculo"
+                - option "Reuniao com cliente" [selected]
+          - generic [ref=e422]:
+            - generic [ref=e423]: Tags
+            - generic [ref=e424]:
+              - combobox "Selecione uma tag ja cadastrada" [ref=e425]
+              - button "Adicionar" [disabled] [ref=e426]:
+                - img [ref=e427]
+                - text: Adicionar
+            - generic [ref=e429]:
+              - img [ref=e430]
+              - text: Ata
+              - button "Remover tag Ata" [ref=e433]:
+                - img [ref=e434]
+            - paragraph [ref=e437]: Novas categorias e tags continuam sendo cadastradas em Configuracoes.
+      - generic [ref=e439]:
+        - button "Cancelar" [ref=e440]
+        - button "Adicionar nota" [ref=e441]
+```
+
+# Test source
+
+```ts
+  216 |       await page.getByTestId('task-description-input').fill('Criado em série para validar repetição.');
+  217 |       await page.getByTestId('task-date-input').fill(formatDateLocal(nextMonday));
+  218 |       await page.getByTestId('task-tab-recurrence').click();
+  219 |       await page.getByTestId('task-recurrence-toggle').check();
+  220 |       await page.getByTestId('task-recurrence-suggestion-weekdays').click();
+  221 |       await expect(page.getByTestId('task-recurrence-mode')).toHaveValue('weekdays');
+  222 |       await page.getByTestId('task-recurrence-until').fill(formatDateLocal(nextFriday));
+  223 |       await expect(page.getByTestId('task-recurrence-count')).toContainText('5 lembretes');
+  224 |       await page.getByTestId('task-submit-button').click();
+  225 |       await page.getByTestId('sidebar-tasks').click();
+  226 |       await page.reload();
+  227 |       await expect(page.locator('[data-testid="task-item"][data-task-title="Rotina recorrente"]')).toHaveCount(5);
+  228 |     } finally {
+  229 |       await cleanupUsersByEmail([user.email]);
+  230 |     }
+  231 |   });
+  232 | 
+  233 |   test('creates custom categories and tags for reminders', async ({ page }) => {
+  234 |     const user = buildE2ETestUser();
+  235 | 
+  236 |     await cleanupUsersByEmail([user.email]);
+  237 | 
+  238 |     try {
+  239 |       await registerUser(page, user);
+  240 | 
+  241 |       await page.getByTestId('sidebar-settings-button').click();
+  242 |       await page.getByTestId('settings-nav-organization').click();
+  243 |       await page.getByTestId('settings-category-create-input').fill('Saúde');
+  244 |       await page.getByTestId('settings-category-create-button').click();
+  245 |       await expect(page.getByText('Categoria "Saúde" criada com sucesso.')).toBeVisible();
+  246 | 
+  247 |       await page.getByTestId('settings-tag-create-input').fill('Consulta');
+  248 |       await page.getByTestId('settings-tag-create-button').click();
+  249 |       await expect(page.getByText('Tag "Consulta" criada com sucesso.')).toBeVisible();
+  250 |       await page.getByRole('button', { name: /fechar configura/i }).click();
+  251 | 
+  252 |       await page.getByTestId('dashboard-create-first-task').click();
+  253 |       await page.getByTestId('task-title-input').fill('Consulta de rotina');
+  254 |       await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)));
+  255 | 
+  256 |       await page.getByTestId('task-category-select').selectOption('Saúde');
+  257 |       await page.getByTestId('task-tag-input').fill('Consulta');
+  258 |       await page.getByTestId('task-tag-add-button').click();
+  259 |       await expect(page.getByTestId('task-tag-chip')).toContainText('Consulta');
+  260 | 
+  261 |       await page.getByTestId('task-submit-button').click();
+  262 | 
+  263 |       const createdTask = taskCard(page, 'Consulta de rotina');
+  264 |       await expect(createdTask).toBeVisible();
+  265 |       await expect(createdTask).toContainText('Saúde');
+  266 |       await expect(createdTask).toContainText('Consulta');
+  267 | 
+  268 |       await createdTask.click();
+  269 |       const taskDetailsDialog = page.getByTestId('task-details-dialog');
+  270 |       await expect(taskDetailsDialog).toContainText('Saúde');
+  271 |       await expect(taskDetailsDialog).toContainText('Consulta');
+  272 | 
+  273 |       await page.getByRole('button', { name: /fechar visualização do lembrete/i }).click();
+  274 |       await page.getByTestId('sidebar-tasks').click();
+  275 |       await page.locator('aside').getByText('Saúde', { exact: true }).click();
+  276 |       await expect(createdTask).toBeVisible();
+  277 |     } finally {
+  278 |       await cleanupUsersByEmail([user.email]);
+  279 |     }
+  280 |   });
+  281 | 
+  282 |   test('creates, edits and deletes linked notes from inside a reminder', async ({ page }) => {
+  283 |     const user = buildE2ETestUser();
+  284 | 
+  285 |     await cleanupUsersByEmail([user.email]);
+  286 | 
+  287 |     try {
+  288 |       await registerUser(page, user);
+  289 | 
+  290 |       await page.getByTestId('sidebar-settings-button').click();
+  291 |       await page.getByTestId('settings-nav-organization').click();
+  292 |       await page.getByTestId('settings-category-create-input').fill('Referencias');
+  293 |       await page.getByTestId('settings-category-create-button').click();
+  294 |       await page.getByTestId('settings-tag-create-input').fill('Ata');
+  295 |       await page.getByTestId('settings-tag-create-button').click();
+  296 |       await page.getByRole('button', { name: /fechar configura/i }).click();
+  297 | 
+  298 |       await createTask(page, 'Reuniao com cliente');
+  299 | 
+  300 |       const createdTask = taskCard(page, 'Reuniao com cliente');
+  301 |       await createdTask.click();
+  302 |       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
+  303 | 
+  304 |       await page.getByTestId('task-details-add-note').click();
+  305 |       await expect(page.getByRole('dialog', { name: /nova nota/i })).toBeVisible();
+  306 |       await page.getByTestId('note-title-input').fill('Ata inicial');
+  307 |       await page.getByTestId('note-content-input').fill('Registrar pontos de alinhamento e proximos passos.');
+  308 |       await page.getByTestId('note-priority-select').selectOption('high');
+  309 |       await page.getByTestId('note-category-select').selectOption('Referencias');
+  310 |       await page.getByTestId('note-mode-fixed').click();
+  311 |       await expect(page.getByTestId('note-task-select')).toBeDisabled();
+  312 |       await page.getByTestId('note-tag-input').fill('Ata');
+  313 |       await page.getByTestId('note-tag-add-button').click();
+  314 |       await expect(page.getByTestId('note-tag-chip')).toContainText('Ata');
+  315 |       await page.getByTestId('note-submit-button').click();
+> 316 |       await expect(page.getByRole('dialog', { name: /nova nota/i })).toHaveCount(0);
+      |                                                                      ^ Error: expect(locator).toHaveCount(expected) failed
+  317 | 
+  318 |       const linkedNoteCard = page.getByTestId('task-details-dialog').getByTestId('note-card').first();
+  319 |       await expect(linkedNoteCard).toContainText('Ata inicial');
+  320 |       await expect(linkedNoteCard).toContainText('Referencias');
+  321 |       await expect(linkedNoteCard).toContainText('Ata');
+  322 | 
+  323 |       await linkedNoteCard.getByTestId('note-edit-button').click();
+  324 |       await expect(page.getByRole('dialog', { name: /editar nota/i })).toBeVisible();
+  325 |       await page.getByTestId('note-title-input').fill('Ata final');
+  326 |       await page.getByTestId('note-submit-button').click();
+  327 |       await expect(page.getByRole('dialog', { name: /editar nota/i })).toHaveCount(0);
+  328 | 
+  329 |       await expect(page.getByTestId('task-details-dialog').getByTestId('note-card').first()).toContainText('Ata final');
+  330 | 
+  331 |       await page.getByTestId('sidebar-notes').click();
+  332 |       const noteCard = page.locator('[data-testid="note-card"][data-note-title="Ata final"]').first();
+  333 |       await expect(noteCard).toBeVisible();
+  334 |       await expect(noteCard.getByTestId('note-linked-task')).toContainText('Reuniao com cliente');
+  335 | 
+  336 |       await noteCard.getByTestId('note-delete-button').click();
+  337 |       await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+  338 |       await page.getByTestId('confirm-dialog-confirm').click();
+  339 |       await expect(page.locator('[data-testid="note-card"][data-note-title="Ata final"]')).toHaveCount(0);
+  340 |     } finally {
+  341 |       await cleanupUsersByEmail([user.email]);
+  342 |     }
+  343 |   });
+  344 | 
+  345 |   test('uses dashboard metrics as shortcuts and filtered views', async ({ page }) => {
+  346 |     const user = buildE2ETestUser();
+  347 |     const today = new Date();
+  348 |     if (today.getHours() >= 22) {
+  349 |       today.setHours(23, 55, 0, 0);
+  350 |     } else {
+  351 |       today.setHours(today.getHours() + 1, 0, 0, 0);
+  352 |     }
+  353 | 
+  354 |     const overdue = new Date();
+  355 |     overdue.setDate(overdue.getDate() - 2);
+  356 |     overdue.setHours(9, 0, 0, 0);
+  357 | 
+  358 |     const completed = new Date();
+  359 |     completed.setDate(completed.getDate() - 1);
+  360 |     completed.setHours(14, 0, 0, 0);
+  361 | 
+  362 |     await cleanupUsersByEmail([user.email]);
+  363 | 
+  364 |     try {
+  365 |       await registerUser(page, user);
+  366 |       await seedCustomTasksForUser(user.email, [
+  367 |         {
+  368 |           title: 'Concluído no painel',
+  369 |           dueDate: completed.toISOString(),
+  370 |           priority: 'medium',
+  371 |           category: 'Geral',
+  372 |           status: 'completed',
+  373 |         },
+  374 |         {
+  375 |           title: 'Hoje no painel',
+  376 |           dueDate: today.toISOString(),
+  377 |           priority: 'high',
+  378 |           category: 'Trabalho',
+  379 |         },
+  380 |         {
+  381 |           title: 'Atrasado no painel',
+  382 |           dueDate: overdue.toISOString(),
+  383 |           priority: 'high',
+  384 |           category: 'Pessoal',
+  385 |         },
+  386 |       ]);
+  387 | 
+  388 |       await page.getByTestId('sidebar-logout').click();
+  389 |       await expect(page.getByTestId('auth-submit-button')).toBeVisible();
+  390 |       await loginUser(page, user.email, user.password);
+  391 | 
+  392 |       await page.getByTestId('dashboard-metric-completed').click();
+  393 |       const dashboardMetricDialog = page.getByTestId('dashboard-metric-dialog');
+  394 |       await expect(dashboardMetricDialog).toBeVisible();
+  395 |       await expect(dashboardMetricDialog).toContainText(/Lembretes conclu/i);
+  396 |       const completedDashboardTask = dashboardMetricDialog.getByTestId('task-item').first();
+  397 |       await expect(completedDashboardTask).toBeVisible();
+  398 |       await completedDashboardTask.click();
+  399 |       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
+  400 |       await expect(page.getByTestId('task-details-back')).toContainText(/Voltar para conclu/i);
+  401 |       await page.getByTestId('task-details-back').click();
+  402 |       await expect(dashboardMetricDialog).toBeVisible();
+  403 | 
+  404 |       await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
+  405 |       await page.getByTestId('dashboard-metric-today').click();
+  406 |       await expect(dashboardMetricDialog).toContainText('Lembretes para hoje');
+  407 |       await expect(dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="Hoje no painel"]')).toBeVisible();
+  408 | 
+  409 |       await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
+  410 |       await page.getByTestId('dashboard-metric-overdue').click();
+  411 |       await expect(dashboardMetricDialog).toContainText('Lembretes atrasados');
+  412 |       await expect(dashboardMetricDialog.locator('[data-testid="task-item"][data-task-title="Atrasado no painel"]')).toBeVisible();
+  413 | 
+  414 |       await dashboardMetricDialog.getByRole('button', { name: /Fechar vis.o filtrada/i }).click();
+  415 |       await page.getByTestId('dashboard-metric-total').click();
+  416 |       await page.getByTestId('task-filters-toggle').click();
+```

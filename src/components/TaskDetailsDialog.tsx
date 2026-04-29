@@ -18,7 +18,8 @@ import {
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
-import type { Priority, Task } from '../types';
+import { NoteCard } from './NoteCard';
+import type { Note, Priority, Task } from '../types';
 
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
@@ -35,6 +36,7 @@ const PRIORITY_STYLES: Record<Priority, string> = {
 interface TaskDetailsDialogProps {
   open: boolean;
   task: Task | null;
+  linkedNotes?: Note[];
   isDeleting?: boolean;
   isToggling?: boolean;
   isRescheduling?: boolean;
@@ -47,6 +49,9 @@ interface TaskDetailsDialogProps {
   onQuickReschedule: (task: Task, preset: 'laterToday' | 'tomorrowMorning' | 'nextWeek') => void;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
+  onCreateLinkedNote: (task: Task) => void;
+  onEditLinkedNote: (note: Note, task: Task) => void;
+  onDeleteLinkedNote: (note: Note) => void;
 }
 
 function formatDueDate(task: Task): string {
@@ -68,6 +73,7 @@ function formatCreatedAt(task: Task): string {
 export function TaskDetailsDialog({
   open,
   task,
+  linkedNotes = [],
   isDeleting = false,
   isToggling = false,
   isRescheduling = false,
@@ -80,6 +86,9 @@ export function TaskDetailsDialog({
   onQuickReschedule,
   onToggle,
   onDelete,
+  onCreateLinkedNote,
+  onEditLinkedNote,
+  onDeleteLinkedNote,
 }: TaskDetailsDialogProps) {
   if (!task) return null;
 
@@ -99,7 +108,7 @@ export function TaskDetailsDialog({
             onClick={() => {
               if (!isBusy) onClose();
             }}
-            className="fixed inset-0 z-[110] bg-slate-950/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[110] bg-slate-950/60 backdrop-blur-sm md:left-[320px]"
           />
 
           <motion.section
@@ -110,7 +119,7 @@ export function TaskDetailsDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="task-details-title"
-            className="fixed inset-x-4 top-1/2 z-[111] mx-auto flex max-h-[88vh] w-full max-w-4xl -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
+            className="fixed inset-x-4 top-1/2 z-[111] mx-auto flex max-h-[88vh] w-full max-w-4xl -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 md:left-[344px] md:right-6 md:mx-0 md:w-auto md:max-w-none"
             data-testid="task-details-dialog"
           >
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
@@ -171,6 +180,15 @@ export function TaskDetailsDialog({
                       <Tag size={12} />
                       {task.category || 'Geral'}
                     </span>
+                    {task.tags?.map((item) => (
+                      <span
+                        key={item}
+                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+                      >
+                        <Tag size={12} />
+                        {item}
+                      </span>
+                    ))}
                     <span
                       className={[
                         'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
@@ -263,6 +281,47 @@ export function TaskDetailsDialog({
                 </section>
 
                 <aside className="space-y-4">
+                  <section className="surface-soft p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Notas vinculadas</h3>
+                        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          Reúna aqui o contexto que pertence a este lembrete.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        data-testid="task-details-add-note"
+                        onClick={() => onCreateLinkedNote(task)}
+                        disabled={isBusy}
+                        className="action-secondary min-h-[44px] rounded-2xl px-4 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <PencilLine size={16} />
+                        Nova nota
+                      </button>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {linkedNotes.length > 0 ? (
+                        linkedNotes.map((note) => (
+                          <NoteCard
+                            key={note.id}
+                            note={note}
+                            linkedTask={task}
+                            compact
+                            onEdit={(currentNote) => onEditLinkedNote(currentNote, task)}
+                            onDelete={onDeleteLinkedNote}
+                          />
+                        ))
+                      ) : (
+                        <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 px-4 py-6 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-400">
+                          Ainda não existe nenhuma nota vinculada a este lembrete.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
                   <section className="surface-soft p-5">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Prazo</h3>
                     <div className="mt-4 space-y-3">

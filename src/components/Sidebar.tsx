@@ -4,19 +4,20 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  NotebookPen,
   Settings,
   Target,
   User as UserIcon,
 } from 'lucide-react';
 import { SidebarItem } from './SidebarItem';
 import { FilterTag } from './FilterTag';
-import { CATEGORIES } from '../types';
 import type { Task, User } from '../types';
 
 interface SidebarProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'tasks' | 'notifications';
-  setActiveTab: (tab: 'dashboard' | 'tasks' | 'notifications') => void;
+  activeTab: 'dashboard' | 'tasks' | 'notes' | 'notifications';
+  setActiveTab: (tab: 'dashboard' | 'tasks' | 'notes' | 'notifications') => void;
+  categories: string[];
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
   pendingTasks: Task[];
@@ -30,6 +31,7 @@ export function Sidebar({
   currentUser,
   activeTab,
   setActiveTab,
+  categories,
   filterCategory,
   setFilterCategory,
   pendingTasks,
@@ -44,7 +46,7 @@ export function Sidebar({
     onOpenProfile();
   };
 
-  const categorySummary = CATEGORIES.map((category) => ({
+  const categorySummary = categories.map((category) => ({
     category,
     count: pendingTasks.filter((task) => task.category === category).length,
   }));
@@ -74,7 +76,7 @@ export function Sidebar({
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Categorias</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{CATEGORIES.length}</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{categories.length}</p>
             </div>
           </div>
         </div>
@@ -95,6 +97,13 @@ export function Sidebar({
             badge={overdueCount}
             badgeTone="alert"
             testId="sidebar-tasks"
+          />
+          <SidebarItem
+            active={activeTab === 'notes'}
+            onClick={() => setActiveTab('notes')}
+            icon={<NotebookPen size={20} />}
+            label="Minhas notas"
+            testId="sidebar-notes"
           />
         </nav>
 

@@ -18,7 +18,6 @@ import { AnimatePresence, motion } from 'motion/react';
 import { FilterTag } from '../components/FilterTag';
 import { TaskItem } from '../components/TaskItem';
 import { LS } from '../lib/storage';
-import { CATEGORIES } from '../types';
 import type { Priority, Task } from '../types';
 
 const PAGE_SIZE = 20;
@@ -69,6 +68,7 @@ function isStatusFilter(value: unknown): value is StatusFilter {
 interface TasksPageProps {
   pendingTasks: Task[];
   completedTasks: Task[];
+  categories: string[];
   filterCategory: string;
   setFilterCategory: (category: string) => void;
   search: string;
@@ -140,7 +140,16 @@ function matchesTaskFilters(
   categoryFilter: string,
   priorityFilter: PriorityFilter,
 ): boolean {
-  const matchesSearch = task.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch);
+  const haystack = [
+    task.title,
+    task.description,
+    task.category,
+    ...(task.tags ?? []),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('pt-BR');
+  const matchesSearch = haystack.includes(normalizedSearch);
   const matchesCategory = categoryFilter === 'Todas' || task.category === categoryFilter;
   const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
 
@@ -244,6 +253,7 @@ function ControlButton({
 export function TasksPage({
   pendingTasks,
   completedTasks,
+  categories,
   filterCategory,
   setFilterCategory,
   search,
@@ -647,7 +657,7 @@ export function TasksPage({
             onClick={() => setFilterCategory('Todas')}
             label="Todas"
           />
-          {CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <FilterTag
               key={category}
               active={filterCategory === category}

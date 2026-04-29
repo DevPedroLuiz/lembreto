@@ -21,8 +21,15 @@ import {
 } from './lib/handlers/auth.js';
 import {
   handleTaskById,
+  handleTaskCategoriesCollection,
+  handleTaskTagsCollection,
+  handleTaskTaxonomy,
   handleTasksCollection,
 } from './lib/handlers/tasks.js';
+import {
+  handleNoteById,
+  handleNotesCollection,
+} from './lib/handlers/notes.js';
 import { handleCleanupCron } from './lib/handlers/cron.js';
 import {
   handleNotificationById,
@@ -98,8 +105,29 @@ async function startServer() {
 
   app.get('/api/tasks', run(handleTasksCollection));
   app.post('/api/tasks', run(handleTasksCollection));
+  app.get('/api/tasks/metadata', run(handleTaskTaxonomy));
+  app.post('/api/tasks/categories', run(handleTaskCategoriesCollection));
+  app.post('/api/tasks/tags', run(handleTaskTagsCollection));
   app.put('/api/tasks/:id', run(handleTaskById));
   app.delete('/api/tasks/:id', run(handleTaskById));
+
+  app.all('/api/tasks/notes', async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).json({ error: 'Metodo nao permitido' });
+      return;
+    }
+
+    await run(handleNotesCollection)(req, res);
+  });
+
+  app.all('/api/tasks/notes/:id', async (req, res) => {
+    if (req.method !== 'PUT' && req.method !== 'DELETE') {
+      res.status(405).json({ error: 'Metodo nao permitido' });
+      return;
+    }
+
+    await run(handleNoteById)(req, res);
+  });
 
   app.get('/api/notifications', run(handleNotificationsCollection));
   app.post('/api/notifications', run(handleNotificationsCollection));

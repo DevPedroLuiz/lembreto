@@ -6,6 +6,7 @@ dotenv.config({ path: '.env.local' });
 const PORT = Number(process.env.PORT ?? 3001);
 const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 const useSystemEdge = process.env.CI !== 'true' && process.env.PLAYWRIGHT_CHANNEL !== 'chromium';
+const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === 'true';
 
 export default defineConfig({
   testDir: './e2e',
@@ -26,7 +27,7 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: baseURL,
-    reuseExistingServer: true,
+    reuseExistingServer,
     timeout: 120_000,
   },
   projects: [

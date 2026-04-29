@@ -1,5 +1,5 @@
 import React from 'react';
-import { BellRing, ChevronRight, Info, ShieldAlert } from 'lucide-react';
+import { ChevronRight, Info, ShieldAlert } from 'lucide-react';
 import { formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { AppNotification } from '../types';
@@ -7,6 +7,7 @@ import type { AppNotification } from '../types';
 interface NotificationFeedProps {
   notifications: AppNotification[];
   onOpenNotification: (notification: AppNotification) => void;
+  onPreviewNotification?: (notification: AppNotification) => void;
   emptyTitle?: string;
   emptyDescription?: string;
   itemTestId?: string;
@@ -34,21 +35,22 @@ function getToneLabel(tone: AppNotification['tone']): string {
   if (tone === 'success') return 'Sucesso';
   if (tone === 'warning') return 'Aviso';
   if (tone === 'error') return 'Erro';
-  return 'Informação';
+  return 'Informacao';
 }
 
 function getActionLabel(notification: AppNotification): string {
   if (notification.target?.type === 'task') return 'Abrir lembrete';
   if (notification.target?.type === 'profile') return 'Abrir perfil';
-  if (notification.target?.type === 'settings') return 'Abrir configurações';
+  if (notification.target?.type === 'settings') return 'Abrir configuracoes';
   return 'Abrir';
 }
 
 export function NotificationFeed({
   notifications,
   onOpenNotification,
-  emptyTitle = 'Nenhuma notificação por aqui',
-  emptyDescription = 'Quando o sistema gerar novos avisos e confirmações, eles vão aparecer aqui.',
+  onPreviewNotification,
+  emptyTitle = 'Nenhuma notificacao por aqui',
+  emptyDescription = 'Quando o sistema gerar novos avisos e confirmacoes, eles vao aparecer aqui.',
   itemTestId = 'notification-item',
 }: NotificationFeedProps) {
   if (notifications.length === 0) {
@@ -76,8 +78,18 @@ export function NotificationFeed({
             data-testid={itemTestId}
             role={isInteractive ? 'button' : undefined}
             tabIndex={isInteractive ? 0 : -1}
-            aria-label={isInteractive ? `Abrir notificação ${notification.title}` : undefined}
+            aria-label={isInteractive ? `Abrir notificacao ${notification.title}` : undefined}
             onClick={isInteractive ? () => onOpenNotification(notification) : undefined}
+            onMouseEnter={() => {
+              if (!notification.read) {
+                onPreviewNotification?.(notification);
+              }
+            }}
+            onFocus={() => {
+              if (!notification.read) {
+                onPreviewNotification?.(notification);
+              }
+            }}
             onKeyDown={isInteractive ? (event) => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();

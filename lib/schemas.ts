@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { validateAvatarDataUrl } from './avatar.js';
 import {
+  NOTE_MODES,
   NOTIFICATION_TONES,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -12,6 +13,8 @@ const passwordSchema = z.string().min(6, 'A senha deve ter no minimo 6 caractere
 const titleSchema = z.string().trim().min(1, 'Titulo obrigatorio').max(140, 'Titulo muito longo');
 const descriptionSchema = z.string().max(4000, 'Descricao muito longa');
 const categorySchema = z.string().trim().min(1, 'Categoria obrigatoria').max(40, 'Categoria muito longa');
+const tagNameSchema = z.string().trim().min(1, 'Tag obrigatoria').max(24, 'Tag muito longa');
+const noteContentSchema = z.string().max(6000, 'Conteudo muito longo');
 const dueDateSchema = z.string().refine(
   (value) => !Number.isNaN(Date.parse(value)),
   'Data invalida',
@@ -77,6 +80,7 @@ export const createTaskSchema = z.object({
   dueDate: dueDateSchema.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   category: categorySchema.default('Geral'),
+  tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
 }).strict();
 
 export const updateTaskSchema = z.object({
@@ -85,7 +89,39 @@ export const updateTaskSchema = z.object({
   dueDate: dueDateSchema.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   category: categorySchema.optional(),
+  tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
   status: z.enum(TASK_STATUSES).optional(),
+}).strict().refine(
+  (value) => Object.keys(value).length > 0,
+  'Envie ao menos um campo para atualizar',
+);
+
+export const createTaskCategorySchema = z.object({
+  name: categorySchema,
+}).strict();
+
+export const createTaskTagSchema = z.object({
+  name: tagNameSchema,
+}).strict();
+
+export const createNoteSchema = z.object({
+  title: titleSchema,
+  content: noteContentSchema.default(''),
+  priority: z.enum(TASK_PRIORITIES).default('medium'),
+  category: categorySchema.default('Geral'),
+  tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
+  mode: z.enum(NOTE_MODES).default('temporary'),
+  taskId: z.string().uuid('Identificador do lembrete invalido').nullable().optional(),
+}).strict();
+
+export const updateNoteSchema = z.object({
+  title: titleSchema.optional(),
+  content: noteContentSchema.optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  category: categorySchema.optional(),
+  tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
+  mode: z.enum(NOTE_MODES).optional(),
+  taskId: z.string().uuid('Identificador do lembrete invalido').nullable().optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
   'Envie ao menos um campo para atualizar',

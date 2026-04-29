@@ -202,6 +202,16 @@ function TaskItemComponent({
             {task.category || 'Geral'}
           </span>
 
+          {task.tags?.map((item) => (
+            <span
+              key={item}
+              className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+            >
+              <Tag size={12} />
+              {item}
+            </span>
+          ))}
+
           <span
             data-testid="task-due-badge"
             data-overdue-kind={overdueKind}
@@ -271,6 +281,7 @@ export const TaskItem = React.memo(
     prev.task.dueDate === next.task.dueDate &&
     prev.task.priority === next.task.priority &&
     prev.task.category === next.task.category &&
+    JSON.stringify(prev.task.tags ?? []) === JSON.stringify(next.task.tags ?? []) &&
     prev.task.status === next.task.status &&
     prev.compact === next.compact &&
     prev.isDeleting === next.isDeleting &&
