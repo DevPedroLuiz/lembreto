@@ -101,7 +101,7 @@ export function NotificationsInboxDrawer({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
+            <div className="flex-1 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
               <NotificationFeed
                 notifications={recentNotifications}
                 onOpenNotification={onOpenNotification}
@@ -112,11 +112,11 @@ export function NotificationsInboxDrawer({
               />
             </div>
 
-            <div className="border-t border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+            <div className="border-t border-slate-200/80 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] dark:border-white/10 md:px-7 md:py-5">
               <button
                 type="button"
                 onClick={onOpenCenter}
-                className="action-secondary ml-auto"
+                className="action-secondary w-full justify-center sm:ml-auto sm:w-auto"
                 data-testid="notifications-open-center"
               >
                 Ir para a central de notificacoes

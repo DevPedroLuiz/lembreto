@@ -4,8 +4,10 @@ import {
   ArrowRight,
   BellRing,
   CheckCircle2,
+  Compass,
   FolderPlus,
   Loader2,
+  MapPin,
   Moon,
   Plus,
   Settings,
@@ -17,6 +19,8 @@ import {
   X,
 } from 'lucide-react';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
+import { BRAZIL_STATES } from '../../lib/brazil-location';
+import type { HolidayRegionOption } from '../types';
 
 function Toggle({
   active,
@@ -59,6 +63,7 @@ function Toggle({
 interface SettingsDrawerProps {
   open: boolean;
   onClose: () => void;
+  initialView?: SettingsView;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   notificationsEnabled: boolean;
@@ -75,9 +80,20 @@ interface SettingsDrawerProps {
   tags: string[];
   onCreateCategory: (name: string) => Promise<string>;
   onCreateTag: (name: string) => Promise<string>;
+  onDeleteCategory: (name: string) => Promise<void>;
+  onDeleteTag: (name: string) => Promise<void>;
+  holidayStateCode: string | null;
+  holidayCityName: string | null;
+  holidayMatchedRegionName: string | null;
+  holidayMunicipalSupported: boolean;
+  holidaySupportedCities: HolidayRegionOption[];
+  isSavingHolidayLocation: boolean;
+  isDetectingHolidayLocation: boolean;
+  onSaveHolidayLocation: (payload: { stateCode: string | null; cityName: string | null }) => Promise<void>;
+  onDetectHolidayLocation: () => Promise<void>;
 }
 
-type SettingsView =
+export type SettingsView =
   | 'appearance'
   | 'notifications'
   | 'organization'
@@ -190,6 +206,12 @@ function normalizeTaxonomyValue(value: string) {
   return value.trim().replace(/\s+/g, ' ');
 }
 
+function isDefaultCategory(value: string) {
+  return ['Geral', 'Trabalho', 'Pessoal', 'Estudos'].some(
+    (category) => category.localeCompare(value, 'pt-BR', { sensitivity: 'accent' }) === 0,
+  );
+}
+
 function SectionHeader({
   eyebrow,
   title,
@@ -250,6 +272,7 @@ function ActionPanel({
 export function SettingsDrawer({
   open,
   onClose,
+  initialView = 'appearance',
   darkMode,
   onToggleDarkMode,
   notificationsEnabled,
@@ -266,12 +289,27 @@ export function SettingsDrawer({
   tags,
   onCreateCategory,
   onCreateTag,
+  onDeleteCategory,
+  onDeleteTag,
+  holidayStateCode,
+  holidayCityName,
+  holidayMatchedRegionName,
+  holidayMunicipalSupported,
+  holidaySupportedCities,
+  isSavingHolidayLocation,
+  isDetectingHolidayLocation,
+  onSaveHolidayLocation,
+  onDetectHolidayLocation,
 }: SettingsDrawerProps) {
-  const [activeView, setActiveView] = React.useState<SettingsView>('appearance');
+  const [activeView, setActiveView] = React.useState<SettingsView>(initialView);
   const [categoryDraft, setCategoryDraft] = React.useState('');
   const [tagDraft, setTagDraft] = React.useState('');
+  const [holidayStateDraft, setHolidayStateDraft] = React.useState(holidayStateCode ?? '');
+  const [holidayCityDraft, setHolidayCityDraft] = React.useState(holidayCityName ?? '');
   const [isCreatingCategory, setIsCreatingCategory] = React.useState(false);
   const [isCreatingTag, setIsCreatingTag] = React.useState(false);
+  const [deletingCategoryName, setDeletingCategoryName] = React.useState<string | null>(null);
+  const [deletingTagName, setDeletingTagName] = React.useState<string | null>(null);
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
 
   const swipe = useSwipeToClose({
@@ -285,8 +323,17 @@ export function SettingsDrawer({
     setCategoryDraft('');
     setTagDraft('');
     setTaxonomyFeedback('');
-    setActiveView('appearance');
-  }, [open]);
+    setDeletingCategoryName(null);
+    setDeletingTagName(null);
+    setHolidayStateDraft(holidayStateCode ?? '');
+    setHolidayCityDraft(holidayCityName ?? '');
+    setActiveView(initialView);
+  }, [holidayCityName, holidayStateCode, initialView, open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setActiveView(initialView);
+  }, [initialView, open]);
 
   const handleCreateCategory = React.useCallback(async () => {
     const normalized = normalizeTaxonomyValue(categoryDraft);
@@ -320,6 +367,74 @@ export function SettingsDrawer({
     }
   }, [isCreatingTag, onCreateTag, tagDraft]);
 
+  const handleDeleteCategory = React.useCallback(async (name: string) => {
+    if (!name || deletingCategoryName === name) return;
+
+    try {
+      setDeletingCategoryName(name);
+      await onDeleteCategory(name);
+      setTaxonomyFeedback(`Categoria "${name}" excluída com sucesso.`);
+    } catch (error) {
+      setTaxonomyFeedback(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível excluir a categoria agora. Tente novamente.',
+      );
+    } finally {
+      setDeletingCategoryName(null);
+    }
+  }, [deletingCategoryName, onDeleteCategory]);
+
+  const handleDeleteTag = React.useCallback(async (name: string) => {
+    if (!name || deletingTagName === name) return;
+
+    try {
+      setDeletingTagName(name);
+      await onDeleteTag(name);
+      setTaxonomyFeedback(`Tag "${name}" excluída com sucesso.`);
+    } catch (error) {
+      setTaxonomyFeedback(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível excluir a tag agora. Tente novamente.',
+      );
+    } finally {
+      setDeletingTagName(null);
+    }
+  }, [deletingTagName, onDeleteTag]);
+
+  const handleSaveHolidayLocation = React.useCallback(async () => {
+    const nextStateCode = holidayStateDraft.trim() || null;
+    const nextCityName = holidayCityDraft.trim() || null;
+
+    try {
+      await onSaveHolidayLocation({
+        stateCode: nextStateCode,
+        cityName: nextCityName,
+      });
+      setTaxonomyFeedback('Região de feriados atualizada com sucesso.');
+    } catch (error) {
+      setTaxonomyFeedback(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível salvar a região agora. Tente novamente.',
+      );
+    }
+  }, [holidayCityDraft, holidayStateDraft, onSaveHolidayLocation]);
+
+  const handleDetectHolidayLocation = React.useCallback(async () => {
+    try {
+      await onDetectHolidayLocation();
+      setTaxonomyFeedback('Localização detectada e aplicada com sucesso.');
+    } catch (error) {
+      setTaxonomyFeedback(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível detectar sua localização agora.',
+      );
+    }
+  }, [onDetectHolidayLocation]);
+
   const toggleMap = {
     darkMode: {
       active: darkMode,
@@ -348,14 +463,26 @@ export function SettingsDrawer({
     },
   } as const;
 
-  const cardsForActiveView = React.useMemo(
-    () => settingCards.filter((card) => card.section === activeView),
-    [activeView],
+  const appearanceCards = React.useMemo(
+    () => settingCards.filter((card) => card.section === 'appearance'),
+    [],
+  );
+  const notificationCards = React.useMemo(
+    () => settingCards.filter((card) => card.section === 'notifications'),
+    [],
+  );
+  const organizationCards = React.useMemo(
+    () => settingCards.filter((card) => card.section === 'organization'),
+    [],
+  );
+  const safetyCards = React.useMemo(
+    () => settingCards.filter((card) => card.section === 'safety'),
+    [],
   );
 
   const activeViewMeta = settingsViews.find((view) => view.key === activeView) ?? settingsViews[0];
 
-  const renderToggleCards = (cards: typeof settingCards) => (
+  const renderToggleCards = (cards: ReadonlyArray<(typeof settingCards)[number]>) => (
     <div className="grid gap-4 md:grid-cols-2">
       {cards.map((card, index) => {
         const config = toggleMap[card.key];
@@ -417,7 +544,7 @@ export function SettingsDrawer({
               title="Visual do sistema"
               description="Ajuste o visual para deixar o uso mais confortável."
             />
-            {renderToggleCards(cardsForActiveView)}
+            {renderToggleCards(appearanceCards)}
           </section>
         );
 
@@ -429,7 +556,7 @@ export function SettingsDrawer({
               title="Alertas e sinais"
               description="Defina como o Lembreto chama sua atenção."
             />
-            {renderToggleCards(cardsForActiveView)}
+            {renderToggleCards(notificationCards)}
           </section>
         );
 
@@ -442,7 +569,7 @@ export function SettingsDrawer({
                 title="Visibilidade dos lembretes"
                 description="Defina como seus lembretes aparecem na agenda."
               />
-              {renderToggleCards(cardsForActiveView)}
+              {renderToggleCards(organizationCards)}
             </section>
 
             <section className="surface-soft p-5">
@@ -453,6 +580,108 @@ export function SettingsDrawer({
               />
 
               <div className="space-y-5">
+                <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                    <MapPin size={16} />
+                    Região para feriados
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Escolha seu estado e cidade para incluir feriados estaduais e municipais junto aos nacionais.
+                  </p>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                        Estado
+                      </span>
+                      <select
+                        value={holidayStateDraft}
+                        onChange={(event) => setHolidayStateDraft(event.target.value)}
+                        className="field-control"
+                      >
+                        <option value="">Selecionar estado</option>
+                        {BRAZIL_STATES.map((state) => (
+                          <option key={state.code} value={state.code}>
+                            {state.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                        Cidade
+                      </span>
+                      <input
+                        type="text"
+                        value={holidayCityDraft}
+                        onChange={(event) => setHolidayCityDraft(event.target.value)}
+                        placeholder="Ex.: São Paulo, Recife, Belo Horizonte"
+                        className="field-control"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-300">
+                    {holidayStateCode ? (
+                      holidayMunicipalSupported ? (
+                        <span>
+                          Feriados municipais ativos para <strong>{holidayMatchedRegionName ?? holidayCityName ?? 'sua cidade'}</strong>.
+                        </span>
+                      ) : (
+                        <span>
+                          Os feriados nacionais e estaduais já estão ativos. Para municípios, a cobertura depende da cidade informada.
+                        </span>
+                      )
+                    ) : (
+                      <span>Sem região definida. Hoje o sistema mostra apenas os feriados nacionais.</span>
+                    )}
+                  </div>
+
+                  {holidaySupportedCities.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                        Cidades reconhecidas neste estado
+                      </p>
+                      <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+                        {holidaySupportedCities.map((city) => (
+                          <span
+                            key={city.code}
+                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
+                          >
+                            {city.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleDetectHolidayLocation();
+                      }}
+                      disabled={isDetectingHolidayLocation}
+                      className="action-secondary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isDetectingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
+                      Usar minha localização
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSaveHolidayLocation();
+                      }}
+                      disabled={isSavingHolidayLocation || !holidayStateDraft.trim()}
+                      className="action-primary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSavingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+                      Salvar região
+                    </button>
+                  </div>
+                </div>
+
                 <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                     <FolderPlus size={16} />
@@ -487,14 +716,33 @@ export function SettingsDrawer({
                     </button>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {categories.map((item) => (
-                      <span
-                        key={item}
-                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
-                      >
-                        {item}
-                      </span>
-                    ))}
+                    {categories.map((item) => {
+                      const isDeleting = deletingCategoryName === item;
+                      const canDelete = !isDefaultCategory(item);
+
+                      return (
+                        <span
+                          key={item}
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
+                        >
+                          <span>{item}</span>
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              aria-label={`Excluir categoria ${item}`}
+                              data-testid={`settings-category-delete-${item}`}
+                              onClick={() => {
+                                void handleDeleteCategory(item);
+                              }}
+                              disabled={isDeleting}
+                              className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-red-300 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
+                            >
+                              {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
+                            </button>
+                          ) : null}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -533,15 +781,31 @@ export function SettingsDrawer({
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {tags.length > 0 ? (
-                      tags.map((item) => (
-                        <span
-                          key={item}
-                          className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
-                        >
-                          <Tag size={12} />
-                          {item}
-                        </span>
-                      ))
+                      tags.map((item) => {
+                        const isDeleting = deletingTagName === item;
+
+                        return (
+                          <span
+                            key={item}
+                            className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+                          >
+                            <Tag size={12} />
+                            <span>{item}</span>
+                            <button
+                              type="button"
+                              aria-label={`Excluir tag ${item}`}
+                              data-testid={`settings-tag-delete-${item}`}
+                              onClick={() => {
+                                void handleDeleteTag(item);
+                              }}
+                              disabled={isDeleting}
+                              className="flex h-5 w-5 items-center justify-center rounded-full border border-blue-200/90 bg-white/80 text-blue-600 transition hover:border-red-300 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/20 dark:bg-slate-900/80 dark:text-blue-200"
+                            >
+                              {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
+                            </button>
+                          </span>
+                        );
+                      })
                     ) : (
                       <p className="text-sm text-slate-500 dark:text-slate-400">
                         Você ainda não cadastrou tags personalizadas.
@@ -568,7 +832,7 @@ export function SettingsDrawer({
               title="Protecao de acoes"
               description="Reduza o risco de mudancas acidentais e mantenha os lembretes mais protegidos no uso diario."
             />
-            {renderToggleCards(cardsForActiveView)}
+            {renderToggleCards(safetyCards)}
           </section>
         );
 
@@ -618,7 +882,7 @@ export function SettingsDrawer({
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-drawer-title"
-            className="fixed inset-x-4 top-1/2 z-[101] mx-auto flex max-h-[88vh] w-full max-w-6xl -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
+            className="fixed inset-x-3 bottom-3 top-auto z-[101] mx-auto flex max-h-[86dvh] w-auto flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:w-full sm:max-w-6xl sm:-translate-y-1/2 sm:rounded-[32px]"
           >
             {swipe.mobileEnabled && (
               <div
@@ -657,7 +921,7 @@ export function SettingsDrawer({
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
-              <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]">
                 <aside className="surface-soft h-fit p-4">
                   <div className="rounded-[24px] border border-blue-200/70 bg-gradient-to-br from-blue-50 to-sky-50 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
                     <div className="flex items-start gap-3">
@@ -675,7 +939,7 @@ export function SettingsDrawer({
                     </div>
                   </div>
 
-                  <nav className="mt-4 space-y-2" aria-label="Secoes de configuracoes">
+                  <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Secoes de configuracoes">
                     {settingsViews.map((view) => {
                       const Icon = view.icon;
                       const isActive = activeView === view.key;
@@ -687,7 +951,7 @@ export function SettingsDrawer({
                           onClick={() => setActiveView(view.key)}
                           data-testid={`settings-nav-${view.key}`}
                           className={[
-                            'flex w-full items-start gap-3 rounded-[22px] border px-4 py-3 text-left transition-all',
+                            'flex min-w-[200px] items-start gap-3 rounded-[22px] border px-4 py-3 text-left transition-all lg:w-full lg:min-w-0',
                             isActive
                               ? 'border-blue-500/30 bg-blue-50 text-blue-700 shadow-[0_20px_40px_-28px_rgba(37,99,235,0.8)] dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300'
                               : 'border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300 dark:hover:border-white/15 dark:hover:bg-white/[0.06]',
@@ -733,9 +997,10 @@ export function SettingsDrawer({
                         </p>
                       </div>
                     </div>
+                    <div className="mt-6">
+                      {renderActiveView()}
+                    </div>
                   </div>
-
-                  {renderActiveView()}
                 </section>
               </div>
             </div>

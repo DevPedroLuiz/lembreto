@@ -6,6 +6,9 @@ export interface SafeUser {
   name: string;
   email: string;
   avatar?: string | null;
+  stateCode?: string | null;
+  cityName?: string | null;
+  holidayRegionCode?: string | null;
 }
 
 type AuthErrorCode =
@@ -21,6 +24,20 @@ export class AuthError extends Error {
     super(code);
     this.code = code;
   }
+}
+
+let ensureUserProfileSchemaPromise: Promise<void> | null = null;
+
+export async function ensureUserProfileSchema(sql: SqlClient) {
+  if (!ensureUserProfileSchemaPromise) {
+    ensureUserProfileSchemaPromise = (async () => {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS state_code TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city_name TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS holiday_region_code TEXT`;
+    })();
+  }
+
+  await ensureUserProfileSchemaPromise;
 }
 
 export function buildTokenJti(payload: Pick<JwtPayload, 'sub' | 'iat'>): string {
@@ -42,8 +59,17 @@ export async function isTokenBlacklisted(
 }
 
 export async function getSafeUserById(sql: SqlClient, userId: string): Promise<SafeUser | null> {
+  await ensureUserProfileSchema(sql);
+
   const rows = await sql`
-    SELECT id, name, email, avatar
+    SELECT
+      id,
+      name,
+      email,
+      avatar,
+      state_code AS "stateCode",
+      city_name AS "cityName",
+      holiday_region_code AS "holidayRegionCode"
     FROM users
     WHERE id = ${userId}
   `;

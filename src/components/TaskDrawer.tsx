@@ -143,12 +143,12 @@ function SummaryPill({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-white/90 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
-        <span className="icon-slot h-4 w-4">{icon}</span>
+    <div className="min-w-[110px] rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-white/90 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04] sm:min-w-0 sm:px-4 sm:py-3">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
+        <span className="icon-slot h-3.5 w-3.5 sm:h-4 sm:w-4">{icon}</span>
         {label}
       </div>
-      <p className="mt-2 text-sm font-semibold text-white dark:text-slate-100">{value}</p>
+      <p className="mt-1.5 truncate text-[13px] font-semibold text-white dark:text-slate-100 sm:mt-2 sm:text-sm">{value}</p>
     </div>
   );
 }
@@ -353,13 +353,13 @@ export function TaskDrawer({
             className="fixed inset-0 z-[100] bg-slate-900/55 backdrop-blur-sm dark:bg-black/72"
           />
 
-          <div className="fixed inset-0 z-[101] flex items-center justify-center p-3 sm:p-5">
+          <div className="fixed inset-0 z-[101] flex items-end justify-center p-2 sm:items-center sm:p-5">
             <motion.div
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[34px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)]"
+              className="flex max-h-[calc(100dvh-0.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-drawer-title"
@@ -374,16 +374,16 @@ export function TaskDrawer({
                 </div>
               )}
 
-              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-5 py-5 text-white dark:border-white/10 md:px-7">
+              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-4 py-3 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7">
                 <div className="flex items-start justify-between gap-4">
                   <div className="max-w-3xl">
                     <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm">
                       {isEditing ? 'Atualização' : 'Planejamento'}
                     </span>
-                    <h2 id="task-drawer-title" className="mt-4 text-2xl font-semibold text-white md:text-[2rem]">
+                    <h2 id="task-drawer-title" className="mt-2.5 text-[1.55rem] font-semibold leading-tight text-white sm:mt-4 sm:text-2xl md:text-[2rem]">
                       {isEditing ? 'Editar lembrete' : 'Novo lembrete'}
                     </h2>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-50/88">
+                    <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-blue-50/88 sm:mt-2 sm:text-sm sm:leading-6">
                       Organize o essencial do lembrete em um só lugar.
                     </p>
                   </div>
@@ -392,21 +392,21 @@ export function TaskDrawer({
                     onClick={onClose}
                     disabled={isSubmitting}
                     aria-label="Fechar formulário de lembrete"
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white/90 transition-colors hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white/90 transition-colors hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"
                   >
                     <X size={20} />
                   </button>
                 </div>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:mt-5 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:pb-0">
                   <SummaryPill label="Prazo" value={summaryDue} icon={<CalendarDays size={14} />} />
                   <SummaryPill label="Horário" value={summaryTime} icon={<Clock3 size={14} />} />
                   <SummaryPill label="Prioridade" value={summaryPriority} icon={<Flag size={14} />} />
                 </div>
               </div>
 
-              <div className="border-b border-slate-200/80 bg-white/80 px-5 py-4 dark:border-white/10 dark:bg-slate-950/86 md:px-7">
-                <div className="flex flex-wrap gap-2">
+              <div className="border-b border-slate-200/80 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-slate-950/86 sm:px-5 sm:py-4 md:px-7">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                   <DrawerTabButton
                     active={activeTab === 'details'}
                     icon={<Layers3 size={16} />}
@@ -426,11 +426,11 @@ export function TaskDrawer({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-5 py-6 md:px-7">
+              <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 md:px-7 md:py-6">
                 <form id="task-form" onSubmit={onSubmit} className="space-y-6" aria-busy={isSubmitting}>
                   {activeTab === 'details' && (
                     <>
-                      <section className="surface-soft p-5">
+                      <section className="surface-soft p-4 sm:p-5">
                         <SectionHeader
                           title="Informações principais"
                           description="Defina o que precisa ser lembrado."
@@ -467,13 +467,13 @@ export function TaskDrawer({
                               value={description}
                               disabled={isSubmitting}
                               onChange={(event) => setDescription(event.target.value)}
-                              className="field-control min-h-[150px] resize-none"
+                          className="field-control min-h-[104px] resize-none sm:min-h-[150px]"
                             />
                           </div>
                         </div>
                       </section>
 
-                      <section className="surface-soft p-5">
+                      <section className="surface-soft p-4 sm:p-5">
                         <SectionHeader
                           title="Prazo e organização"
                           description="Defina quando o lembrete acontece e como ele aparece."
@@ -673,7 +673,7 @@ export function TaskDrawer({
                   )}
 
                   {!isEditing && activeTab === 'recurrence' && (
-                    <section className="surface-soft p-5">
+                    <section className="surface-soft p-4 sm:p-5">
                       <SectionHeader
                           title="Repetição"
                           description="Repita o mesmo lembrete em vários dias."
@@ -795,7 +795,7 @@ export function TaskDrawer({
                 </form>
               </div>
 
-              <div className="border-t border-slate-200/80 bg-white/88 px-5 py-4 dark:border-white/10 dark:bg-slate-950/92 md:px-7">
+              <div className="border-t border-slate-200/80 bg-white/88 px-4 py-3 dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="button"
@@ -811,7 +811,7 @@ export function TaskDrawer({
                     type="submit"
                     data-testid="task-submit-button"
                     disabled={isSubmitting || Boolean(dueDateError) || Boolean(recurrenceError)}
-                    className="action-primary min-w-[240px] justify-center rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
+                    className="action-primary w-full justify-center rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70 sm:min-w-[240px] sm:w-auto"
                   >
                     {isSubmitting ? (
                       <>
@@ -835,3 +835,4 @@ export function TaskDrawer({
     </AnimatePresence>
   );
 }
+

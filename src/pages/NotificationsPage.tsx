@@ -107,7 +107,7 @@ export function NotificationsPage({
               <BellRing size={14} />
               Central de notificações
             </span>
-            <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+            <h3 className="mt-4 text-[2rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
               Tudo o que aconteceu no sistema, em um só lugar.
             </h3>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
@@ -115,11 +115,11 @@ export function NotificationsPage({
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <button
               type="button"
               onClick={handleMarkAllRead}
-              className="action-secondary"
+              className="action-secondary w-full justify-center sm:w-auto"
               disabled={notifications.length === 0 || unreadCount === 0}
               data-testid="notifications-mark-all-read"
             >
@@ -129,7 +129,7 @@ export function NotificationsPage({
             <button
               type="button"
               onClick={handleClearAll}
-              className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15 sm:w-auto"
               disabled={notifications.length === 0}
               data-testid="notifications-clear-all"
             >

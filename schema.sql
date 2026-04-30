@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS users (
   password    TEXT        NOT NULL,
   avatar      TEXT,
   notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  state_code  TEXT,
+  city_name   TEXT,
+  holiday_region_code TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

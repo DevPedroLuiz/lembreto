@@ -3,6 +3,8 @@ import sql from './_db.js';
 import {
   handleTaskById,
   handleTaskCategoriesCollection,
+  handleTaskHolidayLocationDetect,
+  handleTaskHolidays,
   handleTaskTagsCollection,
   handleTaskTaxonomy,
   handleTasksCollection,
@@ -27,15 +29,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const request = buildHandlerRequest(req);
   const action = resolveAction(req);
 
-  const result = action === 'metadata'
-    ? await handleTaskTaxonomy({ sql, request })
-    : action === 'categories'
-      ? await handleTaskCategoriesCollection({ sql, request })
-      : action === 'tags'
-        ? await handleTaskTagsCollection({ sql, request })
-        : hasTaskId(req)
-          ? await handleTaskById({ sql, request })
-          : await handleTasksCollection({ sql, request });
+  let result;
+
+  if (action === 'metadata') {
+    result = await handleTaskTaxonomy({ sql, request });
+  } else if (action === 'holidays') {
+    result = await handleTaskHolidays({ sql, request });
+  } else if (action === 'holidays-location') {
+    result = await handleTaskHolidayLocationDetect({ sql, request });
+  } else if (action === 'categories') {
+    result = await handleTaskCategoriesCollection({ sql, request });
+  } else if (action === 'tags') {
+    result = await handleTaskTagsCollection({ sql, request });
+  } else if (hasTaskId(req)) {
+    result = await handleTaskById({ sql, request });
+  } else {
+    result = await handleTasksCollection({ sql, request });
+  }
 
   return sendHandlerResult(res, result);
 }

@@ -22,6 +22,8 @@ import {
 import {
   handleTaskById,
   handleTaskCategoriesCollection,
+  handleTaskHolidayLocationDetect,
+  handleTaskHolidays,
   handleTaskTagsCollection,
   handleTaskTaxonomy,
   handleTasksCollection,
@@ -106,8 +108,12 @@ async function startServer() {
   app.get('/api/tasks', run(handleTasksCollection));
   app.post('/api/tasks', run(handleTasksCollection));
   app.get('/api/tasks/metadata', run(handleTaskTaxonomy));
+  app.get('/api/tasks/holidays', run(handleTaskHolidays));
+  app.post('/api/tasks/holidays/location', run(handleTaskHolidayLocationDetect));
   app.post('/api/tasks/categories', run(handleTaskCategoriesCollection));
+  app.delete('/api/tasks/categories', run(handleTaskCategoriesCollection));
   app.post('/api/tasks/tags', run(handleTaskTagsCollection));
+  app.delete('/api/tasks/tags', run(handleTaskTagsCollection));
   app.put('/api/tasks/:id', run(handleTaskById));
   app.delete('/api/tasks/:id', run(handleTaskById));
 

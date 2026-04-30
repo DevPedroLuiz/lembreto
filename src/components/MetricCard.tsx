@@ -33,25 +33,25 @@ export function MetricCard({
       aria-label={ariaLabel}
       data-testid={testId}
       className={cn(
-        'surface-panel flex min-h-[152px] w-full flex-col justify-between p-5 text-left md:p-6',
+        'surface-panel flex min-h-[122px] w-full flex-col justify-between p-3.5 text-left sm:min-h-[148px] sm:p-5 md:min-h-[152px] md:p-6',
         isInteractive && 'transition-all hover:-translate-y-1 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
         isInteractive && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
         error && 'border-rose-200/80 dark:border-rose-500/20',
       )}
       disabled={!isInteractive}
     >
-      <div className="space-y-4">
+      <div className="space-y-2.5 sm:space-y-4">
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-slate-500 dark:text-slate-400">{title}</p>
+          <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:text-[13px]">{title}</p>
         </div>
 
         <div className="flex items-end justify-between gap-4">
-          <p className="font-display text-[2.45rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
+          <p className="font-display text-[1.9rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white sm:text-[2.35rem] md:text-[2.45rem]">
             {value}
           </p>
           <div
             className={cn(
-              'flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border shadow-[0_16px_32px_-24px_rgba(15,23,42,0.45)]',
+              'flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl border shadow-[0_16px_32px_-24px_rgba(15,23,42,0.45)] sm:h-11 sm:w-11',
               pulse && 'animate-pulse',
               error
                 ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
@@ -62,14 +62,14 @@ export function MetricCard({
                     : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
             )}
           >
-            <span className="icon-slot h-5 w-5">
+            <span className="icon-slot h-4.5 w-4.5 sm:h-5 sm:w-5">
               {icon}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="mt-7 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06]">
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06] sm:mt-7">
         <div
           className={cn(
             'h-full rounded-full transition-all',

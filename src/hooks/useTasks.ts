@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete } from '../api/client';
-import type { Task, Priority, Status, TaskTaxonomy } from '../types';
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
+import type { Priority, Status, Task, TaskTaxonomy } from '../types';
 
 type TaskPayload = {
   title: string;
@@ -15,6 +15,16 @@ export function useTasks(token: string | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
+
+  const refreshTasks = useCallback(async (requestToken = token) => {
+    if (!requestToken) {
+      setTasks([]);
+      return;
+    }
+
+    const data = await apiGet<Task[]>('/api/tasks', requestToken);
+    setTasks(Array.isArray(data) ? data : []);
+  }, [token]);
 
   const refreshTaxonomy = useCallback(async (requestToken = token) => {
     if (!requestToken) {
@@ -41,7 +51,7 @@ export function useTasks(token: string | null) {
       apiGet<TaskTaxonomy>('/api/tasks/metadata', token),
     ])
       .then(([taskData, taxonomy]) => {
-        if (Array.isArray(taskData)) setTasks(taskData);
+        setTasks(Array.isArray(taskData) ? taskData : []);
         setCategories(Array.isArray(taxonomy.categories) ? taxonomy.categories : []);
         setTags(Array.isArray(taxonomy.tags) ? taxonomy.tags : []);
       })
@@ -54,6 +64,7 @@ export function useTasks(token: string | null) {
 
   const createTask = useCallback(async (payload: TaskPayload) => {
     if (!token) throw new Error('Não autenticado');
+
     const created = await apiPost<Task>('/api/tasks', payload, token);
     setTasks((prev) => [created, ...prev]);
     setCategories((prev) => Array.from(new Set([...prev, created.category])));
@@ -71,11 +82,12 @@ export function useTasks(token: string | null) {
       category: string;
       tags: string[];
       status: Status;
-    }>
+    }>,
   ) => {
     if (!token) throw new Error('Não autenticado');
+
     const updated = await apiPut<Task>(`/api/tasks/${id}`, payload, token);
-    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
     setCategories((prev) => Array.from(new Set([...prev, updated.category])));
     setTags((prev) => Array.from(new Set([...prev, ...(updated.tags ?? [])])));
     return updated;
@@ -87,14 +99,14 @@ export function useTasks(token: string | null) {
     let snapshot: Task[] = [];
     setTasks((prev) => {
       snapshot = prev;
-      return prev.filter((t) => t.id !== id);
+      return prev.filter((task) => task.id !== id);
     });
 
     try {
       await apiDelete(`/api/tasks/${id}`, token);
-    } catch (err) {
+    } catch (error) {
       setTasks(snapshot);
-      throw err;
+      throw error;
     }
   }, [token]);
 
@@ -102,24 +114,30 @@ export function useTasks(token: string | null) {
     const newStatus: Status = task.status === 'pending' ? 'completed' : 'pending';
 
     setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t))
+      prev.map((currentTask) => (
+        currentTask.id === task.id
+          ? { ...currentTask, status: newStatus }
+          : currentTask
+      )),
     );
 
     try {
       const updated = await apiPut<Task>(
         `/api/tasks/${task.id}`,
         { status: newStatus },
-        token!
+        token!,
       );
       setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? updated : t))
+        prev.map((currentTask) => (currentTask.id === task.id ? updated : currentTask)),
       );
       return { task: updated, newStatus };
     } catch {
       setTasks((prev) =>
-        prev.map((t) =>
-          t.id === task.id ? { ...t, status: task.status } : t
-        )
+        prev.map((currentTask) => (
+          currentTask.id === task.id
+            ? { ...currentTask, status: task.status }
+            : currentTask
+        )),
       );
       throw new Error('Falha ao atualizar o status');
     }
@@ -127,6 +145,7 @@ export function useTasks(token: string | null) {
 
   const createCategory = useCallback(async (name: string) => {
     if (!token) throw new Error('Não autenticado');
+
     const created = await apiPost<{ category: string }>('/api/tasks/categories', { name }, token);
     setCategories((prev) => Array.from(new Set([...prev, created.category])));
     return created.category;
@@ -134,12 +153,35 @@ export function useTasks(token: string | null) {
 
   const createTag = useCallback(async (name: string) => {
     if (!token) throw new Error('Não autenticado');
+
     const created = await apiPost<{ tag: string }>('/api/tasks/tags', { name }, token);
     setTags((prev) => Array.from(new Set([...prev, created.tag])));
     return created.tag;
   }, [token]);
 
-  const clearTasks = useCallback(() => setTasks([]), []);
+  const deleteCategory = useCallback(async (name: string) => {
+    if (!token) throw new Error('Não autenticado');
+
+    const normalized = name.trim();
+    if (!normalized) return;
+
+    await apiDelete(`/api/tasks/categories?name=${encodeURIComponent(normalized)}`, token);
+    await Promise.all([refreshTasks(token), refreshTaxonomy(token)]);
+  }, [refreshTasks, refreshTaxonomy, token]);
+
+  const deleteTag = useCallback(async (name: string) => {
+    if (!token) throw new Error('Não autenticado');
+
+    const normalized = name.trim();
+    if (!normalized) return;
+
+    await apiDelete(`/api/tasks/tags?name=${encodeURIComponent(normalized)}`, token);
+    await Promise.all([refreshTasks(token), refreshTaxonomy(token)]);
+  }, [refreshTasks, refreshTaxonomy, token]);
+
+  const clearTasks = useCallback(() => {
+    setTasks([]);
+  }, []);
 
   return {
     tasks,
@@ -151,6 +193,9 @@ export function useTasks(token: string | null) {
     toggleStatus,
     createCategory,
     createTag,
+    deleteCategory,
+    deleteTag,
+    refreshTasks,
     refreshTaxonomy,
     clearTasks,
   };

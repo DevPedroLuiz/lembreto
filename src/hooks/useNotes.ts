@@ -15,20 +15,26 @@ type NotePayload = {
 export function useNotes(token: string | null) {
   const [notes, setNotes] = useState<Note[]>([]);
 
+  const refreshNotes = useCallback(async (requestToken = token) => {
+    if (!requestToken) {
+      setNotes([]);
+      return;
+    }
+
+    const data = await apiGet<Note[]>('/api/tasks/notes', requestToken);
+    setNotes(Array.isArray(data) ? data : []);
+  }, [token]);
+
   useEffect(() => {
     if (!token) {
       setNotes([]);
       return;
     }
 
-    apiGet<Note[]>('/api/tasks/notes', token)
-      .then((data) => {
-        setNotes(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        setNotes([]);
-      });
-  }, [token]);
+    refreshNotes(token).catch(() => {
+      setNotes([]);
+    });
+  }, [refreshNotes, token]);
 
   const createNote = useCallback(async (payload: NotePayload) => {
     if (!token) throw new Error('Não autenticado');
@@ -93,6 +99,7 @@ export function useNotes(token: string | null) {
     createNote,
     updateNote,
     deleteNote,
+    refreshNotes,
     clearNotes,
   };
 }

@@ -1,13 +1,21 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
+import {
+  buildHolidayCalendar,
+  detectBrazilLocationFromCoordinates,
+  ensureHolidayLocationSchema,
+} from '../holidays.js';
 import { logError, logInfo } from '../logger.js';
 import {
   createTaskCategorySchema,
   createTaskSchema,
   createTaskTagSchema,
+  detectHolidayLocationSchema,
   formatZodError,
   updateTaskSchema,
 } from '../schemas.js';
 import {
+  deleteUserCategory,
+  deleteUserTag,
   ensureTaskTaxonomySchema,
   getTaskTaxonomy,
   sanitizeTaskTags,
@@ -52,6 +60,30 @@ async function requireTaskAuth(context: HandlerContext) {
 async function syncTaskTaxonomy(sql: HandlerContext['sql'], userId: string, category: string, tags: string[]) {
   await upsertUserCategory(sql, userId, category);
   await upsertUserTags(sql, userId, tags);
+}
+
+function resolveCalendarYear(context: HandlerContext) {
+  const queryYear = context.request.query?.year;
+  const rawYear = typeof queryYear === 'string'
+    ? queryYear
+    : Array.isArray(queryYear) && typeof queryYear[0] === 'string'
+      ? queryYear[0]
+      : null;
+
+  const yearValue = rawYear ? Number.parseInt(rawYear, 10) : new Date().getFullYear();
+  return Number.isFinite(yearValue) ? yearValue : new Date().getFullYear();
+}
+
+function resolveNameValue(context: HandlerContext): string {
+  const queryName = context.request.query?.name;
+  if (typeof queryName === 'string') return queryName;
+  if (Array.isArray(queryName) && typeof queryName[0] === 'string') return queryName[0];
+
+  const bodyName = context.request.body && typeof context.request.body === 'object' && 'name' in context.request.body
+    ? (context.request.body as { name?: unknown }).name
+    : undefined;
+
+  return typeof bodyName === 'string' ? bodyName : '';
 }
 
 export async function handleTasksCollection(context: HandlerContext): Promise<HandlerResult> {
@@ -232,12 +264,84 @@ export async function handleTaskTaxonomy(context: HandlerContext): Promise<Handl
   }
 }
 
+export async function handleTaskHolidays(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireTaskAuth(context);
+  if ('status' in auth) return auth;
+
+  const user = auth.user;
+  const { request, sql } = context;
+
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  try {
+    await ensureHolidayLocationSchema(sql);
+    const year = resolveCalendarYear(context);
+    const calendar = buildHolidayCalendar({
+      stateCode: user.stateCode ?? null,
+      cityName: user.cityName ?? null,
+      regionCode: user.holidayRegionCode ?? null,
+    }, new Date(year, new Date().getMonth(), new Date().getDate()));
+
+    return json(200, calendar);
+  } catch (error) {
+    logError('task_holidays_failed', error, getRequestMeta(request, { userId: user.id }));
+    return json(500, { error: 'Erro ao carregar feriados e datas comemorativas' });
+  }
+}
+
+export async function handleTaskHolidayLocationDetect(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireTaskAuth(context);
+  if ('status' in auth) return auth;
+
+  const { request } = context;
+  if (request.method !== 'POST') return methodNotAllowed();
+
+  const parsed = detectHolidayLocationSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    return json(400, { error: formatZodError(parsed.error) });
+  }
+
+  try {
+    const detected = await detectBrazilLocationFromCoordinates(
+      parsed.data.latitude,
+      parsed.data.longitude,
+    );
+    return json(200, detected);
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Nao foi possivel identificar sua localizacao agora.';
+    logError('task_holiday_location_detect_failed', error, getRequestMeta(request, { userId: auth.user.id }));
+    return json(500, { error: message });
+  }
+}
+
 export async function handleTaskCategoriesCollection(context: HandlerContext): Promise<HandlerResult> {
   const auth = await requireTaskAuth(context);
   if ('status' in auth) return auth;
 
   const user = auth.user;
   const { request, sql } = context;
+  if (request.method === 'DELETE') {
+    const name = resolveNameValue(context).trim();
+    if (!name) {
+      return json(400, { error: 'Categoria invalida' });
+    }
+
+    try {
+      const deleted = await deleteUserCategory(sql, user.id, name);
+      logInfo('task_category_deleted', getRequestMeta(request, { userId: user.id, category: deleted }));
+      return json(200, { category: deleted });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao excluir categoria';
+      const status = message.includes('padrao') ? 400 : 500;
+      if (status === 500) {
+        logError('task_category_delete_failed', error, getRequestMeta(request, { userId: user.id, category: name }));
+      }
+      return json(status, { error: message });
+    }
+  }
+
   if (request.method !== 'POST') return methodNotAllowed();
 
   const parsed = createTaskCategorySchema.safeParse(request.body ?? {});
@@ -261,6 +365,22 @@ export async function handleTaskTagsCollection(context: HandlerContext): Promise
 
   const user = auth.user;
   const { request, sql } = context;
+  if (request.method === 'DELETE') {
+    const name = resolveNameValue(context).trim();
+    if (!name) {
+      return json(400, { error: 'Tag invalida' });
+    }
+
+    try {
+      const deleted = await deleteUserTag(sql, user.id, name);
+      logInfo('task_tag_deleted', getRequestMeta(request, { userId: user.id, tag: deleted }));
+      return json(200, { tag: deleted });
+    } catch (error) {
+      logError('task_tag_delete_failed', error, getRequestMeta(request, { userId: user.id, tag: name }));
+      return json(500, { error: 'Erro ao excluir tag' });
+    }
+  }
+
   if (request.method !== 'POST') return methodNotAllowed();
 
   const parsed = createTaskTagSchema.safeParse(request.body ?? {});

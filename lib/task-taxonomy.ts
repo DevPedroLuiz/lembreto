@@ -86,6 +86,80 @@ export async function upsertUserTags(sql: SqlClient, userId: string, tags: strin
   }
 }
 
+async function notesTableExists(sql: SqlClient) {
+  const rows = await sql`
+    SELECT to_regclass('public.notes') IS NOT NULL AS exists
+  `;
+
+  return Boolean(rows[0]?.exists);
+}
+
+export async function deleteUserCategory(sql: SqlClient, userId: string, name: string) {
+  await ensureTaskTaxonomySchema(sql);
+  const normalizedName = name.trim();
+  if (!normalizedName) return null;
+
+  if (DEFAULT_CATEGORIES.some((category) => category.localeCompare(normalizedName, 'pt-BR', { sensitivity: 'accent' }) === 0)) {
+    throw new Error('As categorias padrao nao podem ser excluidas.');
+  }
+
+  await sql`
+    UPDATE tasks
+    SET category = 'Geral'
+    WHERE user_id = ${userId}
+      AND lower(category) = lower(${normalizedName})
+  `;
+
+  if (await notesTableExists(sql)) {
+    await sql`
+      UPDATE notes
+      SET category = 'Geral',
+          updated_at = NOW()
+      WHERE user_id = ${userId}
+        AND lower(category) = lower(${normalizedName})
+    `;
+  }
+
+  await sql`
+    DELETE FROM user_categories
+    WHERE user_id = ${userId}
+      AND lower(name) = lower(${normalizedName})
+  `;
+
+  return normalizedName;
+}
+
+export async function deleteUserTag(sql: SqlClient, userId: string, tag: string) {
+  await ensureTaskTaxonomySchema(sql);
+  const normalizedTag = tag.trim();
+  if (!normalizedTag) return null;
+
+  await sql`
+    UPDATE tasks
+    SET tags = COALESCE(array_remove(tags, ${normalizedTag}), ARRAY[]::TEXT[])
+    WHERE user_id = ${userId}
+      AND ${normalizedTag} = ANY(tags)
+  `;
+
+  if (await notesTableExists(sql)) {
+    await sql`
+      UPDATE notes
+      SET tags = COALESCE(array_remove(tags, ${normalizedTag}), ARRAY[]::TEXT[]),
+          updated_at = NOW()
+      WHERE user_id = ${userId}
+        AND ${normalizedTag} = ANY(tags)
+    `;
+  }
+
+  await sql`
+    DELETE FROM user_tags
+    WHERE user_id = ${userId}
+      AND lower(name) = lower(${normalizedTag})
+  `;
+
+  return normalizedTag;
+}
+
 export async function getTaskTaxonomy(sql: SqlClient, userId: string) {
   await ensureTaskTaxonomySchema(sql);
 

@@ -1,0 +1,8 @@
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS state_code TEXT;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS city_name TEXT;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS holiday_region_code TEXT;

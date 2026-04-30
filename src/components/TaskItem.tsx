@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle2, Circle, Clock3, Loader2, PencilLine, Tag, Trash2 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
@@ -60,6 +60,7 @@ function TaskItemComponent({
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
+  const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
 
   const formatDate = () => {
     try {
@@ -95,7 +96,7 @@ function TaskItemComponent({
         onEdit(task);
       }}
       className={cn(
-        'surface-soft group relative flex items-start gap-4 p-4 md:p-5',
+        'surface-soft group relative flex items-start gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4 md:p-5',
         isBusy && 'opacity-75',
         isOverdue && !isCompleted && (
           overdueKind === 'timed'
@@ -108,7 +109,7 @@ function TaskItemComponent({
     >
       <div
         className={cn(
-          'absolute inset-y-4 left-3 w-1 rounded-full',
+          'absolute inset-y-3 left-3 w-1 rounded-full sm:inset-y-4',
           task.priority === 'high'
             ? 'bg-rose-400/80'
             : task.priority === 'medium'
@@ -126,7 +127,7 @@ function TaskItemComponent({
           onToggle(task);
         }}
         className={cn(
-          'ml-3 mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait disabled:opacity-60',
+          'ml-1.5 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait disabled:opacity-60 sm:ml-3 sm:h-11 sm:w-11',
           isCompleted
             ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
             : 'border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400 dark:hover:border-blue-400/30 dark:hover:text-blue-300',
@@ -142,12 +143,12 @@ function TaskItemComponent({
       </button>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3 sm:gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h3
                 className={cn(
-                  'truncate text-base font-semibold',
+                  compact ? 'line-clamp-2 text-[14px] font-semibold leading-5 sm:text-[15px]' : 'truncate text-[15px] font-semibold sm:text-base',
                   isCompleted
                     ? 'text-slate-400 line-through dark:text-slate-500'
                     : 'text-slate-900 dark:text-white',
@@ -155,12 +156,14 @@ function TaskItemComponent({
               >
                 {task.title}
               </h3>
-              <span
-                aria-hidden="true"
-                className="icon-slot h-7 w-7 rounded-xl border border-slate-200 bg-white text-slate-400 transition-colors group-hover:border-blue-200 group-hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:text-blue-300"
-              >
-                <PencilLine size={14} />
-              </span>
+              {!compact && (
+                <span
+                  aria-hidden="true"
+                  className="icon-slot h-7 w-7 rounded-xl border border-slate-200 bg-white text-slate-400 transition-colors group-hover:border-blue-200 group-hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:text-blue-300"
+                >
+                  <PencilLine size={14} />
+                </span>
+              )}
             </div>
             {!compact && task.description && (
               <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
@@ -185,11 +188,12 @@ function TaskItemComponent({
           </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className={cn('mt-3 flex flex-wrap items-center gap-2', compact && 'gap-1.5')}>
           {!isCompleted && (
             <span
               className={cn(
                 'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
+                compact && 'px-2 py-0.5 text-[10px]',
                 PRIORITY_COLORS[task.priority],
               )}
             >
@@ -197,20 +201,34 @@ function TaskItemComponent({
             </span>
           )}
 
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+          <span
+            className={cn(
+              'inline-flex max-w-[96px] items-center gap-1 truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
+              compact && 'hidden sm:inline-flex',
+            )}
+          >
             <Tag size={12} />
             {task.category || 'Geral'}
           </span>
 
-          {task.tags?.map((item) => (
+          {visibleTags.map((item) => (
             <span
               key={item}
-              className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
+              className={cn(
+                'inline-flex max-w-[88px] items-center gap-1 truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
+                compact && 'hidden sm:inline-flex',
+              )}
             >
               <Tag size={12} />
               {item}
             </span>
           ))}
+
+          {compact && (task.tags?.length ?? 0) > 1 && (
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500 sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400">
+              +{(task.tags?.length ?? 0) - 1}
+            </span>
+          )}
 
           <span
             data-testid="task-due-badge"
@@ -218,7 +236,8 @@ function TaskItemComponent({
             title={timeDescription}
             aria-label={`${formatDate()} - ${timeDescription}`}
             className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
+              'inline-flex max-w-[98px] items-center gap-1 truncate rounded-full border px-2 py-1 text-[10px] font-semibold sm:max-w-none sm:px-2.5 sm:text-[11px]',
+              compact && 'max-w-[88px] px-2 py-0.5',
               overdueKind === 'timed'
                 ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
                 : overdueKind === 'all-day'
@@ -230,7 +249,7 @@ function TaskItemComponent({
             {formatDate()}
           </span>
 
-          {timeLabel && (
+          {timeLabel && !compact && (
             <span
               data-testid="task-time-badge"
               className={cn(
@@ -244,7 +263,7 @@ function TaskItemComponent({
             </span>
           )}
 
-          {overdueKind === 'all-day' && (
+          {overdueKind === 'all-day' && !compact && (
             <span
               data-testid="task-all-day-badge"
               className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300"
@@ -287,3 +306,4 @@ export const TaskItem = React.memo(
     prev.isDeleting === next.isDeleting &&
     prev.isToggling === next.isToggling,
 );
+

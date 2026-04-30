@@ -9,6 +9,9 @@ export interface User {
   name: string;
   email: string;
   avatar?: string | null;
+  stateCode?: string | null;
+  cityName?: string | null;
+  holidayRegionCode?: string | null;
 }
 
 export interface Task {
@@ -27,6 +30,37 @@ export interface Task {
 export interface TaskTaxonomy {
   categories: string[];
   tags: string[];
+}
+
+export interface HolidayRegionOption {
+  code: string;
+  name: string;
+}
+
+export interface HolidayLocationInfo {
+  stateCode: string | null;
+  stateName: string | null;
+  cityName: string | null;
+  regionCode: string | null;
+  matchedRegionName: string | null;
+  municipalSupported: boolean;
+}
+
+export interface HolidayEntry {
+  id: string;
+  name: string;
+  date: string;
+  type: string;
+  scope: 'national' | 'state' | 'city';
+}
+
+export interface HolidayCalendarPayload {
+  location: HolidayLocationInfo;
+  today: HolidayEntry[];
+  upcoming: HolidayEntry[];
+  commemorative: HolidayEntry[];
+  monthHighlights: HolidayEntry[];
+  supportedCities: HolidayRegionOption[];
 }
 
 export interface Note {

@@ -6,20 +6,21 @@
   useState,
 } from 'react';
 import {
-  Bell,
   BellRing,
-  LayoutDashboard,
   ListTodo,
   NotebookPen,
   Plus,
   Settings,
+  Sparkles,
   User as UserIcon,
 } from 'lucide-react';
 import { addDays, addHours, format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
+import { apiPost } from './api/client';
 import { useAuth } from './hooks/useAuth';
+import { useHolidays } from './hooks/useHolidays';
 import { useNotes } from './hooks/useNotes';
 import { useNotifications } from './hooks/useNotifications';
 import { useTasks } from './hooks/useTasks';
@@ -56,7 +57,7 @@ import { TaskDetailsDialog } from './components/TaskDetailsDialog';
 import { DashboardMetricDialog } from './components/DashboardMetricDialog';
 import { NotificationsInboxDrawer } from './components/NotificationsInboxDrawer';
 import { ProfileDrawer } from './components/ProfileDrawer';
-import { SettingsDrawer } from './components/SettingsDrawer';
+import { SettingsDrawer, type SettingsView } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AuthPage } from './pages/AuthPage';
@@ -188,6 +189,8 @@ export default function App() {
     toggleStatus,
     createCategory,
     createTag,
+    deleteCategory,
+    deleteTag,
   } = useTasks(isResetPasswordRoute ? null : auth.token);
   const {
     notes,
@@ -195,6 +198,7 @@ export default function App() {
     createNote,
     updateNote,
     deleteNote,
+    refreshNotes,
   } = useNotes(isResetPasswordRoute ? null : auth.token);
   const {
     notifications,
@@ -214,6 +218,11 @@ export default function App() {
     showToast: triggerToastOnly,
     requestPermission,
   } = useToast();
+  const {
+    calendar: holidayCalendar,
+    isLoading: isHolidayLoading,
+    refresh: refreshHolidays,
+  } = useHolidays(isResetPasswordRoute ? null : auth.token, isResetPasswordRoute ? null : auth.currentUser);
 
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
@@ -225,6 +234,7 @@ export default function App() {
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
+  const [settingsInitialView, setSettingsInitialView] = useState<SettingsView>('appearance');
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [configSound, setConfigSound] = useState(true);
@@ -278,6 +288,8 @@ export default function App() {
   const [profAvatar, setProfAvatar] = useState<string | null>(null);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
+  const [isSavingHolidayLocation, setIsSavingHolidayLocation] = useState(false);
+  const [isDetectingHolidayLocation, setIsDetectingHolidayLocation] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
   );
@@ -489,6 +501,16 @@ export default function App() {
   const toggleDarkMode = useCallback(() => {
     saveConfig({ darkMode: !darkMode });
   }, [darkMode, saveConfig]);
+
+  const handleDeleteCategory = useCallback(async (name: string) => {
+    await deleteCategory(name);
+    await refreshNotes();
+  }, [deleteCategory, refreshNotes]);
+
+  const handleDeleteTag = useCallback(async (name: string) => {
+    await deleteTag(name);
+    await refreshNotes();
+  }, [deleteTag, refreshNotes]);
 
   const playSuccessSound = useCallback(() => {
     if (!configSound) return;
@@ -1372,8 +1394,9 @@ export default function App() {
     });
   }, [emitNotification, notificationClock, notificationsEnabled, tomorrowTasks]);
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((view: SettingsView = 'appearance') => {
     setShowNotificationsInbox(false);
+    setSettingsInitialView(view);
     setShowSettings(true);
   }, []);
 
@@ -1389,6 +1412,94 @@ export default function App() {
   const closeSettingsDrawer = useCallback(() => {
     setShowSettings(false);
   }, []);
+
+  const saveHolidayLocation = useCallback(async ({
+    stateCode,
+    cityName,
+  }: {
+    stateCode: string | null;
+    cityName: string | null;
+  }) => {
+    try {
+      setIsSavingHolidayLocation(true);
+      await auth.updateProfile({
+        stateCode,
+        cityName,
+      });
+      await refreshHolidays(auth.token ?? undefined);
+      emitNotification(
+        'Região atualizada',
+        'Os feriados agora consideram sua região configurada.',
+        'success',
+        { target: { type: 'settings' } },
+      );
+    } finally {
+      setIsSavingHolidayLocation(false);
+    }
+  }, [auth, emitNotification, refreshHolidays]);
+
+  const detectHolidayLocation = useCallback(async () => {
+    if (!auth.token) throw new Error('Você precisa estar autenticado para detectar a região.');
+    if (!navigator.geolocation) throw new Error('Seu navegador não oferece suporte à geolocalização.');
+
+    setIsDetectingHolidayLocation(true);
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 5 * 60 * 1000,
+        });
+      });
+
+      const detected = await apiPost<{
+        stateCode: string | null;
+        cityName: string | null;
+        regionCode: string | null;
+      }>(
+        '/api/tasks/holidays/location',
+        {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        },
+        auth.token,
+      );
+
+      await auth.updateProfile({
+        stateCode: detected.stateCode,
+        cityName: detected.cityName,
+        holidayRegionCode: detected.regionCode,
+      });
+      await refreshHolidays(auth.token);
+
+      emitNotification(
+        'Localização aplicada',
+        'Sua região foi identificada para mostrar os feriados corretos.',
+        'success',
+        { target: { type: 'settings' } },
+      );
+    } catch (error) {
+      const message = error instanceof GeolocationPositionError
+        ? error.code === error.PERMISSION_DENIED
+          ? 'Permita o acesso à localização para detectar sua região.'
+          : 'Não foi possível obter sua localização agora.'
+        : error instanceof Error
+          ? error.message
+          : 'Não foi possível detectar sua região agora.';
+
+      emitNotification('Falha na localização', message, 'error', {
+        target: { type: 'settings' },
+      });
+      throw new Error(message);
+    } finally {
+      setIsDetectingHolidayLocation(false);
+    }
+  }, [auth, emitNotification, refreshHolidays]);
+
+  const openHolidaySettings = useCallback(() => {
+    openSettings('organization');
+  }, [openSettings]);
 
   const closeFloatingSurfacesForNavigation = useCallback(() => {
     setShowNotificationsInbox(false);
@@ -1708,7 +1819,7 @@ export default function App() {
         : '';
 
   return (
-    <div className="flex h-screen w-full overflow-hidden text-slate-900 dark:text-slate-100">
+    <div className="flex h-[100dvh] min-h-[100dvh] w-full overflow-hidden text-slate-900 dark:text-slate-100">
       <Sidebar
         currentUser={auth.currentUser}
         activeTab={activeTab}
@@ -1726,10 +1837,10 @@ export default function App() {
       <main className="relative flex h-full flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="pointer-events-none absolute inset-0 bg-grid opacity-40 dark:opacity-20" />
 
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/70 bg-white/80 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/75 md:hidden">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/70 bg-white/80 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/75 sm:p-4 lg:hidden">
           <div className="flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_30px_-22px_rgba(37,99,235,0.8)]">
-              <Bell size={18} />
+              <Sparkles size={18} />
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Painel</p>
@@ -1751,7 +1862,7 @@ export default function App() {
               )}
             </motion.button>
             <button
-              onClick={openSettings}
+              onClick={() => openSettings()}
               aria-label="Abrir configurações"
               className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
             >
@@ -1771,8 +1882,13 @@ export default function App() {
           </div>
         </header>
 
-        <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 md:p-8 md:pb-8 xl:p-10">
-          <div className="surface-panel mb-8 p-5 md:p-6">
+        <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 sm:p-6 sm:pb-28 lg:p-8 lg:pb-8 xl:p-10">
+          <div
+            className={cn(
+              'surface-panel mb-6 p-5 md:mb-8 md:p-6',
+              activeTab === 'dashboard' && 'hidden lg:block',
+            )}
+          >
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <span className="section-eyebrow">
@@ -1792,7 +1908,7 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="hidden items-center gap-3 lg:flex">
                 <motion.button
                   type="button"
                   onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
@@ -1818,7 +1934,7 @@ export default function App() {
               <button
                 onClick={openNewTask}
                 data-testid="new-task-button"
-                className="action-primary hidden md:inline-flex"
+                className="action-primary hidden lg:inline-flex"
               >
                 <Plus size={20} /> Novo lembrete
               </button>
@@ -1827,7 +1943,7 @@ export default function App() {
               <button
                 onClick={() => openNewNote()}
                 data-testid="new-note-header-button"
-                className="action-primary hidden md:inline-flex"
+                className="action-primary hidden lg:inline-flex"
               >
                 <Plus size={20} /> Nova nota
               </button>
@@ -1878,6 +1994,16 @@ export default function App() {
                   onEdit={openTaskDetails}
                   deletingTaskIds={deletingTaskIds}
                   togglingTaskIds={togglingTaskIds}
+                  holidayCalendar={holidayCalendar}
+                  isHolidayLoading={isHolidayLoading}
+                  isDetectingHolidayLocation={isDetectingHolidayLocation}
+                  onRefreshHolidays={() => {
+                    void refreshHolidays();
+                  }}
+                  onDetectHolidayLocation={() => {
+                    void detectHolidayLocation();
+                  }}
+                  onOpenHolidaySettings={openHolidaySettings}
                 />
               )}
               {activeTab === 'notes' && (
@@ -1903,7 +2029,7 @@ export default function App() {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 lg:hidden">
         <div className="grid grid-cols-[1fr_1fr_auto_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
@@ -1913,7 +2039,7 @@ export default function App() {
               activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
             >
-              <LayoutDashboard size={24} />
+              <Sparkles size={24} />
             </button>
           <button
             onClick={openNotesTab}
@@ -2078,6 +2204,7 @@ export default function App() {
       <SettingsDrawer
         open={showSettings}
         onClose={closeSettingsDrawer}
+        initialView={settingsInitialView}
         darkMode={darkMode}
         onToggleDarkMode={toggleDarkMode}
         notificationsEnabled={notificationsEnabled}
@@ -2096,6 +2223,17 @@ export default function App() {
         tags={tags}
         onCreateCategory={createCategory}
         onCreateTag={createTag}
+        onDeleteCategory={handleDeleteCategory}
+        onDeleteTag={handleDeleteTag}
+        holidayStateCode={auth.currentUser?.stateCode ?? null}
+        holidayCityName={auth.currentUser?.cityName ?? null}
+        holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}
+        holidayMunicipalSupported={holidayCalendar?.location.municipalSupported ?? false}
+        holidaySupportedCities={holidayCalendar?.supportedCities ?? []}
+        isSavingHolidayLocation={isSavingHolidayLocation}
+        isDetectingHolidayLocation={isDetectingHolidayLocation}
+        onSaveHolidayLocation={saveHolidayLocation}
+        onDetectHolidayLocation={detectHolidayLocation}
       />
 
       <NotificationsInboxDrawer

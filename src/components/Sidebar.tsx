@@ -52,8 +52,8 @@ export function Sidebar({
   }));
 
   return (
-    <aside className="hidden h-full w-[320px] shrink-0 flex-col p-5 md:flex">
-      <div className="surface-panel flex h-full flex-col p-5">
+    <aside className="hidden h-full w-[292px] shrink-0 flex-col p-4 lg:flex xl:w-[320px] xl:p-5">
+      <div className="surface-panel flex h-full flex-col p-5 xl:p-5">
         <div className="mb-8">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,0.7)]">
@@ -189,7 +189,7 @@ export function Sidebar({
           </div>
 
           <button
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings()}
             data-testid="sidebar-settings-button"
             className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
           >

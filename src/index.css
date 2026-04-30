@@ -30,6 +30,22 @@ body {
     linear-gradient(220deg, rgba(16, 185, 129, 0.04), transparent 35%);
 }
 
+@media (max-width: 640px) {
+  .surface-panel {
+    border-radius: 24px;
+  }
+
+  .surface-soft {
+    border-radius: 24px;
+  }
+
+  .section-eyebrow {
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+    letter-spacing: 0.14em;
+  }
+}
+
 .dark body {
   @apply text-slate-100;
   background:

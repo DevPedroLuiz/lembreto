@@ -95,7 +95,7 @@ export function NotesPage({
             </button>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <div className="surface-soft p-4">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total de notas</p>
               <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{notes.length}</p>

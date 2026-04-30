@@ -15,6 +15,8 @@ const descriptionSchema = z.string().max(4000, 'Descricao muito longa');
 const categorySchema = z.string().trim().min(1, 'Categoria obrigatoria').max(40, 'Categoria muito longa');
 const tagNameSchema = z.string().trim().min(1, 'Tag obrigatoria').max(24, 'Tag muito longa');
 const noteContentSchema = z.string().max(6000, 'Conteudo muito longo');
+const stateCodeSchema = z.string().trim().length(2, 'Estado invalido');
+const cityNameSchema = z.string().trim().min(1, 'Cidade obrigatoria').max(120, 'Cidade muito longa');
 const dueDateSchema = z.string().refine(
   (value) => !Number.isNaN(Date.parse(value)),
   'Data invalida',
@@ -69,6 +71,9 @@ export const profileUpdateSchema = z.object({
   email: emailSchema.optional(),
   password: passwordSchema.optional(),
   avatar: z.union([avatarSchema, z.null()]).optional(),
+  stateCode: z.union([stateCodeSchema, z.null()]).optional(),
+  cityName: z.union([cityNameSchema, z.null()]).optional(),
+  holidayRegionCode: z.union([z.string().trim().max(24, 'Codigo regional muito longo'), z.null()]).optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
   'Envie ao menos um campo para atualizar',
@@ -102,6 +107,11 @@ export const createTaskCategorySchema = z.object({
 
 export const createTaskTagSchema = z.object({
   name: tagNameSchema,
+}).strict();
+
+export const detectHolidayLocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
 }).strict();
 
 export const createNoteSchema = z.object({

@@ -274,6 +274,20 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-tasks').click();
       await page.locator('aside').getByText('Saúde', { exact: true }).click();
       await expect(createdTask).toBeVisible();
+
+      await page.getByTestId('sidebar-settings-button').click();
+      await page.getByTestId('settings-nav-organization').click();
+      const settingsDialog = page.getByRole('dialog', { name: /config/i });
+      await page.getByRole('button', { name: 'Excluir tag Consulta' }).click();
+      await page.getByRole('button', { name: 'Excluir categoria Saúde' }).click();
+      await expect(settingsDialog.getByRole('button', { name: 'Excluir categoria Saúde' })).toHaveCount(0);
+      await expect(settingsDialog.getByRole('button', { name: 'Excluir tag Consulta' })).toHaveCount(0);
+      await page.getByRole('button', { name: /fechar configura/i }).click();
+
+      await page.locator('aside').getByText('Todas', { exact: true }).click();
+      await createdTask.click();
+      await expect(taskDetailsDialog).toContainText('Geral');
+      await expect(taskDetailsDialog.getByText('Consulta', { exact: true })).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

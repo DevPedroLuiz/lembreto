@@ -16,9 +16,10 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { FilterTag } from '../components/FilterTag';
+import { HolidaysPanel } from '../components/HolidaysPanel';
 import { TaskItem } from '../components/TaskItem';
 import { LS } from '../lib/storage';
-import type { Priority, Task } from '../types';
+import type { HolidayCalendarPayload, Priority, Task } from '../types';
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 200;
@@ -26,6 +27,7 @@ const SEARCH_DEBOUNCE_MS = 200;
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | 'pending' | 'completed';
+type TasksPageView = 'agenda' | 'holidays';
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: 'created', label: 'Recentes' },
@@ -80,6 +82,12 @@ interface TasksPageProps {
   onEdit: (task: Task) => void;
   deletingTaskIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
+  holidayCalendar: HolidayCalendarPayload | null;
+  isHolidayLoading: boolean;
+  isDetectingHolidayLocation: boolean;
+  onRefreshHolidays: () => void;
+  onDetectHolidayLocation: () => void;
+  onOpenHolidaySettings: () => void;
 }
 
 interface PaginationControlsProps {
@@ -265,6 +273,12 @@ export function TasksPage({
   onEdit,
   deletingTaskIds,
   togglingTaskIds,
+  holidayCalendar,
+  isHolidayLoading,
+  isDetectingHolidayLocation,
+  onRefreshHolidays,
+  onDetectHolidayLocation,
+  onOpenHolidaySettings,
 }: TasksPageProps) {
   const config = React.useMemo(() => LS.getConfig(), []);
   const initialSortMode = isSortMode(config.taskSortMode) ? config.taskSortMode : 'created';
@@ -279,6 +293,7 @@ export function TasksPage({
   const [filtersOpen, setFiltersOpen] = React.useState(() =>
     hasStoredCustomFilters(search, filterCategory, initialSortMode, initialPriorityFilter, initialStatusFilter),
   );
+  const [activeView, setActiveView] = React.useState<TasksPageView>('agenda');
   const [searchInput, setSearchInput] = React.useState(search);
   const [isMobileViewport, setIsMobileViewport] = React.useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
@@ -589,6 +604,39 @@ export function TasksPage({
             </p>
           </div>
 
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveView('agenda')}
+              aria-pressed={activeView === 'agenda'}
+              className={[
+                'inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all',
+                activeView === 'agenda'
+                  ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_16px_32px_-24px_rgba(37,99,235,0.75)]'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
+              ].join(' ')}
+            >
+              <ArrowUpDown size={16} />
+              Agenda
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView('holidays')}
+              aria-pressed={activeView === 'holidays'}
+              className={[
+                'inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all',
+                activeView === 'holidays'
+                  ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_16px_32px_-24px_rgba(37,99,235,0.75)]'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
+              ].join(' ')}
+            >
+              <Sparkles size={16} />
+              Datas e feriados
+            </button>
+          </div>
+
+          {activeView === 'agenda' && (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
@@ -649,9 +697,11 @@ export function TasksPage({
               )}
             </AnimatePresence>
           </div>
+          )}
         </div>
 
-        <div className="mt-5 flex gap-2 overflow-x-auto pb-1 md:hidden">
+        {activeView === 'agenda' && (
+        <div className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:hidden">
           <FilterTag
             active={filterCategory === 'Todas'}
             onClick={() => setFilterCategory('Todas')}
@@ -666,17 +716,18 @@ export function TasksPage({
             />
           ))}
         </div>
+        )}
       </section>
 
       <AnimatePresence>
-        {filtersOpen && isMobileViewport && (
+        {activeView === 'agenda' && filtersOpen && isMobileViewport && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setFiltersOpen(false)}
-              className="fixed inset-0 z-[130] bg-slate-950/45 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-[130] bg-slate-950/45 backdrop-blur-sm lg:hidden"
             />
 
             <motion.section
@@ -685,7 +736,7 @@ export function TasksPage({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 24 }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-              className="fixed inset-x-3 bottom-3 z-[131] max-h-[78vh] overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_30px_100px_-28px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96 md:hidden"
+              className="fixed inset-x-3 bottom-3 z-[131] max-h-[78vh] overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_30px_100px_-28px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96 lg:hidden"
               aria-modal="true"
               role="dialog"
               aria-labelledby="mobile-filters-title"
@@ -716,7 +767,18 @@ export function TasksPage({
         )}
       </AnimatePresence>
 
-      {statusFilter !== 'completed' && (
+      {activeView === 'holidays' && (
+        <HolidaysPanel
+          calendar={holidayCalendar}
+          isLoading={isHolidayLoading}
+          isDetectingLocation={isDetectingHolidayLocation}
+          onRefresh={onRefreshHolidays}
+          onDetectLocation={onDetectHolidayLocation}
+          onOpenLocationSettings={onOpenHolidaySettings}
+        />
+      )}
+
+      {activeView === 'agenda' && statusFilter !== 'completed' && (
         <section className="surface-panel p-5 md:p-6">
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
@@ -769,7 +831,7 @@ export function TasksPage({
         </section>
       )}
 
-      {showCompleted && statusFilter !== 'pending' && sortedCompletedTasks.length > 0 && (
+      {activeView === 'agenda' && showCompleted && statusFilter !== 'pending' && sortedCompletedTasks.length > 0 && (
         <section className="surface-panel p-5 opacity-90 md:p-6">
           <div className="mb-5">
             <h4 className="text-lg font-semibold text-slate-900 dark:text-white">

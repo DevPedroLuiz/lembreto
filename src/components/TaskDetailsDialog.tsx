@@ -108,7 +108,7 @@ export function TaskDetailsDialog({
             onClick={() => {
               if (!isBusy) onClose();
             }}
-            className="fixed inset-0 z-[110] bg-slate-950/60 backdrop-blur-sm md:left-[320px]"
+            className="fixed inset-0 z-[110] bg-slate-950/60 backdrop-blur-sm lg:left-[320px]"
           />
 
           <motion.section
@@ -119,7 +119,7 @@ export function TaskDetailsDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="task-details-title"
-            className="fixed inset-x-4 top-1/2 z-[111] mx-auto flex max-h-[88vh] w-full max-w-4xl -translate-y-1/2 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 md:left-[344px] md:right-6 md:mx-0 md:w-auto md:max-w-none"
+            className="fixed inset-x-3 bottom-3 top-auto z-[111] mx-auto flex max-h-[86dvh] w-auto flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:w-full sm:max-w-4xl sm:-translate-y-1/2 sm:rounded-[32px] lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
             data-testid="task-details-dialog"
           >
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">

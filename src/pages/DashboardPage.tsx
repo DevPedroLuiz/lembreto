@@ -168,11 +168,11 @@ export function DashboardPage({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="space-y-8"
+      className="space-y-6 sm:space-y-8"
     >
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
-        <div className="surface-panel overflow-hidden p-6 md:p-8">
-          <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+      <section className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
+        <div className="surface-panel overflow-hidden p-5 sm:p-6 md:p-8">
+          <div className="flex flex-col gap-6 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <span className="section-eyebrow">
                 <span className="icon-slot h-4 w-4">
@@ -180,22 +180,22 @@ export function DashboardPage({
                 </span>
                 Visão geral do dia
               </span>
-              <h3 className="mt-5 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
+              <h3 className="mt-4 font-display text-[1.55rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-3xl md:text-4xl">
                 Clareza para decidir o que vem primeiro.
               </h3>
-              <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+              <p className="mt-3 max-w-xl text-[13px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm sm:leading-7 md:text-base">
                 Centralize prioridades, acompanhe prazos e mantenha uma rotina mais leve com um painel simples de consultar.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <button type="button" onClick={onNewTask} className="action-primary min-h-[52px] whitespace-nowrap px-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button type="button" onClick={onNewTask} className="action-primary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
                 <span className="icon-slot h-[18px] w-[18px]">
                   <Plus size={18} />
                 </span>
                 Novo lembrete
               </button>
-              <button type="button" onClick={onViewAll} className="action-secondary min-h-[52px] whitespace-nowrap px-5">
+              <button type="button" onClick={onViewAll} className="action-secondary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
                 <span className="icon-slot h-[18px] w-[18px]">
                   <ListTodo size={18} />
                 </span>
@@ -204,7 +204,7 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-4 xl:grid-cols-4">
             <MetricCard
               title="Total"
               value={tasks.length}
@@ -245,9 +245,10 @@ export function DashboardPage({
           </div>
         </div>
 
-        <aside className="surface-panel flex min-h-[280px] flex-col overflow-hidden p-6 md:p-8">
+        <aside className="surface-panel relative flex min-h-[260px] flex-col overflow-hidden p-5 sm:p-6 md:min-h-[280px] md:p-8">
+          <div className="pointer-events-none absolute inset-x-10 top-0 h-24 rounded-full bg-blue-500/8 blur-3xl dark:bg-blue-400/10" />
           <span className="section-eyebrow w-fit">Progresso</span>
-          <div className="mt-8">
+          <div className="relative mt-6 sm:mt-8">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Desempenho da sua lista</p>
             <div className="mt-3 flex items-end gap-2">
               <span className="font-display text-5xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -259,14 +260,14 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="mt-8">
-            <div className="h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06]">
+          <div className="relative mt-6 sm:mt-8">
+            <div className="h-3 overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 shadow-[inset_0_1px_1px_rgba(255,255,255,0.7)] dark:border-white/10 dark:bg-white/[0.06] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.04)]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-sky-500 transition-all"
+                className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 shadow-[0_0_18px_rgba(59,130,246,0.25)] transition-all"
                 style={{ width: `${completedPercentage}%` }}
               />
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="inline-flex min-h-[34px] items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200">
                 <span
                   className={[
@@ -288,11 +289,22 @@ export function DashboardPage({
             </div>
           </div>
 
-          <button type="button" onClick={onNewTask} className="action-secondary mt-auto w-full">
-            <span className="icon-slot h-[18px] w-[18px]">
+          <button
+            type="button"
+            onClick={onNewTask}
+            className="group mt-auto flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-blue-300 hover:bg-white sm:min-h-[60px] sm:px-5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
+          >
+            <div>
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                Novo lembrete
+              </span>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Registre rapidamente o próximo passo.
+              </p>
+            </div>
+            <span className="icon-slot flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition group-hover:border-blue-300 group-hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-200 dark:group-hover:border-blue-500/40 dark:group-hover:text-blue-300">
               <Plus size={18} />
             </span>
-            Registrar nova meta
           </button>
         </aside>
       </section>
@@ -300,7 +312,7 @@ export function DashboardPage({
       {assistantTask && (
         <section
           data-testid="assistant-focus-card"
-          className="surface-panel overflow-hidden p-6 md:p-7"
+          className="surface-panel overflow-hidden p-5 sm:p-6 md:p-7"
         >
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-3xl">
@@ -310,20 +322,20 @@ export function DashboardPage({
                 </span>
                 Assistente do dia
               </span>
-              <h4 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-[2rem]">
+              <h4 className="mt-4 text-[1.65rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:text-2xl md:text-[2rem]">
                 {assistantPrimaryCopy}
               </h4>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400 sm:leading-7 md:text-base">
                 {assistantSecondaryCopy}
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <button
                 type="button"
                 data-testid="assistant-open-focus"
                 onClick={() => onEdit(assistantTask)}
-                className="action-primary min-h-[52px] whitespace-nowrap px-5"
+                className="action-primary min-h-[52px] justify-center whitespace-nowrap px-5"
               >
                 <span className="icon-slot h-[18px] w-[18px]">
                   <Target size={18} />
@@ -334,7 +346,7 @@ export function DashboardPage({
                 type="button"
                 data-testid="assistant-open-context"
                 onClick={assistantContextAction}
-                className="action-secondary min-h-[52px] whitespace-nowrap px-5"
+                className="action-secondary min-h-[52px] justify-center whitespace-nowrap px-5"
               >
                 <span className="icon-slot h-[18px] w-[18px]">
                   <ArrowRight size={18} />
@@ -344,8 +356,8 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,0.55fr))]">
-            <div className="rounded-[28px] border border-slate-200/80 bg-slate-50/70 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,0.55fr))]">
+            <div className="col-span-2 rounded-[28px] border border-slate-200/80 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.04] sm:p-5 lg:col-span-1">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -364,7 +376,7 @@ export function DashboardPage({
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04] sm:p-5">
               <div className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
                 <CalendarDays size={18} />
               </div>
@@ -374,7 +386,7 @@ export function DashboardPage({
               <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">{assistantDueLabel}</p>
             </div>
 
-            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04] sm:p-5">
               <div className="icon-slot h-10 w-10 rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
                 <Clock3 size={18} />
               </div>
@@ -384,7 +396,7 @@ export function DashboardPage({
               <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">{assistantTimeLabel || 'Dia todo'}</p>
             </div>
 
-            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+            <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04] sm:p-5">
               <div className="icon-slot h-10 w-10 rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
                 <Target size={18} />
               </div>
@@ -404,16 +416,16 @@ export function DashboardPage({
       )}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
-        <div className="surface-panel p-5 md:p-6">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <div>
+        <div className="surface-panel p-4 sm:p-5 md:p-6">
+          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Próximos lembretes</h4>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 Veja o que merece sua atenção imediata.
               </p>
             </div>
 
-            <button type="button" onClick={onViewAll} className="action-ghost">
+            <button type="button" onClick={onViewAll} className="action-ghost self-start whitespace-nowrap sm:self-auto">
               Ver tudo
               <span className="icon-slot h-4 w-4">
                 <ArrowRight size={16} />
@@ -443,12 +455,12 @@ export function DashboardPage({
                     </p>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     <button
                       type="button"
                       data-testid="dashboard-create-first-task"
                       onClick={onNewTask}
-                      className="action-primary min-h-[56px]"
+                      className="action-primary min-h-[56px] w-full justify-center"
                     >
                       <span className="icon-slot h-[18px] w-[18px]">
                         <Plus size={18} />
@@ -459,7 +471,7 @@ export function DashboardPage({
                       type="button"
                       data-testid="dashboard-explore-categories"
                       onClick={onViewAll}
-                      className="action-secondary min-h-[56px]"
+                      className="action-secondary min-h-[56px] w-full justify-center"
                     >
                       <span className="icon-slot h-[18px] w-[18px]">
                         <ListTodo size={18} />
@@ -470,7 +482,7 @@ export function DashboardPage({
                       type="button"
                       data-testid="dashboard-use-example"
                       onClick={() => onApplyTemplate(QUICK_START_TEMPLATES[0])}
-                      className="inline-flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition-all hover:-translate-y-0.5 hover:bg-emerald-100 active:translate-y-0 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+                      className="inline-flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition-all hover:-translate-y-0.5 hover:bg-emerald-100 active:translate-y-0 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
                     >
                       <span className="icon-slot h-[18px] w-[18px]">
                         <Sparkles size={18} />
@@ -483,7 +495,7 @@ export function DashboardPage({
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
                       Sugestões rápidas
                     </p>
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {QUICK_START_TEMPLATES.map((template) => (
                         <button
                           key={template.title}
@@ -536,7 +548,7 @@ export function DashboardPage({
           </div>
         </div>
 
-        <aside className="surface-panel p-5 md:p-6">
+        <aside className="surface-panel p-4 sm:p-5 md:p-6">
           <div className="mb-5">
             <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Atalhos úteis</h4>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
@@ -550,11 +562,11 @@ export function DashboardPage({
                 key={template.title}
                 type="button"
                 onClick={() => onApplyTemplate(template)}
-                className="flex w-full items-start justify-between rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
+                className="flex w-full items-start justify-between overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50/80 px-3.5 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white sm:px-4 sm:py-4 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
               >
-                <div className="pr-4">
+                <div className="min-w-0 flex-1 pr-3 sm:pr-4">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">{template.title}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-slate-500 dark:text-slate-400 sm:line-clamp-3 sm:text-sm sm:leading-6">
                     {template.description}
                   </p>
                 </div>

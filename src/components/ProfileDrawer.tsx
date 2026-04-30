@@ -104,7 +104,7 @@ export function ProfileDrawer({
             animate={{ x: swipe.offset }}
             exit={{ x: '100%' }}
             transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 220 }}
-            className="fixed right-0 top-0 z-[101] flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white/96 shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
+            className="fixed right-0 top-0 z-[101] flex h-full w-full max-w-xl flex-col border-l border-slate-200/80 bg-white/96 pb-[max(env(safe-area-inset-bottom),0px)] shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_24px_80px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94"
             role="dialog"
             aria-modal="true"
             aria-labelledby="profile-drawer-title"

@@ -1,11 +1,13 @@
 import bcrypt from 'bcryptjs';
 import {
   buildTokenJti,
+  ensureUserProfileSchema,
   getAuthFailureResponse,
   requireAuthFromAuthorizationHeader,
   requireAuthFromToken,
 } from '../auth.js';
 import { isTrustedRequestOrigin } from '../csrf.js';
+import { resolveHolidayLocation } from '../holidays.js';
 import { extractBearerToken, signToken, verifyToken } from '../jwt.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import {
@@ -45,6 +47,9 @@ interface UserRow {
   name: string;
   email: string;
   avatar: string | null;
+  stateCode: string | null;
+  cityName: string | null;
+  holidayRegionCode: string | null;
 }
 
 interface LoginUserRow extends UserRow {
@@ -66,6 +71,9 @@ interface ProfileCurrentUserRow {
   email: string;
   password: string;
   avatar: string | null;
+  state_code: string | null;
+  city_name: string | null;
+  holiday_region_code: string | null;
 }
 
 export async function handleAuthRegister(context: HandlerContext): Promise<HandlerResult> {
@@ -94,6 +102,8 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
   const { name, email, password } = parsed.data;
 
   try {
+    await ensureUserProfileSchema(sql);
+
     const existing = await sql`
       SELECT id FROM users WHERE email = ${email}
     `;
@@ -105,7 +115,14 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
     const rows = await sql`
       INSERT INTO users (name, email, password)
       VALUES (${name}, ${email}, ${hashedPassword})
-      RETURNING id, name, email, avatar
+      RETURNING
+        id,
+        name,
+        email,
+        avatar,
+        state_code AS "stateCode",
+        city_name AS "cityName",
+        holiday_region_code AS "holidayRegionCode"
     `;
 
     const user = rows[0] as unknown as UserRow;
@@ -147,8 +164,18 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
   const { email, password } = parsed.data;
 
   try {
+    await ensureUserProfileSchema(sql);
+
     const rows = await sql`
-      SELECT id, name, email, avatar, password AS password_hash
+      SELECT
+        id,
+        name,
+        email,
+        avatar,
+        state_code AS "stateCode",
+        city_name AS "cityName",
+        holiday_region_code AS "holidayRegionCode",
+        password AS password_hash
       FROM users
       WHERE email = ${email}
     `;
@@ -386,9 +413,19 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
   }
 
   const userId = auth.user.id;
-  const { name, email, password, avatar } = parsed.data;
+  const {
+    name,
+    email,
+    password,
+    avatar,
+    stateCode,
+    cityName,
+    holidayRegionCode,
+  } = parsed.data;
 
   try {
+    await ensureUserProfileSchema(sql);
+
     if (email) {
       const conflict = await sql`
         SELECT id FROM users
@@ -400,7 +437,16 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
     }
 
     const current = await sql`
-      SELECT name, email, password, avatar FROM users WHERE id = ${userId}
+      SELECT
+        name,
+        email,
+        password,
+        avatar,
+        state_code,
+        city_name,
+        holiday_region_code
+      FROM users
+      WHERE id = ${userId}
     `;
     if (current.length === 0) {
       return json(404, { error: 'Usuario nao encontrado' });
@@ -412,6 +458,18 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
       newPasswordHash = await bcrypt.hash(password.trim(), 12);
     }
 
+    const resolvedLocation = resolveHolidayLocation(
+      stateCode !== undefined ? stateCode : cur.state_code,
+      cityName !== undefined ? cityName : cur.city_name,
+    );
+    const nextStateCode = stateCode !== undefined ? resolvedLocation.stateCode : cur.state_code;
+    const nextCityName = cityName !== undefined ? resolvedLocation.cityName : cur.city_name;
+    const nextRegionCode = holidayRegionCode !== undefined
+      ? holidayRegionCode
+      : (stateCode !== undefined || cityName !== undefined)
+        ? resolvedLocation.regionCode
+        : cur.holiday_region_code;
+
     const nextEmail = email || cur.email;
     const shouldRotateToken =
       Boolean(password && password.trim()) || nextEmail !== auth.user.email;
@@ -421,9 +479,19 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         name     = ${name || cur.name},
         email    = ${nextEmail},
         password = ${newPasswordHash},
-        avatar   = ${avatar !== undefined ? avatar : cur.avatar}
+        avatar   = ${avatar !== undefined ? avatar : cur.avatar},
+        state_code = ${nextStateCode},
+        city_name = ${nextCityName},
+        holiday_region_code = ${nextRegionCode}
       WHERE id = ${userId}
-      RETURNING id, name, email, avatar
+      RETURNING
+        id,
+        name,
+        email,
+        avatar,
+        state_code AS "stateCode",
+        city_name AS "cityName",
+        holiday_region_code AS "holidayRegionCode"
     `;
 
     const user = rows[0] as unknown as UserRow;

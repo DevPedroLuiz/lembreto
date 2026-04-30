@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Clock3,
@@ -137,13 +137,13 @@ export function NoteDrawer({
             className="fixed inset-0 z-[120] bg-slate-950/60 backdrop-blur-sm"
           />
 
-          <div className="fixed inset-0 z-[121] flex items-center justify-center p-3 sm:p-5">
+          <div className="fixed inset-0 z-[121] flex items-end justify-center p-2 sm:items-center sm:p-5">
             <motion.div
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[34px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)]"
+              className="flex max-h-[calc(100dvh-0.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="note-drawer-title"
@@ -158,51 +158,51 @@ export function NoteDrawer({
                 </div>
               )}
 
-              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-5 py-5 text-white dark:border-white/10 md:px-7">
+              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-4 py-3 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7">
                 <div className="flex items-start justify-between gap-4">
                   <div className="max-w-2xl">
                     <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm">
-                      {isEditing ? 'Edicao' : 'Anotacao'}
+                      {isEditing ? 'Edição' : 'Anotação'}
                     </span>
-                    <h2 id="note-drawer-title" className="mt-4 text-2xl font-semibold text-white md:text-[2rem]">
+                    <h2 id="note-drawer-title" className="mt-2.5 text-[1.55rem] font-semibold leading-tight text-white sm:mt-4 sm:text-2xl md:text-[2rem]">
                       {isEditing ? 'Editar nota' : 'Nova nota'}
                     </h2>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-blue-50/88">
-                      Registre contexto, ideias e informacoes auxiliares sem perder a ligacao com os seus lembretes.
+                    <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-blue-50/88 sm:mt-2 sm:text-sm sm:leading-6">
+                      Registre contexto e apoio sem perder a ligação com seus lembretes.
                     </p>
                   </div>
 
                   <button
                     onClick={onClose}
                     disabled={isSubmitting}
-                    aria-label="Fechar formulario de nota"
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white/90 transition-colors hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Fechar formulário de nota"
+                    className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white/90 transition-colors hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"
                   >
                     <X size={20} />
                   </button>
                 </div>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-white/90">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
-                      <Flag size={14} />
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 sm:mt-5 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:pb-0">
+                  <div className="min-w-[110px] rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-white/90 sm:min-w-0 sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
+                      <Flag size={13} />
                       Prioridade
                     </div>
-                    <p className="mt-2 text-sm font-semibold">{priority === 'high' ? 'Alta' : priority === 'medium' ? 'Media' : 'Baixa'}</p>
+                    <p className="mt-1.5 truncate text-[13px] font-semibold sm:mt-2 sm:text-sm">{priority === 'high' ? 'Alta' : priority === 'medium' ? 'Média' : 'Baixa'}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-white/90">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
-                      <Pin size={14} />
+                  <div className="min-w-[110px] rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-white/90 sm:min-w-0 sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
+                      <Pin size={13} />
                       Tipo
                     </div>
-                    <p className="mt-2 text-sm font-semibold">{mode === 'fixed' ? 'Fixa' : 'Temporária'}</p>
+                    <p className="mt-1.5 truncate text-[13px] font-semibold sm:mt-2 sm:text-sm">{mode === 'fixed' ? 'Fixa' : 'Temporária'}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-white/90">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
-                      <Link2 size={14} />
+                  <div className="min-w-[110px] rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-white/90 sm:min-w-0 sm:px-4 sm:py-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
+                      <Link2 size={13} />
                       Vínculo
                     </div>
-                    <p className="mt-2 text-sm font-semibold">{linkedTask ? linkedTask.title : 'Sem lembrete vinculado'}</p>
+                    <p className="mt-1.5 truncate text-[13px] font-semibold sm:mt-2 sm:text-sm">{linkedTask ? linkedTask.title : 'Sem vínculo'}</p>
                   </div>
                 </div>
               </div>
@@ -215,9 +215,9 @@ export function NoteDrawer({
                 }}
                 className="flex min-h-0 flex-1 flex-col"
               >
-                <div className="flex-1 overflow-y-auto px-5 py-6 md:px-7">
+                <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 md:px-7 md:py-6">
                   <div className="space-y-6">
-                  <section className="surface-soft p-5">
+                  <section className="surface-soft p-4 sm:p-5">
                     <div className="mb-4 flex items-start gap-3">
                       <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
                         <FileText size={18} />
@@ -225,7 +225,7 @@ export function NoteDrawer({
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Conteúdo da nota</h3>
                         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          Escreva apenas o contexto que ajuda voce a agir melhor depois.
+                          Escreva apenas o contexto que ajuda você a agir melhor depois.
                         </p>
                       </div>
                     </div>
@@ -248,7 +248,7 @@ export function NoteDrawer({
                           data-testid="note-title-input"
                           value={title}
                           onChange={(event) => setTitle(event.target.value)}
-                          placeholder="Ex.: Pontos para a reuniao de alinhamento"
+                          placeholder="Ex.: Pontos para a reunião de alinhamento"
                           className="field-control"
                         />
                       </div>
@@ -262,19 +262,19 @@ export function NoteDrawer({
                           value={content}
                           onChange={(event) => setContent(event.target.value)}
                           placeholder="Escreva observações, ideias, contexto ou próximos passos."
-                          className="field-control min-h-[180px] resize-none"
+                          className="field-control min-h-[120px] resize-none sm:min-h-[180px]"
                         />
                       </div>
                     </div>
                   </section>
 
-                  <section className="surface-soft p-5">
+                  <section className="surface-soft p-4 sm:p-5">
                     <div className="mb-4 flex items-start gap-3">
                       <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
                         <Tag size={18} />
                       </span>
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Classificacao</h3>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Classificação</h3>
                         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                           Relacione esta nota com a mesma organização dos seus lembretes.
                         </p>
@@ -293,7 +293,7 @@ export function NoteDrawer({
                           className="field-control cursor-pointer"
                         >
                           <option value="low">Baixa</option>
-                          <option value="medium">Media</option>
+                          <option value="medium">Média</option>
                           <option value="high">Alta</option>
                         </select>
                       </div>
@@ -358,7 +358,7 @@ export function NoteDrawer({
 
                       <div>
                         <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                          Vincular a lembrete
+                          Vincular ao lembrete
                         </label>
                         <select
                           value={linkedTask ? linkedTask.id : taskId ?? ''}
@@ -367,7 +367,7 @@ export function NoteDrawer({
                           onChange={(event) => setTaskId(event.target.value || null)}
                           className="field-control cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                         >
-                          <option value="">Sem vinculo</option>
+                          <option value="">Sem vínculo</option>
                           {availableTasks.map((task) => (
                             <option key={task.id} value={task.id}>
                               {task.title}
@@ -472,7 +472,7 @@ export function NoteDrawer({
                   </div>
                 </div>
 
-                <div className="border-t border-slate-200/80 bg-white/88 px-5 py-4 dark:border-white/10 dark:bg-slate-950/92 md:px-7">
+                <div className="border-t border-slate-200/80 bg-white/88 px-4 py-3 dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
@@ -488,7 +488,7 @@ export function NoteDrawer({
                       data-testid="note-submit-button"
                       onClick={() => void onSubmit()}
                       disabled={isSubmitting}
-                      className="action-primary min-w-[240px] justify-center rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
+                      className="action-primary w-full justify-center rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70 sm:min-w-[240px] sm:w-auto"
                     >
                       {isSubmitting ? (
                         <>
@@ -511,3 +511,7 @@ export function NoteDrawer({
     </AnimatePresence>
   );
 }
+
+
+
+

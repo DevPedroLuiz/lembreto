@@ -117,6 +117,9 @@ export function useAuth() {
     email?: string;
     password?: string;
     avatar?: string | null;
+    stateCode?: string | null;
+    cityName?: string | null;
+    holidayRegionCode?: string | null;
   }) => {
     if (!token) throw new Error('Não autenticado');
 
