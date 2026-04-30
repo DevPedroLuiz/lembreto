@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { isHolidayForLocationOnDate } from './holidays.js';
 import {
   type NotificationTargetType,
   type NotificationTone,
@@ -321,6 +322,10 @@ interface SchedulableTaskRow {
   userId: string;
   title: string;
   dueDate: string | null;
+  suppressHolidayNotifications: boolean;
+  stateCode: string | null;
+  cityName: string | null;
+  holidayRegionCode: string | null;
 }
 
 function minutesDifference(targetDate: Date, referenceDate: Date) {
@@ -329,13 +334,21 @@ function minutesDifference(targetDate: Date, referenceDate: Date) {
 
 export async function generateScheduledNotifications(sql: SqlClient): Promise<ScheduledNotificationSummary> {
   await ensureNotificationsInfrastructure(sql);
+  await sql`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
+  `;
 
   const rows = await sql`
     SELECT
       tasks.id,
       tasks.user_id AS "userId",
       tasks.title,
-      tasks.due_date AS "dueDate"
+      tasks.due_date AS "dueDate",
+      tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
+      users.state_code AS "stateCode",
+      users.city_name AS "cityName",
+      users.holiday_region_code AS "holidayRegionCode"
     FROM tasks
     INNER JOIN users ON users.id = tasks.user_id
     WHERE tasks.status = 'pending'
@@ -352,6 +365,20 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
 
     const dueDate = new Date(task.dueDate);
     if (Number.isNaN(dueDate.getTime())) continue;
+
+    if (
+      task.suppressHolidayNotifications &&
+      isHolidayForLocationOnDate(
+        {
+          stateCode: task.stateCode,
+          cityName: task.cityName,
+          regionCode: task.holidayRegionCode,
+        },
+        dueDate,
+      )
+    ) {
+      continue;
+    }
 
     const minutesUntil = minutesDifference(dueDate, now);
 

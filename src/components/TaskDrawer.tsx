@@ -1,6 +1,7 @@
 ﻿import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  BellOff,
   CalendarDays,
   Clock3,
   Flag,
@@ -94,6 +95,8 @@ interface TaskDrawerProps {
   setRecurrenceMode: (value: RecurrenceMode) => void;
   recurrenceUntil: string;
   setRecurrenceUntil: (value: string) => void;
+  suppressHolidayNotifications: boolean;
+  setSuppressHolidayNotifications: (value: boolean) => void;
   recurrenceError?: string;
   recurrencePreviewCount?: number;
   onApplyRecurrenceSuggestion: (suggestion: RecurrenceSuggestion) => void;
@@ -266,6 +269,8 @@ export function TaskDrawer({
   setRecurrenceMode,
   recurrenceUntil,
   setRecurrenceUntil,
+  suppressHolidayNotifications,
+  setSuppressHolidayNotifications,
   recurrenceError = '',
   recurrencePreviewCount = 0,
   onApplyRecurrenceSuggestion,
@@ -704,6 +709,36 @@ export function TaskDrawer({
 
                         {recurrenceEnabled && (
                           <div className="space-y-5">
+                            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="pr-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="icon-slot h-8 w-8 rounded-xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                                      <BellOff size={15} />
+                                    </span>
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                      Silenciar notificações em feriados
+                                    </p>
+                                  </div>
+                                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                                    O lembrete continua na agenda, mas não envia alertas quando cair em feriado nacional, estadual ou municipal da sua região.
+                                  </p>
+                                </div>
+
+                                <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                                  <input
+                                    type="checkbox"
+                                    data-testid="task-holiday-notification-toggle"
+                                    checked={suppressHolidayNotifications}
+                                    disabled={isSubmitting}
+                                    onChange={(event) => setSuppressHolidayNotifications(event.target.checked)}
+                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  Ignorar
+                                </label>
+                              </div>
+                            </div>
+
                             <div>
                               <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
                                 Sugestões de repetição

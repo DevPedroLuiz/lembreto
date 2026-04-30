@@ -86,6 +86,7 @@ export const createTaskSchema = z.object({
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
+  suppressHolidayNotifications: z.boolean().default(false),
 }).strict();
 
 export const updateTaskSchema = z.object({
@@ -95,6 +96,7 @@ export const updateTaskSchema = z.object({
   priority: z.enum(TASK_PRIORITIES).optional(),
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
+  suppressHolidayNotifications: z.boolean().optional(),
   status: z.enum(TASK_STATUSES).optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,

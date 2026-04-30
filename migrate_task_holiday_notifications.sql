@@ -1,0 +1,2 @@
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE;

@@ -248,6 +248,7 @@ export default function App() {
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formCategory, setFormCategory] = useState('Geral');
   const [formTags, setFormTags] = useState<string[]>([]);
+  const [formSuppressHolidayNotifications, setFormSuppressHolidayNotifications] = useState(false);
   const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
   const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
   const [formRecurrenceUntil, setFormRecurrenceUntil] = useState('');
@@ -300,6 +301,7 @@ export default function App() {
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const previewedNotificationIdsRef = useRef<Set<string>>(new Set());
   const welcomedUserIdRef = useRef<string | null>(null);
+  const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
 
@@ -338,6 +340,18 @@ export default function App() {
 
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!auth.token || !auth.currentUser) return;
+
+    const currentDayKey = format(new Date(notificationClock), 'yyyy-MM-dd');
+    if (holidayRefreshDayRef.current === currentDayKey) return;
+
+    holidayRefreshDayRef.current = currentDayKey;
+    void refreshHolidays().catch(() => {
+      // best effort holiday refresh on day rollover
+    });
+  }, [auth.currentUser, auth.token, notificationClock, refreshHolidays]);
 
   useEffect(() => {
     if (!auth.token) return undefined;
@@ -599,6 +613,7 @@ export default function App() {
     setFormPriority('medium');
     setFormCategory('Geral');
     setFormTags([]);
+    setFormSuppressHolidayNotifications(false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -678,6 +693,7 @@ export default function App() {
     setFormPriority(template.priority);
     setFormCategory(template.category);
     setFormTags([]);
+    setFormSuppressHolidayNotifications(false);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
@@ -691,6 +707,7 @@ export default function App() {
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
+    setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -711,6 +728,7 @@ export default function App() {
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
+    setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -939,6 +957,7 @@ export default function App() {
       priority: formPriority,
       category: formCategory,
       tags: formTags,
+      suppressHolidayNotifications: formSuppressHolidayNotifications,
     };
 
       try {
@@ -988,6 +1007,7 @@ export default function App() {
     formTime,
     formTitle,
     formTags,
+      formSuppressHolidayNotifications,
       isTaskSubmitting,
       resetTaskForm,
       recurringDates,
@@ -1309,12 +1329,44 @@ export default function App() {
     return pendingTasks.filter((task) => Boolean(getTaskTimeLabel(task.dueDate)));
   }, [pendingTasks]);
 
+  const holidayDateKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const allEntries = [
+      ...(holidayCalendar?.today ?? []),
+      ...(holidayCalendar?.upcoming ?? []),
+      ...(holidayCalendar?.commemorative ?? []),
+      ...(holidayCalendar?.monthHighlights ?? []),
+    ];
+
+    allEntries.forEach((entry) => {
+      try {
+        keys.add(format(parseISO(entry.date), 'yyyy-MM-dd'));
+      } catch {
+        if (entry.date) keys.add(entry.date.slice(0, 10));
+      }
+    });
+
+    return keys;
+  }, [holidayCalendar]);
+
+  const shouldSuppressHolidayNotification = useCallback((task: Task) => {
+    if (!task.suppressHolidayNotifications) return false;
+
+    try {
+      return holidayDateKeys.has(format(parseISO(task.dueDate), 'yyyy-MM-dd'));
+    } catch {
+      return false;
+    }
+  }, [holidayDateKeys]);
+
   useEffect(() => {
     if (!notificationsEnabled || overdueTasks.length === 0) return;
 
     const now = new Date(notificationClock);
 
     overdueTasks.forEach((task) => {
+      if (shouldSuppressHolidayNotification(task)) return;
+
       const dueDate = parseISO(task.dueDate);
       const minutesOverdue = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / 60000));
       const overdueBucket = Math.floor(minutesOverdue / OVERDUE_REMINDER_INTERVAL_MINUTES);
@@ -1331,7 +1383,7 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, overdueTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, overdueTasks, shouldSuppressHolidayNotification]);
 
   useEffect(() => {
     if (!notificationsEnabled || timedPendingTasks.length === 0) return;
@@ -1339,6 +1391,8 @@ export default function App() {
     const now = new Date(notificationClock);
 
     timedPendingTasks.forEach((task) => {
+      if (shouldSuppressHolidayNotification(task)) return;
+
       const dueDate = parseISO(task.dueDate);
       const minutesUntil = getMinutesDifference(dueDate, now);
 
@@ -1356,12 +1410,14 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, timedPendingTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
 
   useEffect(() => {
     if (!notificationsEnabled || todayTasks.length === 0) return;
 
     todayTasks.forEach((task) => {
+      if (shouldSuppressHolidayNotification(task)) return;
+
       const dueDate = parseISO(task.dueDate);
       emitNotification(
         'Lembrete para hoje',
@@ -1374,12 +1430,14 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, todayTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, todayTasks]);
 
   useEffect(() => {
     if (!notificationsEnabled || tomorrowTasks.length === 0) return;
 
     tomorrowTasks.forEach((task) => {
+      if (shouldSuppressHolidayNotification(task)) return;
+
       const dueDate = parseISO(task.dueDate);
       emitNotification(
         'Lembrete vindo amanhã',
@@ -1392,7 +1450,7 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, tomorrowTasks]);
+  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, tomorrowTasks]);
 
   const openSettings = useCallback((view: SettingsView = 'appearance') => {
     setShowNotificationsInbox(false);
@@ -2152,6 +2210,8 @@ export default function App() {
         setRecurrenceMode={setFormRecurrenceMode}
         recurrenceUntil={formRecurrenceUntil}
         setRecurrenceUntil={setFormRecurrenceUntil}
+        suppressHolidayNotifications={formSuppressHolidayNotifications}
+        setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
         recurrenceError={recurrenceError}
         recurrencePreviewCount={recurringDates.length}
         onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}

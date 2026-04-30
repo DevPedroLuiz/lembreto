@@ -107,6 +107,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           priority,
           category,
           tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           created_at  AS "createdAt"
         FROM tasks
@@ -126,12 +127,28 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       return json(400, { error: formatZodError(parsed.error) });
     }
 
-    const { title, description, dueDate, priority, category } = parsed.data;
+    const {
+      title,
+      description,
+      dueDate,
+      priority,
+      category,
+      suppressHolidayNotifications,
+    } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
 
     try {
       const rows = await sql`
-        INSERT INTO tasks (user_id, title, description, due_date, priority, category, tags)
+        INSERT INTO tasks (
+          user_id,
+          title,
+          description,
+          due_date,
+          priority,
+          category,
+          tags,
+          suppress_holiday_notifications
+        )
         VALUES (
           ${user.id},
           ${title},
@@ -139,7 +156,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${dueDate || null},
           ${priority},
           ${category},
-          ${tags}
+          ${tags},
+          ${suppressHolidayNotifications}
         )
         RETURNING
           id,
@@ -150,6 +168,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           priority,
           category,
           tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           created_at  AS "createdAt"
       `;
@@ -186,12 +205,28 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       return json(400, { error: formatZodError(parsed.error) });
     }
 
-    const { title, description, dueDate, priority, category, status } = parsed.data;
-    const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
+      const {
+        title,
+        description,
+        dueDate,
+        priority,
+        category,
+        status,
+        suppressHolidayNotifications,
+      } = parsed.data;
+      const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
 
-    try {
-      const current = await sql`
-        SELECT title, description, due_date, priority, category, tags, status
+      try {
+        const current = await sql`
+        SELECT
+          title,
+          description,
+          due_date,
+          priority,
+          category,
+          tags,
+          status,
+          suppress_holiday_notifications
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
       `;
       if (current.length === 0) {
@@ -210,6 +245,11 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           priority    = ${priority !== undefined ? priority : cur.priority},
           category    = ${categoryValue},
           tags        = ${tagsValue},
+          suppress_holiday_notifications = ${
+            suppressHolidayNotifications !== undefined
+              ? suppressHolidayNotifications
+              : cur.suppress_holiday_notifications
+          },
           status      = ${status !== undefined ? status : cur.status}
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
@@ -221,6 +261,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           priority,
           category,
           tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           created_at  AS "createdAt"
       `;

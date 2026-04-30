@@ -217,6 +217,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-date-input').fill(formatDateLocal(nextMonday));
       await page.getByTestId('task-tab-recurrence').click();
       await page.getByTestId('task-recurrence-toggle').check();
+      await page.getByTestId('task-holiday-notification-toggle').check();
       await page.getByTestId('task-recurrence-suggestion-weekdays').click();
       await expect(page.getByTestId('task-recurrence-mode')).toHaveValue('weekdays');
       await page.getByTestId('task-recurrence-until').fill(formatDateLocal(nextFriday));

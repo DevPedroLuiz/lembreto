@@ -164,15 +164,19 @@ async function main() {
       dueDate: new Date().toISOString(),
       priority: 'high',
       category: 'Estudos',
+      suppressHolidayNotifications: true,
     });
 
     assert.equal(created.priority, 'high');
+    assert.equal(created.suppressHolidayNotifications, true);
 
     const updated = updateTaskSchema.parse({
       status: 'completed',
+      suppressHolidayNotifications: false,
     });
 
     assert.equal(updated.status, 'completed');
+    assert.equal(updated.suppressHolidayNotifications, false);
 
     const result = updateTaskSchema.safeParse({});
     assert.equal(result.success, false);

@@ -9,6 +9,7 @@ type TaskPayload = {
   priority: Priority;
   category: string;
   tags: string[];
+  suppressHolidayNotifications: boolean;
 };
 
 export function useTasks(token: string | null) {
@@ -81,6 +82,7 @@ export function useTasks(token: string | null) {
       priority: Priority;
       category: string;
       tags: string[];
+      suppressHolidayNotifications: boolean;
       status: Status;
     }>,
   ) => {

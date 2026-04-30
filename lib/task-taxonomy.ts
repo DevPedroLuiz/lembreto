@@ -28,6 +28,11 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
   `;
 
   await sql`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
+  `;
+
+  await sql`
     CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin
     ON tasks USING GIN(tags)
   `;

@@ -48,6 +48,10 @@ function createHolidayEngine(stateCode?: string | null, regionCode?: string | nu
   return new Holidays(BRAZIL_CODE);
 }
 
+function extractDateKey(value: string) {
+  return value.slice(0, 10);
+}
+
 function buildEntryKey(entry: { date: string; name: string; type?: string }) {
   return `${entry.date}|${entry.name}|${entry.type ?? 'public'}`;
 }
@@ -236,6 +240,36 @@ export function buildHolidayCalendar(
     monthHighlights,
     supportedCities: getHolidayRegionsByState(resolvedLocation.stateCode),
   };
+}
+
+export function isHolidayForLocationOnDate(
+  location: Pick<HolidayLocationInfo, 'stateCode' | 'cityName' | 'regionCode'>,
+  targetDate: Date,
+): boolean {
+  if (Number.isNaN(targetDate.getTime())) return false;
+
+  const resolvedLocation = resolveHolidayLocation(location.stateCode, location.cityName);
+  const year = targetDate.getFullYear();
+  const dateKey = extractDateKey(targetDate.toISOString());
+
+  const nationalEntries = mapHolidayEntries(
+    createHolidayEngine().getHolidays(year) as unknown as Array<Record<string, unknown>>,
+    'national',
+  );
+  const stateEntries = resolvedLocation.stateCode
+    ? mapHolidayEntries(
+        createHolidayEngine(resolvedLocation.stateCode).getHolidays(year) as unknown as Array<Record<string, unknown>>,
+        'state',
+      )
+    : [];
+  const cityEntries = resolvedLocation.stateCode && resolvedLocation.regionCode
+    ? mapHolidayEntries(
+        createHolidayEngine(resolvedLocation.stateCode, resolvedLocation.regionCode).getHolidays(year) as unknown as Array<Record<string, unknown>>,
+        'city',
+      )
+    : [];
+
+  return [...nationalEntries, ...stateEntries, ...cityEntries].some((entry) => extractDateKey(entry.date) === dateKey);
 }
 
 export interface ReverseDetectedLocation {

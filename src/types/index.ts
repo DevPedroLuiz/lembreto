@@ -23,6 +23,7 @@ export interface Task {
   priority: Priority;
   category: string;
   tags: string[];
+  suppressHolidayNotifications: boolean;
   status: Status;
   createdAt: string;
 }
