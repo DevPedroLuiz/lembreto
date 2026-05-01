@@ -23,6 +23,7 @@ import { useAuth } from './hooks/useAuth';
 import { useHolidays } from './hooks/useHolidays';
 import { useNotes } from './hooks/useNotes';
 import { useNotifications } from './hooks/useNotifications';
+import { usePushNotifications } from './hooks/usePushNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
 import { LS, type AppConfig } from './lib/storage';
@@ -176,6 +177,7 @@ function getMinutesDifference(targetDate: Date, referenceDate: Date) {
 
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
+  const [locationSearch, setLocationSearch] = useState(() => window.location.search);
   const isResetPasswordRoute = pathname === '/reset-password';
 
   const auth = useAuth();
@@ -203,6 +205,7 @@ export default function App() {
   const {
     notifications,
     serverEnabled: serverNotificationsEnabled,
+    pushPublicKey,
     loaded: notificationsLoaded,
     refreshNotifications,
     createNotification,
@@ -216,6 +219,7 @@ export default function App() {
     setToastMsg,
     notify: triggerToastNotification,
     showToast: triggerToastOnly,
+    notifPerm,
     requestPermission,
   } = useToast();
   const {
@@ -304,6 +308,7 @@ export default function App() {
   const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
+  const pushPermissionRequestedRef = useRef(false);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
@@ -314,6 +319,21 @@ export default function App() {
     () => (noteContextTaskId ? tasks.find((task) => task.id === noteContextTaskId) ?? null : null),
     [noteContextTaskId, tasks],
   );
+
+  const refreshNotificationsFromPush = useCallback(() => {
+    if (!auth.token) return;
+    void refreshNotifications(auth.token).catch(() => {
+      // best effort sync after a push arrives
+    });
+  }, [auth.token, refreshNotifications]);
+
+  usePushNotifications({
+    token: isResetPasswordRoute ? null : auth.token,
+    enabled: notificationsEnabled,
+    pushPublicKey,
+    notificationPermission: notifPerm,
+    onPushMessage: refreshNotificationsFromPush,
+  });
 
   useEffect(() => {
     const cfg = LS.getConfig();
@@ -407,6 +427,7 @@ export default function App() {
       welcomedUserIdRef.current = null;
       notificationPreferenceHydratedRef.current = false;
       notificationsOverrideRef.current = null;
+      pushPermissionRequestedRef.current = false;
       return;
     }
 
@@ -428,6 +449,18 @@ export default function App() {
       }
     });
   }, [auth.token, notifications, notificationsEnabled, notificationsLoaded, triggerToastNotification]);
+
+  useEffect(() => {
+    if (!auth.token || isResetPasswordRoute) return;
+    if (!pushPublicKey) return;
+    if (!notificationsEnabled || notifPerm !== 'default') return;
+    if (pushPermissionRequestedRef.current) return;
+
+    pushPermissionRequestedRef.current = true;
+    void requestPermission().catch(() => {
+      // best effort permission prompt
+    });
+  }, [auth.token, isResetPasswordRoute, notifPerm, notificationsEnabled, pushPublicKey, requestPermission]);
 
   useEffect(() => {
     if (!auth.token || !auth.currentUser || welcomedUserIdRef.current === auth.currentUser.id) return;
@@ -461,9 +494,12 @@ export default function App() {
   }, [activeTab, auth.token, markAllRead, notifications]);
 
   useEffect(() => {
-    const syncPathname = () => setPathname(window.location.pathname);
-    window.addEventListener('popstate', syncPathname);
-    return () => window.removeEventListener('popstate', syncPathname);
+    const syncLocation = () => {
+      setPathname(window.location.pathname);
+      setLocationSearch(window.location.search);
+    };
+    window.addEventListener('popstate', syncLocation);
+    return () => window.removeEventListener('popstate', syncLocation);
   }, []);
 
   useEffect(() => {
@@ -872,6 +908,29 @@ export default function App() {
     if (!formRecurrenceEnabled || !formDate || !formRecurrenceUntil) return [];
     return buildRecurringDates(formDate, formRecurrenceUntil, formRecurrenceMode);
   }, [formDate, formRecurrenceEnabled, formRecurrenceMode, formRecurrenceUntil]);
+
+  const holidayDateKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const allEntries = holidayCalendar?.allEntries ?? [];
+
+    allEntries.forEach((entry) => {
+      try {
+        keys.add(format(parseISO(entry.date), 'yyyy-MM-dd'));
+      } catch {
+        if (entry.date) keys.add(entry.date.slice(0, 10));
+      }
+    });
+
+    return keys;
+  }, [holidayCalendar]);
+
+  const recurringHolidaySuppressedCount = useMemo(() => {
+    if (!formRecurrenceEnabled || !formSuppressHolidayNotifications || recurringDates.length === 0) return 0;
+
+    return recurringDates.reduce((count, dateValue) => (
+      holidayDateKeys.has(dateValue) ? count + 1 : count
+    ), 0);
+  }, [formRecurrenceEnabled, formSuppressHolidayNotifications, holidayDateKeys, recurringDates]);
 
   const recurrenceError = useMemo(() => {
     if (editingTask || !formRecurrenceEnabled) return '';
@@ -1329,26 +1388,6 @@ export default function App() {
     return pendingTasks.filter((task) => Boolean(getTaskTimeLabel(task.dueDate)));
   }, [pendingTasks]);
 
-  const holidayDateKeys = useMemo(() => {
-    const keys = new Set<string>();
-    const allEntries = [
-      ...(holidayCalendar?.today ?? []),
-      ...(holidayCalendar?.upcoming ?? []),
-      ...(holidayCalendar?.commemorative ?? []),
-      ...(holidayCalendar?.monthHighlights ?? []),
-    ];
-
-    allEntries.forEach((entry) => {
-      try {
-        keys.add(format(parseISO(entry.date), 'yyyy-MM-dd'));
-      } catch {
-        if (entry.date) keys.add(entry.date.slice(0, 10));
-      }
-    });
-
-    return keys;
-  }, [holidayCalendar]);
-
   const shouldSuppressHolidayNotification = useCallback((task: Task) => {
     if (!task.suppressHolidayNotifications) return false;
 
@@ -1602,6 +1641,49 @@ export default function App() {
     setShowNotificationsInbox(false);
   }, []);
 
+  useEffect(() => {
+    if (!locationSearch) return;
+    if (auth.restoring) return;
+
+    const params = new URLSearchParams(locationSearch);
+    const notificationTarget = params.get('notificationTarget');
+    if (!notificationTarget) return;
+
+    if (!auth.token) return;
+
+    if (notificationTarget === 'task') {
+      const taskId = params.get('taskId');
+      if (taskId) {
+        setActiveTab('tasks');
+        setPendingNotificationTaskId(taskId);
+      }
+    } else if (notificationTarget === 'profile') {
+      openProfile();
+    } else if (notificationTarget === 'settings') {
+      openSettings();
+    } else {
+      openNotificationsCenter();
+    }
+
+    params.delete('notificationTarget');
+    params.delete('taskId');
+
+    const nextSearch = params.toString();
+    const nextUrl = nextSearch.length > 0
+      ? `${window.location.pathname}?${nextSearch}`
+      : window.location.pathname;
+
+    window.history.replaceState({}, '', nextUrl);
+    setLocationSearch(nextSearch.length > 0 ? `?${nextSearch}` : '');
+  }, [
+    auth.restoring,
+    auth.token,
+    locationSearch,
+    openNotificationsCenter,
+    openProfile,
+    openSettings,
+  ]);
+
   const handlePreviewNotification = useCallback((notification: AppNotification) => {
     if (notification.read || previewedNotificationIdsRef.current.has(notification.id)) return;
 
@@ -1810,6 +1892,7 @@ export default function App() {
       window.history.pushState({}, '', nextPath);
     }
     setPathname(nextPath);
+    setLocationSearch(window.location.search);
   }, []);
 
   if (isResetPasswordRoute) {
@@ -1941,51 +2024,48 @@ export default function App() {
         </header>
 
         <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 sm:p-6 sm:pb-28 lg:p-8 lg:pb-8 xl:p-10">
-          <div
-            className={cn(
-              'surface-panel mb-6 p-5 md:mb-8 md:p-6',
-              activeTab === 'dashboard' && 'hidden lg:block',
-            )}
-          >
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <span className="section-eyebrow">
-                  {activeTab === 'dashboard'
-                    ? 'Painel principal'
-                    : activeTab === 'notes'
-                      ? 'Caderno pessoal'
-                      : 'Gestão de lembretes'}
-                </span>
-                <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
-                  {pageTitle}
-                </h2>
-                {pageDescription && (
-                  <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
-                    {pageDescription}
-                  </p>
-                )}
-              </div>
-
-              <div className="hidden items-center gap-3 lg:flex">
-                <motion.button
-                  type="button"
-                  onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
-                  data-testid="header-notifications-button"
-                  aria-label="Abrir notificações recentes"
-                  className="relative inline-flex h-14 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:border-white/20 dark:hover:bg-white/[0.08]"
-                >
-                  <span className="icon-slot h-5 w-5">
-                    <BellRing size={20} className={unreadNotifications > 0 ? 'animate-bell-attention' : ''} />
+          {!(activeTab === 'dashboard' && isMobileViewport) && (
+            <div className="surface-panel mb-6 p-5 md:mb-8 md:p-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <span className="section-eyebrow">
+                    {activeTab === 'dashboard'
+                      ? 'Painel principal'
+                      : activeTab === 'notes'
+                        ? 'Caderno pessoal'
+                        : 'Gestão de lembretes'}
                   </span>
-                  {unreadNotifications > 0 && (
-                    <span className="absolute -right-2 -top-2 inline-flex min-w-6 items-center justify-center rounded-full bg-rose-500 px-1.5 py-1 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
-                      {Math.min(unreadNotifications, 99)}
-                    </span>
+                  <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
+                    {pageTitle}
+                  </h2>
+                  {pageDescription && (
+                    <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+                      {pageDescription}
+                    </p>
                   )}
-                </motion.button>
+                </div>
+
+                <div className="hidden items-center gap-3 lg:flex">
+                  <motion.button
+                    type="button"
+                    onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
+                    data-testid="header-notifications-button"
+                    aria-label="Abrir notificações recentes"
+                    className="relative inline-flex h-14 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 dark:hover:border-white/20 dark:hover:bg-white/[0.08]"
+                  >
+                    <span className="icon-slot h-5 w-5">
+                      <BellRing size={20} className={unreadNotifications > 0 ? 'animate-bell-attention' : ''} />
+                    </span>
+                    {unreadNotifications > 0 && (
+                      <span className="absolute -right-2 -top-2 inline-flex min-w-6 items-center justify-center rounded-full bg-rose-500 px-1.5 py-1 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
+                        {Math.min(unreadNotifications, 99)}
+                      </span>
+                    )}
+                  </motion.button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             {activeTab === 'tasks' && (
@@ -2214,6 +2294,7 @@ export default function App() {
         setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
         recurrenceError={recurrenceError}
         recurrencePreviewCount={recurringDates.length}
+        holidaySuppressedCount={recurringHolidaySuppressedCount}
         onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}
       />
 

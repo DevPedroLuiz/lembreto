@@ -40,8 +40,35 @@ async function waitForJsonResponse(
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+async function ensureAuthPage(page: Page) {
+  const logoutButton = page.getByTestId('sidebar-logout');
+  const authEmailInput = page.getByTestId('auth-email-input');
+
+  if (await authEmailInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+    return;
+  }
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  if (await logoutButton.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await logoutButton.click();
+  }
+
+  if (await authEmailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+    return;
+  }
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(authEmailInput).toBeVisible({ timeout: 15000 });
+}
+
+async function refreshAuthenticatedPage(page: Page) {
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('sidebar-dashboard')).toBeVisible({ timeout: 15000 });
+}
+
 async function registerUser(page: Page, user: E2ETestUser): Promise<string> {
-  await page.goto('/');
+  await ensureAuthPage(page);
 
   const registerResponsePromise = waitForJsonResponse(
     page,
@@ -62,7 +89,7 @@ async function registerUser(page: Page, user: E2ETestUser): Promise<string> {
 }
 
 async function loginUser(page: Page, email: string, password: string): Promise<string> {
-  await page.goto('/');
+  await ensureAuthPage(page);
 
   const loginResponsePromise = waitForJsonResponse(
     page,
@@ -85,7 +112,7 @@ async function loginUserWithRememberedEmail(
   email: string,
   password: string,
 ): Promise<string> {
-  await page.goto('/');
+  await ensureAuthPage(page);
 
   const loginResponsePromise = waitForJsonResponse(
     page,
@@ -400,9 +427,7 @@ test.describe('Lembreto critical flows', () => {
         },
       ]);
 
-      await page.getByTestId('sidebar-logout').click();
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
-      await loginUser(page, user.email, user.password);
+      await refreshAuthenticatedPage(page);
 
       await page.getByTestId('dashboard-metric-completed').click();
       const dashboardMetricDialog = page.getByTestId('dashboard-metric-dialog');
@@ -464,9 +489,7 @@ test.describe('Lembreto critical flows', () => {
         },
       ]);
 
-      await page.getByTestId('sidebar-logout').click();
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
-      await loginUser(page, user.email, user.password);
+      await refreshAuthenticatedPage(page);
 
       await expect(page.getByTestId('assistant-focus-card')).toBeVisible();
       await expect(page.getByTestId('assistant-focus-card')).toContainText('Revisar contrato importante');
@@ -632,9 +655,7 @@ test.describe('Lembreto critical flows', () => {
       await registerUser(page, user);
       await seedTasksForUser(user.email, 26, { prefix: 'Tarefa paginada' });
 
-      await page.getByTestId('sidebar-logout').click();
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
-      await loginUser(page, user.email, user.password);
+      await refreshAuthenticatedPage(page);
 
       await page.getByTestId('sidebar-tasks').click();
 
@@ -683,9 +704,7 @@ test.describe('Lembreto critical flows', () => {
         },
       ]);
 
-      await page.getByTestId('sidebar-logout').click();
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
-      await loginUser(page, user.email, user.password);
+      await refreshAuthenticatedPage(page);
 
       await page.getByTestId('sidebar-tasks').click();
       await page.getByTestId('task-filters-toggle').click();
@@ -699,9 +718,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-sort-category').click();
       await expectFirstTaskTitle(page, 'Categoria estudo');
       await expect(page.getByTestId('task-sort-category')).toHaveAttribute('aria-pressed', 'true');
-      await page.getByTestId('sidebar-logout').click();
-      await expect(page.getByTestId('auth-submit-button')).toBeVisible();
-      await loginUser(page, user.email, user.password);
+      await refreshAuthenticatedPage(page);
       await page.getByTestId('sidebar-tasks').click();
       await page.getByTestId('task-filters-toggle').click();
 

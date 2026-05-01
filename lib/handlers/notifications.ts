@@ -3,21 +3,28 @@ import { logError, logInfo, logWarn } from '../logger.js';
 import {
   clearNotificationsForUser,
   createNotification,
+  deletePushSubscription,
   generateScheduledNotifications,
   getNotificationsEnabled,
+  getPushPublicKey,
+  isPushConfigured,
   listNotificationsForUser,
   markAllNotificationsRead,
   markNotificationReadState,
   NotificationReferenceUnavailableError,
   setNotificationsEnabled,
+  upsertPushSubscription,
 } from '../notifications.js';
 import {
   createNotificationSchema,
+  deletePushSubscriptionSchema,
   formatZodError,
+  pushSubscriptionSchema,
   updateNotificationSchema,
   updateNotificationSettingsSchema,
 } from '../schemas.js';
 import {
+  empty,
   type HandlerContext,
   type HandlerResult,
   getRequestMeta,
@@ -76,7 +83,12 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
         listNotificationsForUser(sql, user.id),
         getNotificationsEnabled(sql, user.id),
       ]);
-      return json(200, { notifications, enabled });
+      return json(200, {
+        notifications,
+        enabled,
+        pushConfigured: isPushConfigured(),
+        pushPublicKey: getPushPublicKey(),
+      });
     } catch (error) {
       logError('notifications_list_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao buscar notificacoes' });
@@ -189,7 +201,11 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
   if (request.method === 'GET') {
     try {
       const enabled = await getNotificationsEnabled(sql, user.id);
-      return json(200, { enabled });
+      return json(200, {
+        enabled,
+        pushConfigured: isPushConfigured(),
+        pushPublicKey: getPushPublicKey(),
+      });
     } catch (error) {
       logError('notification_settings_get_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao carregar preferencia de notificacoes' });
@@ -209,6 +225,46 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
     } catch (error) {
       logError('notification_settings_update_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao salvar preferencia de notificacoes' });
+    }
+  }
+
+  return methodNotAllowed();
+}
+
+export async function handleNotificationPushSubscriptions(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireNotificationAuth(context);
+  if ('status' in auth) return auth;
+
+  const user = auth.user;
+  const { request, sql } = context;
+
+  if (request.method === 'POST') {
+    const parsed = pushSubscriptionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return json(400, { error: formatZodError(parsed.error) });
+    }
+
+    try {
+      await upsertPushSubscription(sql, user.id, parsed.data);
+      return json(201, { ok: true });
+    } catch (error) {
+      logError('push_subscription_upsert_failed', error, getRequestMeta(request, { userId: user.id }));
+      return json(500, { error: 'Erro ao registrar dispositivo para notificacoes' });
+    }
+  }
+
+  if (request.method === 'DELETE') {
+    const parsed = deletePushSubscriptionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return json(400, { error: formatZodError(parsed.error) });
+    }
+
+    try {
+      await deletePushSubscription(sql, user.id, parsed.data.endpoint);
+      return empty(204);
+    } catch (error) {
+      logError('push_subscription_delete_failed', error, getRequestMeta(request, { userId: user.id }));
+      return json(500, { error: 'Erro ao remover dispositivo de notificacoes' });
     }
   }
 

@@ -19,6 +19,7 @@
     { "source": "/api/notes/:id", "destination": "/api/notes?id=:id" },
     { "source": "/api/notifications/settings", "destination": "/api/notifications?action=settings" },
     { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications?action=mark-all-read" },
+    { "source": "/api/notifications/push-subscriptions", "destination": "/api/notifications?action=push-subscriptions" },
     { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
     { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]

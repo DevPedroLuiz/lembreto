@@ -37,6 +37,7 @@ import {
   handleNotificationById,
   handleNotificationsCollection,
   handleNotificationsCron,
+  handleNotificationPushSubscriptions,
   handleNotificationSettings,
   handleNotificationMarkAllRead,
 } from './lib/handlers/notifications.js';
@@ -141,6 +142,8 @@ async function startServer() {
   app.post('/api/notifications/mark-all-read', run(handleNotificationMarkAllRead));
   app.get('/api/notifications/settings', run(handleNotificationSettings));
   app.put('/api/notifications/settings', run(handleNotificationSettings));
+  app.post('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
+  app.delete('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.put('/api/notifications/:id', run(handleNotificationById));
 
   app.get('/api/cron/cleanup', run(handleCleanupCron));

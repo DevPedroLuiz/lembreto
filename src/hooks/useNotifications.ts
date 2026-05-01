@@ -5,6 +5,8 @@ import type { AppNotification, NotificationTarget } from '../types';
 interface NotificationsResponse {
   notifications: AppNotification[];
   enabled: boolean;
+  pushConfigured?: boolean;
+  pushPublicKey?: string | null;
 }
 
 interface NotificationCreateResponse {
@@ -15,6 +17,7 @@ interface NotificationCreateResponse {
 export function useNotifications(token: string | null) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [serverEnabled, setServerEnabled] = useState<boolean | null>(null);
+  const [pushPublicKey, setPushPublicKey] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const requestSequenceRef = useRef(0);
 
@@ -22,6 +25,7 @@ export function useNotifications(token: string | null) {
     requestSequenceRef.current += 1;
     setNotifications([]);
     setServerEnabled(null);
+    setPushPublicKey(null);
     setLoaded(false);
   }, [token]);
 
@@ -31,6 +35,7 @@ export function useNotifications(token: string | null) {
     if (!requestToken) {
       setNotifications([]);
       setServerEnabled(null);
+      setPushPublicKey(null);
       setLoaded(true);
       return { notifications: [], enabled: true } satisfies NotificationsResponse;
     }
@@ -41,6 +46,7 @@ export function useNotifications(token: string | null) {
     if (requestSequence === requestSequenceRef.current) {
       setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
       setServerEnabled(data.enabled);
+      setPushPublicKey(typeof data.pushPublicKey === 'string' ? data.pushPublicKey : null);
       setLoaded(true);
     }
 
@@ -52,6 +58,7 @@ export function useNotifications(token: string | null) {
     void refreshNotifications().catch(() => {
       setNotifications([]);
       setServerEnabled(null);
+      setPushPublicKey(null);
       setLoaded(true);
     });
   }, [refreshNotifications]);
@@ -124,6 +131,7 @@ export function useNotifications(token: string | null) {
   return {
     notifications,
     serverEnabled,
+    pushPublicKey,
     loaded,
     refreshNotifications,
     createNotification,

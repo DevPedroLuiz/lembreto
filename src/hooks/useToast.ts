@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export interface ToastMessage {
   title: string;
@@ -19,12 +19,9 @@ export function useToast() {
 
   const notify = useCallback(
     (title: string, body: string) => {
-      if (notifPerm === 'granted' && 'Notification' in window) {
-        new Notification(title, { body });
-      }
       showToast(title, body);
     },
-    [notifPerm, showToast]
+    [showToast]
   );
 
   const requestPermission = useCallback(async () => {
@@ -34,6 +31,19 @@ export function useToast() {
     } else if ('Notification' in window) {
       setNotifPerm(Notification.permission);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return undefined;
+
+    const syncPermission = () => setNotifPerm(Notification.permission);
+
+    window.addEventListener('focus', syncPermission);
+    document.addEventListener('visibilitychange', syncPermission);
+    return () => {
+      window.removeEventListener('focus', syncPermission);
+      document.removeEventListener('visibilitychange', syncPermission);
+    };
   }, []);
 
   return { toastMsg, setToastMsg, notify, showToast, notifPerm, requestPermission };

@@ -39,6 +39,7 @@ export interface HolidayCalendarPayload {
   upcoming: HolidayEntry[];
   commemorative: HolidayEntry[];
   monthHighlights: HolidayEntry[];
+  allEntries: HolidayEntry[];
   supportedCities: HolidayRegionOption[];
 }
 
@@ -238,6 +239,7 @@ export function buildHolidayCalendar(
     upcoming,
     commemorative,
     monthHighlights,
+    allEntries,
     supportedCities: getHolidayRegionsByState(resolvedLocation.stateCode),
   };
 }

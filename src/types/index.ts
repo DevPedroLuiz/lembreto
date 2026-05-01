@@ -61,6 +61,7 @@ export interface HolidayCalendarPayload {
   upcoming: HolidayEntry[];
   commemorative: HolidayEntry[];
   monthHighlights: HolidayEntry[];
+  allEntries: HolidayEntry[];
   supportedCities: HolidayRegionOption[];
 }
 

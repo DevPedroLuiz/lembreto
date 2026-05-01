@@ -172,7 +172,7 @@ export function DashboardPage({
     >
       <section className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
         <div className="surface-panel overflow-hidden p-5 sm:p-6 md:p-8">
-          <div className="flex flex-col gap-6 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-5 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <span className="section-eyebrow">
                 <span className="icon-slot h-4 w-4">
@@ -180,10 +180,10 @@ export function DashboardPage({
                 </span>
                 Visão geral do dia
               </span>
-              <h3 className="mt-4 font-display text-[1.55rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-3xl md:text-4xl">
+              <h3 className="mt-4 font-display text-[1.35rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-3xl md:text-4xl">
                 Clareza para decidir o que vem primeiro.
               </h3>
-              <p className="mt-3 max-w-xl text-[13px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm sm:leading-7 md:text-base">
+              <p className="mt-3 max-w-xl text-[12px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm sm:leading-7 md:text-base">
                 Centralize prioridades, acompanhe prazos e mantenha uma rotina mais leve com um painel simples de consultar.
               </p>
             </div>
@@ -204,7 +204,7 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-4 xl:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-8 sm:gap-4 xl:grid-cols-4">
             <MetricCard
               title="Total"
               value={tasks.length}
@@ -417,10 +417,10 @@ export function DashboardPage({
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
         <div className="surface-panel p-4 sm:p-5 md:p-6">
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Próximos lembretes</h4>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400 sm:text-sm">
                 Veja o que merece sua atenção imediata.
               </p>
             </div>
@@ -549,9 +549,9 @@ export function DashboardPage({
         </div>
 
         <aside className="surface-panel p-4 sm:p-5 md:p-6">
-          <div className="mb-5">
+          <div className="mb-4 sm:mb-5">
             <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Atalhos úteis</h4>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400 sm:text-sm">
               Crie rapidamente uma base para o restante da semana.
             </p>
           </div>
@@ -562,11 +562,11 @@ export function DashboardPage({
                 key={template.title}
                 type="button"
                 onClick={() => onApplyTemplate(template)}
-                className="flex w-full items-start justify-between overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50/80 px-3.5 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white sm:px-4 sm:py-4 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
+                className="flex w-full items-start justify-between overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50/80 px-3.5 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white sm:px-4 sm:py-4 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
               >
                 <div className="min-w-0 flex-1 pr-3 sm:pr-4">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">{template.title}</p>
-                  <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-slate-500 dark:text-slate-400 sm:line-clamp-3 sm:text-sm sm:leading-6">
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 sm:line-clamp-3 sm:text-sm sm:leading-6">
                     {template.description}
                   </p>
                 </div>

@@ -143,12 +143,12 @@ function TaskItemComponent({
       </button>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3 sm:gap-4">
+        <div className="flex items-start justify-between gap-2.5 sm:gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
               <h3
                 className={cn(
-                  compact ? 'line-clamp-2 text-[14px] font-semibold leading-5 sm:text-[15px]' : 'truncate text-[15px] font-semibold sm:text-base',
+                  compact ? 'line-clamp-2 text-[13px] font-semibold leading-5 sm:text-[15px]' : 'truncate text-[15px] font-semibold sm:text-base',
                   isCompleted
                     ? 'text-slate-400 line-through dark:text-slate-500'
                     : 'text-slate-900 dark:text-white',
@@ -225,7 +225,7 @@ function TaskItemComponent({
           ))}
 
           {compact && (task.tags?.length ?? 0) > 1 && (
-            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500 sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400">
+            <span className="hidden items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500 sm:inline-flex sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400">
               +{(task.tags?.length ?? 0) - 1}
             </span>
           )}
@@ -237,7 +237,7 @@ function TaskItemComponent({
             aria-label={`${formatDate()} - ${timeDescription}`}
             className={cn(
               'inline-flex max-w-[98px] items-center gap-1 truncate rounded-full border px-2 py-1 text-[10px] font-semibold sm:max-w-none sm:px-2.5 sm:text-[11px]',
-              compact && 'max-w-[88px] px-2 py-0.5',
+              compact && 'max-w-[84px] px-2 py-0.5',
               overdueKind === 'timed'
                 ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
                 : overdueKind === 'all-day'

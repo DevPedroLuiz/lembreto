@@ -77,10 +77,11 @@ export async function apiGet<T = unknown>(
   return data as T;
 }
 
-export async function apiDelete(path: string, token: string): Promise<void> {
+export async function apiDelete(path: string, token: string, body?: object): Promise<void> {
   const res = await fetch(path, {
     method: 'DELETE',
     headers: buildHeaders(token),
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   emitUnauthorizedIfNeeded(res.status, token);
   if (res.status !== 204 && !res.ok) {

@@ -3,6 +3,7 @@ import sql from './_db.js';
 import {
   handleNotificationById,
   handleNotificationMarkAllRead,
+  handleNotificationPushSubscriptions,
   handleNotificationSettings,
   handleNotificationsCollection,
 } from '../lib/handlers/notifications.js';
@@ -20,6 +21,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const request = buildHandlerRequest(req);
 
   const result = await (async () => {
+    if (action === 'push-subscriptions') {
+      return handleNotificationPushSubscriptions({ sql, request });
+    }
+
     if (action === 'settings') {
       return handleNotificationSettings({ sql, request });
     }

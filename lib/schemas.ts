@@ -155,6 +155,20 @@ export const updateNotificationSettingsSchema = z.object({
   enabled: z.boolean(),
 }).strict();
 
+export const pushSubscriptionSchema = z.object({
+  endpoint: z.string().trim().url('Endpoint de push invalido').max(4096, 'Endpoint de push muito longo'),
+  expirationTime: z.number().int().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string().trim().min(1, 'Chave p256dh obrigatoria').max(1024, 'Chave p256dh muito longa'),
+    auth: z.string().trim().min(1, 'Chave auth obrigatoria').max(1024, 'Chave auth muito longa'),
+  }).strict(),
+  userAgent: z.string().trim().max(512, 'User agent muito longo').optional(),
+}).strict();
+
+export const deletePushSubscriptionSchema = z.object({
+  endpoint: z.string().trim().url('Endpoint de push invalido').max(4096, 'Endpoint de push muito longo'),
+}).strict();
+
 export function formatZodError(error: z.ZodError): string {
   const issue = error.issues[0];
   return issue?.message ?? 'Dados invalidos';

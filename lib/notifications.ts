@@ -1,10 +1,9 @@
 import { format } from 'date-fns';
+import webpush from 'web-push';
+import { type NotificationTargetType, type NotificationTone } from './contracts.js';
 import { isHolidayForLocationOnDate } from './holidays.js';
-import {
-  type NotificationTargetType,
-  type NotificationTone,
-} from './contracts.js';
 import type { SqlClient } from './handlers/core.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 export interface NotificationTarget {
   type: 'task';
@@ -32,6 +31,23 @@ interface NotificationRow {
   targetType: NotificationTargetType | null;
   targetTaskId: string | null;
   dedupeKey: string | null;
+}
+
+interface PushSubscriptionRow {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent: string | null;
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  userAgent?: string | null;
 }
 
 export interface CreateNotificationInput {
@@ -101,6 +117,152 @@ export function mapNotificationRow(row: NotificationRow): AppNotificationRecord 
   };
 }
 
+export function getPushPublicKey() {
+  const value = process.env.VAPID_PUBLIC_KEY?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function getPushPrivateKey() {
+  const value = process.env.VAPID_PRIVATE_KEY?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+function getPushSubject() {
+  const configured = process.env.VAPID_SUBJECT?.trim();
+  return configured && configured.length > 0
+    ? configured
+    : 'mailto:notificacoes@lembreto.app';
+}
+
+export function isPushConfigured() {
+  return Boolean(getPushPublicKey() && getPushPrivateKey());
+}
+
+function getWebPushClient() {
+  const publicKey = getPushPublicKey();
+  const privateKey = getPushPrivateKey();
+  if (!publicKey || !privateKey) return null;
+
+  webpush.setVapidDetails(getPushSubject(), publicKey, privateKey);
+  return webpush;
+}
+
+function buildNotificationNavigationPath(target?: AppNotificationRecord['target']) {
+  const params = new URLSearchParams();
+
+  if (target?.type === 'task') {
+    params.set('notificationTarget', 'task');
+    params.set('taskId', target.taskId);
+  } else if (target?.type === 'profile') {
+    params.set('notificationTarget', 'profile');
+  } else if (target?.type === 'settings') {
+    params.set('notificationTarget', 'settings');
+  } else {
+    params.set('notificationTarget', 'notifications');
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `/?${query}` : '/';
+}
+
+function buildPushPayload(notification: AppNotificationRecord) {
+  return {
+    title: notification.title,
+    body: notification.message,
+    tag: notification.dedupeKey ?? `notification:${notification.id}`,
+    icon: '/icon.png',
+    badge: '/icon.png',
+    data: {
+      id: notification.id,
+      path: buildNotificationNavigationPath(notification.target),
+      target: notification.target ?? { type: 'notifications' },
+      tone: notification.tone,
+      createdAt: notification.createdAt,
+    },
+  };
+}
+
+async function shouldSendPushToUser(sql: SqlClient, userId: string) {
+  const rows = await sql`
+    SELECT notifications_enabled AS "notificationsEnabled"
+    FROM users
+    WHERE id = ${userId}
+    LIMIT 1
+  `;
+
+  return rows[0]?.notificationsEnabled !== false;
+}
+
+async function sendPushNotificationToUser(
+  sql: SqlClient,
+  userId: string,
+  notification: AppNotificationRecord,
+) {
+  const client = getWebPushClient();
+  if (!client) return;
+
+  if (!(await shouldSendPushToUser(sql, userId))) return;
+
+  const rows = await sql`
+    SELECT
+      endpoint,
+      p256dh,
+      auth,
+      user_agent AS "userAgent"
+    FROM push_subscriptions
+    WHERE user_id = ${userId}
+  `;
+
+  const subscriptions = rows as unknown as PushSubscriptionRow[];
+  if (subscriptions.length === 0) return;
+
+  const payload = JSON.stringify(buildPushPayload(notification));
+
+  await Promise.allSettled(
+    subscriptions.map(async (subscription) => {
+      try {
+        await client.sendNotification(
+          {
+            endpoint: subscription.endpoint,
+            keys: {
+              p256dh: subscription.p256dh,
+              auth: subscription.auth,
+            },
+          },
+          payload,
+        );
+      } catch (error) {
+        const statusCode =
+          typeof error === 'object' &&
+          error !== null &&
+          'statusCode' in error &&
+          typeof (error as { statusCode?: unknown }).statusCode === 'number'
+            ? (error as { statusCode: number }).statusCode
+            : null;
+
+        if (statusCode === 404 || statusCode === 410) {
+          await sql`
+            DELETE FROM push_subscriptions
+            WHERE endpoint = ${subscription.endpoint}
+          `;
+          logWarn('push_subscription_removed_stale', {
+            userId,
+            endpoint: subscription.endpoint,
+            statusCode,
+          });
+          return;
+        }
+
+        logError('push_notification_send_failed', error, {
+          userId,
+          endpoint: subscription.endpoint,
+          notificationId: notification.id,
+        });
+      }
+    }),
+  );
+}
+
 export async function ensureNotificationsInfrastructure(sql: SqlClient) {
   await sql`
     ALTER TABLE users
@@ -141,6 +303,25 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
     ON notifications(user_id, dedupe_key)
     WHERE dedupe_key IS NOT NULL
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      expiration_time BIGINT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_seen
+    ON push_subscriptions(user_id, last_seen_at DESC)
   `;
 }
 
@@ -189,7 +370,71 @@ export async function setNotificationsEnabled(sql: SqlClient, userId: string, en
   `;
 }
 
-export async function createNotification(sql: SqlClient, input: CreateNotificationInput): Promise<CreateNotificationResult> {
+export async function upsertPushSubscription(
+  sql: SqlClient,
+  userId: string,
+  input: PushSubscriptionInput,
+) {
+  await ensureNotificationsInfrastructure(sql);
+
+  await sql`
+    INSERT INTO push_subscriptions (
+      user_id,
+      endpoint,
+      p256dh,
+      auth,
+      expiration_time,
+      user_agent,
+      last_seen_at
+    )
+    VALUES (
+      ${userId},
+      ${input.endpoint},
+      ${input.keys.p256dh},
+      ${input.keys.auth},
+      ${input.expirationTime ?? null},
+      ${input.userAgent ?? null},
+      NOW()
+    )
+    ON CONFLICT (endpoint) DO UPDATE
+    SET
+      user_id = EXCLUDED.user_id,
+      p256dh = EXCLUDED.p256dh,
+      auth = EXCLUDED.auth,
+      expiration_time = EXCLUDED.expiration_time,
+      user_agent = EXCLUDED.user_agent,
+      last_seen_at = NOW()
+  `;
+
+  logInfo('push_subscription_upserted', {
+    userId,
+    endpoint: input.endpoint,
+  });
+}
+
+export async function deletePushSubscription(sql: SqlClient, userId: string, endpoint: string) {
+  await ensureNotificationsInfrastructure(sql);
+
+  const deleted = await sql`
+    DELETE FROM push_subscriptions
+    WHERE user_id = ${userId}
+      AND endpoint = ${endpoint}
+    RETURNING id
+  `;
+
+  logInfo('push_subscription_deleted', {
+    userId,
+    endpoint,
+    deleted: deleted.length,
+  });
+
+  return deleted.length;
+}
+
+export async function createNotification(
+  sql: SqlClient,
+  input: CreateNotificationInput,
+): Promise<CreateNotificationResult> {
   await ensureNotificationsInfrastructure(sql);
 
   const targetType = input.target?.type ?? null;
@@ -229,9 +474,19 @@ export async function createNotification(sql: SqlClient, input: CreateNotificati
   }
 
   if (inserted.length > 0) {
+    const notification = mapNotificationRow(inserted[0] as unknown as NotificationRow);
+    try {
+      await sendPushNotificationToUser(sql, input.userId, notification);
+    } catch (error) {
+      logError('push_notification_dispatch_failed', error, {
+        userId: input.userId,
+        notificationId: notification.id,
+      });
+    }
+
     return {
       created: true,
-      notification: mapNotificationRow(inserted[0] as unknown as NotificationRow),
+      notification,
     };
   }
 
