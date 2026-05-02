@@ -17,6 +17,7 @@ interface NotificationCreateResponse {
 export function useNotifications(token: string | null) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [serverEnabled, setServerEnabled] = useState<boolean | null>(null);
+  const [pushConfigured, setPushConfigured] = useState(false);
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const requestSequenceRef = useRef(0);
@@ -25,6 +26,7 @@ export function useNotifications(token: string | null) {
     requestSequenceRef.current += 1;
     setNotifications([]);
     setServerEnabled(null);
+    setPushConfigured(false);
     setPushPublicKey(null);
     setLoaded(false);
   }, [token]);
@@ -35,6 +37,7 @@ export function useNotifications(token: string | null) {
     if (!requestToken) {
       setNotifications([]);
       setServerEnabled(null);
+      setPushConfigured(false);
       setPushPublicKey(null);
       setLoaded(true);
       return { notifications: [], enabled: true } satisfies NotificationsResponse;
@@ -46,6 +49,7 @@ export function useNotifications(token: string | null) {
     if (requestSequence === requestSequenceRef.current) {
       setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
       setServerEnabled(data.enabled);
+      setPushConfigured(Boolean(data.pushConfigured));
       setPushPublicKey(typeof data.pushPublicKey === 'string' ? data.pushPublicKey : null);
       setLoaded(true);
     }
@@ -58,6 +62,7 @@ export function useNotifications(token: string | null) {
     void refreshNotifications().catch(() => {
       setNotifications([]);
       setServerEnabled(null);
+      setPushConfigured(false);
       setPushPublicKey(null);
       setLoaded(true);
     });
@@ -131,6 +136,7 @@ export function useNotifications(token: string | null) {
   return {
     notifications,
     serverEnabled,
+    pushConfigured,
     pushPublicKey,
     loaded,
     refreshNotifications,

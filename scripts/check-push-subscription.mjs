@@ -12,7 +12,6 @@ const name = process.env.LEMBRETO_TEST_NAME ?? 'Push Check';
 const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lembreto-push-'));
 
 const context = await chromium.launchPersistentContext(userDataDir, {
-  channel: 'msedge',
   headless: true,
   permissions: ['notifications'],
 });

@@ -13,6 +13,10 @@ export interface AppConfig {
   taskSortMode?: string;
   taskPriorityFilter?: string;
   taskStatusFilter?: string;
+  taskTagFilter?: string;
+  taskDateFilterMode?: string;
+  taskDateFilterStart?: string;
+  taskDateFilterEnd?: string;
 }
 
 export const LS = {

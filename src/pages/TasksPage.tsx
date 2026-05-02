@@ -2,6 +2,9 @@ import React from 'react';
 import {
   ArrowDownAZ,
   ArrowUpDown,
+  CalendarDays,
+  CalendarRange,
+  CheckCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -9,10 +12,12 @@ import {
   Circle,
   CircleDot,
   Flag,
+  Hash,
   RotateCcw,
   Search,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { FilterTag } from '../components/FilterTag';
@@ -27,6 +32,8 @@ const SEARCH_DEBOUNCE_MS = 200;
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | 'pending' | 'completed';
+type TagFilter = 'all' | string;
+type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
 type TasksPageView = 'agenda' | 'holidays';
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
@@ -49,6 +56,17 @@ const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'completed', label: 'Concluídos' },
 ];
 
+const DATE_FILTER_OPTIONS: Array<{ value: DateFilterMode; label: string }> = [
+  { value: 'all', label: 'Todas' },
+  { value: 'day', label: 'Dia' },
+  { value: 'range', label: 'Período' },
+  { value: 'week', label: 'Semana' },
+  { value: 'month', label: 'Mês' },
+  { value: 'year', label: 'Ano' },
+];
+
+const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+
 const PRIORITY_ORDER: Record<Priority, number> = {
   high: 0,
   medium: 1,
@@ -67,10 +85,21 @@ function isStatusFilter(value: unknown): value is StatusFilter {
   return value === 'all' || value === 'pending' || value === 'completed';
 }
 
+function isDateFilterMode(value: unknown): value is DateFilterMode {
+  return value === 'all' || value === 'day' || value === 'range' || value === 'week' || value === 'month' || value === 'year';
+}
+
+function normalizeTagFilter(value: unknown, tags: string[]): TagFilter {
+  if (value === 'all') return 'all';
+  if (typeof value !== 'string') return 'all';
+  return tags.includes(value) ? value : 'all';
+}
+
 interface TasksPageProps {
   pendingTasks: Task[];
   completedTasks: Task[];
   categories: string[];
+  tags: string[];
   filterCategory: string;
   setFilterCategory: (category: string) => void;
   search: string;
@@ -79,6 +108,7 @@ interface TasksPageProps {
   onNewTask: () => void;
   onToggle: (task: Task) => void;
   onDelete: (id: string, event: React.MouseEvent) => void;
+  onDeleteSelected: (ids: string[]) => void;
   onEdit: (task: Task) => void;
   deletingTaskIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
@@ -95,6 +125,146 @@ interface PaginationControlsProps {
   currentPage: number;
   onPageChange: (page: number) => void;
   testIdPrefix: string;
+}
+
+function buildAvailableTags(tags: string[], tasks: Task[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  const append = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const key = normalized.toLocaleLowerCase('pt-BR');
+    if (seen.has(key)) return;
+    seen.add(key);
+    ordered.push(normalized);
+  };
+
+  tags.forEach(append);
+  tasks.forEach((task) => (task.tags ?? []).forEach(append));
+
+  return ordered.sort((left, right) =>
+    left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }),
+  );
+}
+
+function buildSelectableTaskIds(tasks: Task[]): Set<string> {
+  return new Set(tasks.map((task) => task.id));
+}
+
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(value: string | undefined | null): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+
+  return formatDateKey(date) === value ? date : null;
+}
+
+function normalizeDateKey(value: unknown): string {
+  return typeof value === 'string' && parseDateKey(value) ? value : '';
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function startOfWeek(date: Date): Date {
+  const weekStart = new Date(date);
+  const weekday = weekStart.getDay();
+  const diff = weekday === 0 ? -6 : 1 - weekday;
+  weekStart.setDate(weekStart.getDate() + diff);
+  return weekStart;
+}
+
+function endOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function getDateFilterRange(
+  mode: DateFilterMode,
+  startDateKey: string,
+  endDateKey: string,
+): { start: string; end: string } | null {
+  if (mode === 'all') return null;
+
+  const startDate = parseDateKey(startDateKey);
+  if (!startDate) return null;
+
+  if (mode === 'day') return { start: startDateKey, end: startDateKey };
+
+  if (mode === 'week') {
+    const weekStart = startOfWeek(startDate);
+    return {
+      start: formatDateKey(weekStart),
+      end: formatDateKey(addCalendarDays(weekStart, 6)),
+    };
+  }
+
+  if (mode === 'month') {
+    return {
+      start: formatDateKey(new Date(startDate.getFullYear(), startDate.getMonth(), 1)),
+      end: formatDateKey(endOfMonth(startDate)),
+    };
+  }
+
+  if (mode === 'year') {
+    return {
+      start: formatDateKey(new Date(startDate.getFullYear(), 0, 1)),
+      end: formatDateKey(new Date(startDate.getFullYear(), 11, 31)),
+    };
+  }
+
+  const endDate = parseDateKey(endDateKey);
+  if (!endDate) return { start: startDateKey, end: startDateKey };
+
+  return startDate.getTime() <= endDate.getTime()
+    ? { start: startDateKey, end: endDateKey }
+    : { start: endDateKey, end: startDateKey };
+}
+
+function buildCalendarDays(cursorDate: Date): Date[] {
+  const firstDay = new Date(cursorDate.getFullYear(), cursorDate.getMonth(), 1);
+  const calendarStart = startOfWeek(firstDay);
+
+  return Array.from({ length: 42 }, (_, index) => addCalendarDays(calendarStart, index));
+}
+
+function formatDateLabel(value: string): string {
+  const date = parseDateKey(value);
+  if (!date) return 'Sem data';
+
+  return date.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatMonthLabel(date: Date): string {
+  return date.toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function matchesDateFilter(task: Task, range: { start: string; end: string } | null): boolean {
+  if (!range) return true;
+
+  const dueDate = new Date(task.dueDate);
+  if (Number.isNaN(dueDate.getTime())) return false;
+
+  const dueDateKey = formatDateKey(dueDate);
+  return dueDateKey >= range.start && dueDateKey <= range.end;
 }
 
 function parseDateValue(value: string): number {
@@ -147,6 +317,8 @@ function matchesTaskFilters(
   normalizedSearch: string,
   categoryFilter: string,
   priorityFilter: PriorityFilter,
+  tagFilter: TagFilter,
+  dateRange: { start: string; end: string } | null,
 ): boolean {
   const haystack = [
     task.title,
@@ -160,8 +332,10 @@ function matchesTaskFilters(
   const matchesSearch = haystack.includes(normalizedSearch);
   const matchesCategory = categoryFilter === 'Todas' || task.category === categoryFilter;
   const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
+  const matchesTag = tagFilter === 'all' || (task.tags ?? []).includes(tagFilter);
+  const matchesDate = matchesDateFilter(task, dateRange);
 
-  return matchesSearch && matchesCategory && matchesPriority;
+  return matchesSearch && matchesCategory && matchesPriority && matchesTag && matchesDate;
 }
 
 function hasStoredCustomFilters(
@@ -170,13 +344,17 @@ function hasStoredCustomFilters(
   sortMode: SortMode,
   priorityFilter: PriorityFilter,
   statusFilter: StatusFilter,
+  tagFilter: TagFilter,
+  dateFilterMode: DateFilterMode,
 ) {
   return (
     search.trim().length > 0 ||
     filterCategory !== 'Todas' ||
     sortMode !== 'created' ||
     priorityFilter !== 'all' ||
-    statusFilter !== 'all'
+    statusFilter !== 'all' ||
+    tagFilter !== 'all' ||
+    dateFilterMode !== 'all'
   );
 }
 
@@ -262,6 +440,7 @@ export function TasksPage({
   pendingTasks,
   completedTasks,
   categories,
+  tags,
   filterCategory,
   setFilterCategory,
   search,
@@ -270,6 +449,7 @@ export function TasksPage({
   onNewTask,
   onToggle,
   onDelete,
+  onDeleteSelected,
   onEdit,
   deletingTaskIds,
   togglingTaskIds,
@@ -280,21 +460,46 @@ export function TasksPage({
   onDetectHolidayLocation,
   onOpenHolidaySettings,
 }: TasksPageProps) {
+  const availableTags = React.useMemo(
+    () => buildAvailableTags(tags, [...pendingTasks, ...completedTasks]),
+    [completedTasks, pendingTasks, tags],
+  );
   const config = React.useMemo(() => LS.getConfig(), []);
   const initialSortMode = isSortMode(config.taskSortMode) ? config.taskSortMode : 'created';
   const initialPriorityFilter = isPriorityFilter(config.taskPriorityFilter) ? config.taskPriorityFilter : 'all';
   const initialStatusFilter = isStatusFilter(config.taskStatusFilter) ? config.taskStatusFilter : 'all';
+  const initialTagFilter = normalizeTagFilter(config.taskTagFilter, availableTags);
+  const todayKey = React.useMemo(() => formatDateKey(new Date()), []);
+  const initialDateFilterMode = isDateFilterMode(config.taskDateFilterMode) ? config.taskDateFilterMode : 'all';
+  const initialDateFilterStart = normalizeDateKey(config.taskDateFilterStart) || todayKey;
+  const initialDateFilterEnd = normalizeDateKey(config.taskDateFilterEnd);
 
   const [pendingPage, setPendingPage] = React.useState(1);
   const [completedPage, setCompletedPage] = React.useState(1);
   const [sortMode, setSortMode] = React.useState<SortMode>(initialSortMode);
   const [priorityFilter, setPriorityFilter] = React.useState<PriorityFilter>(initialPriorityFilter);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatusFilter);
+  const [tagFilter, setTagFilter] = React.useState<TagFilter>(initialTagFilter);
+  const [dateFilterMode, setDateFilterMode] = React.useState<DateFilterMode>(initialDateFilterMode);
+  const [dateFilterStart, setDateFilterStart] = React.useState(initialDateFilterStart);
+  const [dateFilterEnd, setDateFilterEnd] = React.useState(initialDateFilterEnd);
+  const [calendarCursor, setCalendarCursor] = React.useState(
+    () => parseDateKey(initialDateFilterStart) ?? new Date(),
+  );
   const [filtersOpen, setFiltersOpen] = React.useState(() =>
-    hasStoredCustomFilters(search, filterCategory, initialSortMode, initialPriorityFilter, initialStatusFilter),
+    hasStoredCustomFilters(
+      search,
+      filterCategory,
+      initialSortMode,
+      initialPriorityFilter,
+      initialStatusFilter,
+      initialTagFilter,
+      initialDateFilterMode,
+    ),
   );
   const [activeView, setActiveView] = React.useState<TasksPageView>('agenda');
   const [searchInput, setSearchInput] = React.useState(search);
+  const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
   const [isMobileViewport, setIsMobileViewport] = React.useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
   );
@@ -347,19 +552,132 @@ export function TasksPage({
     });
   }, []);
 
+  const handleTagFilterChange = React.useCallback((nextTagFilter: TagFilter) => {
+    setTagFilter(nextTagFilter);
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskTagFilter: nextTagFilter,
+    });
+  }, []);
+
+  const saveDateFilter = React.useCallback((
+    nextMode: DateFilterMode,
+    nextStart: string,
+    nextEnd: string,
+  ) => {
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskDateFilterMode: nextMode,
+      taskDateFilterStart: nextStart,
+      taskDateFilterEnd: nextEnd,
+    });
+  }, []);
+
+  const updateDateFilter = React.useCallback((
+    nextMode: DateFilterMode,
+    nextStart = dateFilterStart || todayKey,
+    nextEnd = dateFilterEnd,
+  ) => {
+    const normalizedStart = normalizeDateKey(nextStart) || todayKey;
+    const normalizedEnd = normalizeDateKey(nextEnd);
+    const startDate = parseDateKey(normalizedStart);
+
+    setDateFilterMode(nextMode);
+    setDateFilterStart(normalizedStart);
+    setDateFilterEnd(nextMode === 'range' ? normalizedEnd : '');
+    if (startDate) setCalendarCursor(startDate);
+    saveDateFilter(nextMode, normalizedStart, nextMode === 'range' ? normalizedEnd : '');
+  }, [dateFilterEnd, dateFilterStart, saveDateFilter, todayKey]);
+
+  const handleDateModeChange = React.useCallback((nextMode: DateFilterMode) => {
+    if (nextMode === 'all') {
+      updateDateFilter('all', dateFilterStart || todayKey, dateFilterEnd);
+      return;
+    }
+
+    if (nextMode === 'range') {
+      updateDateFilter('range', dateFilterStart || todayKey, dateFilterEnd);
+      return;
+    }
+
+    updateDateFilter(nextMode, dateFilterStart || todayKey, '');
+  }, [dateFilterEnd, dateFilterStart, todayKey, updateDateFilter]);
+
+  const handleDateStartChange = React.useCallback((nextStart: string) => {
+    const normalizedStart = normalizeDateKey(nextStart);
+    if (!normalizedStart) return;
+    updateDateFilter(dateFilterMode === 'all' ? 'day' : dateFilterMode, normalizedStart, dateFilterEnd);
+  }, [dateFilterEnd, dateFilterMode, updateDateFilter]);
+
+  const handleDateEndChange = React.useCallback((nextEnd: string) => {
+    updateDateFilter('range', dateFilterStart || todayKey, nextEnd);
+  }, [dateFilterStart, todayKey, updateDateFilter]);
+
+  const handleCalendarDayClick = React.useCallback((dateKey: string) => {
+    if (dateFilterMode === 'range') {
+      if (!dateFilterStart || dateFilterEnd || dateKey < dateFilterStart) {
+        updateDateFilter('range', dateKey, '');
+        return;
+      }
+
+      updateDateFilter('range', dateFilterStart, dateKey);
+      return;
+    }
+
+    updateDateFilter(dateFilterMode === 'all' ? 'day' : dateFilterMode, dateKey, '');
+  }, [dateFilterEnd, dateFilterMode, dateFilterStart, updateDateFilter]);
+
+  const handleMonthInputChange = React.useCallback((nextMonth: string) => {
+    if (!/^\d{4}-\d{2}$/.test(nextMonth)) return;
+    updateDateFilter('month', `${nextMonth}-01`, '');
+  }, [updateDateFilter]);
+
+  const handleYearInputChange = React.useCallback((nextYear: string) => {
+    if (!/^\d{4}$/.test(nextYear)) return;
+    updateDateFilter('year', `${nextYear}-01-01`, '');
+  }, [updateDateFilter]);
+
+  const handleCalendarMonthChange = React.useCallback((offset: number) => {
+    setCalendarCursor((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  }, []);
+
+  React.useEffect(() => {
+    if (tagFilter === 'all') return;
+    if (availableTags.includes(tagFilter)) return;
+
+    setTagFilter('all');
+    const currentConfig = LS.getConfig();
+    LS.saveConfig({
+      ...currentConfig,
+      taskTagFilter: 'all',
+    });
+  }, [availableTags, tagFilter]);
+
   const normalizedSearch = React.useMemo(
     () => search.trim().toLocaleLowerCase('pt-BR'),
     [search],
   );
 
+  const activeDateRange = React.useMemo(
+    () => getDateFilterRange(dateFilterMode, dateFilterStart, dateFilterEnd),
+    [dateFilterEnd, dateFilterMode, dateFilterStart],
+  );
+
+  const calendarDays = React.useMemo(
+    () => buildCalendarDays(calendarCursor),
+    [calendarCursor],
+  );
+
   const locallyFilteredPendingTasks = React.useMemo(
-    () => pendingTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter)),
-    [filterCategory, normalizedSearch, pendingTasks, priorityFilter],
+    () => pendingTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter, tagFilter, activeDateRange)),
+    [activeDateRange, filterCategory, normalizedSearch, pendingTasks, priorityFilter, tagFilter],
   );
 
   const locallyFilteredCompletedTasks = React.useMemo(
-    () => completedTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter)),
-    [completedTasks, filterCategory, normalizedSearch, priorityFilter],
+    () => completedTasks.filter((task) => matchesTaskFilters(task, normalizedSearch, filterCategory, priorityFilter, tagFilter, activeDateRange)),
+    [activeDateRange, completedTasks, filterCategory, normalizedSearch, priorityFilter, tagFilter],
   );
 
   const visiblePendingTasks = React.useMemo(
@@ -382,16 +700,62 @@ export function TasksPage({
     [sortMode, visibleCompletedTasks],
   );
 
+  const selectableTasks = React.useMemo(
+    () => [...sortedPendingTasks, ...sortedCompletedTasks],
+    [sortedCompletedTasks, sortedPendingTasks],
+  );
+
+  const selectableTaskIds = React.useMemo(
+    () => buildSelectableTaskIds(selectableTasks),
+    [selectableTasks],
+  );
+
+  React.useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (selectableTaskIds.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selectableTaskIds]);
+
+  const selectedCount = selectedTaskIds.size;
+  const allSelectableSelected = selectableTasks.length > 0 && selectedCount === selectableTasks.length;
+
+  const handleSelectionChange = React.useCallback((task: Task, selected: boolean) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(task.id);
+      else next.delete(task.id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAll = React.useCallback(() => {
+    setSelectedTaskIds((prev) => {
+      if (selectableTasks.length === 0) return prev;
+      if (prev.size === selectableTasks.length) return new Set<string>();
+      return new Set(selectableTasks.map((task) => task.id));
+    });
+  }, [selectableTasks]);
+
+  const handleDeleteSelected = React.useCallback(() => {
+    if (selectedTaskIds.size === 0) return;
+    onDeleteSelected(Array.from(selectedTaskIds));
+    setSelectedTaskIds(new Set());
+  }, [onDeleteSelected, selectedTaskIds]);
+
   const pendingTotalPages = Math.max(1, Math.ceil(sortedPendingTasks.length / PAGE_SIZE));
   const completedTotalPages = Math.max(1, Math.ceil(sortedCompletedTasks.length / PAGE_SIZE));
 
   React.useEffect(() => {
     setPendingPage(1);
-  }, [filterCategory, priorityFilter, search, sortMode, statusFilter]);
+  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, search, sortMode, statusFilter, tagFilter]);
 
   React.useEffect(() => {
     setCompletedPage(1);
-  }, [filterCategory, priorityFilter, search, sortMode, statusFilter]);
+  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, search, sortMode, statusFilter, tagFilter]);
 
   React.useEffect(() => {
     if (pendingPage > pendingTotalPages) {
@@ -429,6 +793,19 @@ export function TasksPage({
     () => STATUS_FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label ?? 'Todos',
     [statusFilter],
   );
+  const activeTagLabel = React.useMemo(
+    () => (tagFilter === 'all' ? 'Todas as tags' : tagFilter),
+    [tagFilter],
+  );
+  const activeDateLabel = React.useMemo(() => {
+    if (!activeDateRange) return 'Todas as datas';
+    if (activeDateRange.start === activeDateRange.end) return formatDateLabel(activeDateRange.start);
+    return `${formatDateLabel(activeDateRange.start)} até ${formatDateLabel(activeDateRange.end)}`;
+  }, [activeDateRange]);
+  const calendarMonthLabel = React.useMemo(
+    () => formatMonthLabel(calendarCursor),
+    [calendarCursor],
+  );
 
   const totalVisibleTasks = sortedPendingTasks.length + sortedCompletedTasks.length;
   const hasCustomFilters = hasStoredCustomFilters(
@@ -437,12 +814,16 @@ export function TasksPage({
     sortMode,
     priorityFilter,
     statusFilter,
+    tagFilter,
+    dateFilterMode,
   );
   const activeFilterCount = [
     filterCategory !== 'Todas',
     sortMode !== 'created',
     priorityFilter !== 'all',
     statusFilter !== 'all',
+    tagFilter !== 'all',
+    dateFilterMode !== 'all',
     search.trim().length > 0,
   ].filter(Boolean).length;
 
@@ -453,6 +834,11 @@ export function TasksPage({
     setSortMode('created');
     setPriorityFilter('all');
     setStatusFilter('all');
+    setTagFilter('all');
+    setDateFilterMode('all');
+    setDateFilterStart(todayKey);
+    setDateFilterEnd('');
+    setCalendarCursor(parseDateKey(todayKey) ?? new Date());
     setFiltersOpen(false);
 
     const currentConfig = LS.getConfig();
@@ -461,16 +847,20 @@ export function TasksPage({
       taskSortMode: 'created',
       taskPriorityFilter: 'all',
       taskStatusFilter: 'all',
+      taskTagFilter: 'all',
+      taskDateFilterMode: 'all',
+      taskDateFilterStart: todayKey,
+      taskDateFilterEnd: '',
     });
-  }, [setFilterCategory, setSearch]);
+  }, [setFilterCategory, setSearch, todayKey]);
 
   const filtersPanel = (
-    <div className="surface-soft max-w-5xl p-4 sm:p-5">
-      <div className="flex flex-col gap-3 border-b border-slate-200/70 pb-4 dark:border-white/10 sm:flex-row sm:items-start sm:justify-between">
+    <div className="surface-soft max-w-6xl overflow-hidden p-0">
+      <div className="flex flex-col gap-3 border-b border-slate-200/70 bg-slate-50/70 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:px-5">
         <div>
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">Controles da lista</p>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">Filtros da agenda</p>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Ajuste a visualização para encontrar exatamente o que precisa.
+            Combine busca, data, categoria e status para chegar no lembrete certo.
           </p>
         </div>
 
@@ -485,98 +875,332 @@ export function TasksPage({
         </button>
       </div>
 
-      <div className="relative mt-4">
-        <Search className="field-icon" size={18} />
-        <input
-          type="text"
-          data-testid="task-search-input"
-          placeholder="Buscar lembretes por título"
-          value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-          className="field-control field-control-with-icon"
-        />
-      </div>
-
-      <div className="mt-5 space-y-5">
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
-              <SlidersHorizontal size={15} />
+      <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-[minmax(300px,0.92fr)_minmax(0,1.08fr)]">
+        <section className="rounded-3xl border border-slate-200/70 bg-white/76 p-4 dark:border-white/10 dark:bg-slate-950/36">
+          <div className="mb-4 flex items-start gap-3">
+            <span className="icon-slot h-9 w-9 rounded-2xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+              <CalendarRange size={17} />
             </span>
             <div>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">Ordenação</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Escolha como os lembretes aparecem na lista.
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Data do lembrete</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Filtre por um dia, período, semana, mês ou ano.
               </p>
             </div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            {SORT_OPTIONS.map((option) => {
-              const isActive = sortMode === option.value;
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {DATE_FILTER_OPTIONS.map((option) => {
+              const isActive = dateFilterMode === option.value;
               return (
                 <ControlButton
                   key={option.value}
                   type="button"
-                  data-testid={`task-sort-${option.value}`}
-                  onClick={() => handleSortChange(option.value)}
+                  data-testid={`task-date-filter-${option.value}`}
+                  onClick={() => handleDateModeChange(option.value)}
                   aria-pressed={isActive}
                   active={isActive}
+                  className="h-10 rounded-xl px-2 text-xs"
                 >
-                  {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
+                  {option.value === 'all' ? <Circle size={13} /> : <CalendarDays size={13} />}
                   {option.label}
                 </ControlButton>
               );
             })}
           </div>
-        </div>
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-          <div>
-            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Prioridade</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {PRIORITY_FILTER_OPTIONS.map((option) => {
-                const isActive = priorityFilter === option.value;
+          {dateFilterMode !== 'all' && (
+            <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+              {dateFilterMode === 'range' ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    De
+                    <input
+                      type="date"
+                      value={dateFilterStart}
+                      onChange={(event) => handleDateStartChange(event.target.value)}
+                      className="field-control mt-2 px-3 py-2.5"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Até
+                    <input
+                      type="date"
+                      value={dateFilterEnd}
+                      onChange={(event) => handleDateEndChange(event.target.value)}
+                      className="field-control mt-2 px-3 py-2.5"
+                    />
+                  </label>
+                </div>
+              ) : dateFilterMode === 'month' ? (
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Mês de referência
+                  <input
+                    type="month"
+                    value={dateFilterStart.slice(0, 7)}
+                    onChange={(event) => handleMonthInputChange(event.target.value)}
+                    className="field-control mt-2 px-3 py-2.5"
+                  />
+                </label>
+              ) : dateFilterMode === 'year' ? (
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Ano de referência
+                  <input
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    value={dateFilterStart.slice(0, 4)}
+                    onChange={(event) => handleYearInputChange(event.target.value)}
+                    className="field-control mt-2 px-3 py-2.5"
+                  />
+                </label>
+              ) : (
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Data de referência
+                  <input
+                    type="date"
+                    value={dateFilterStart}
+                    onChange={(event) => handleDateStartChange(event.target.value)}
+                    className="field-control mt-2 px-3 py-2.5"
+                  />
+                </label>
+              )}
+            </div>
+          )}
+
+          <div className="mt-4 rounded-3xl border border-slate-200/70 bg-white p-3 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.5)] dark:border-white/10 dark:bg-slate-950/45">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                aria-label="Mes anterior"
+                onClick={() => handleCalendarMonthChange(-1)}
+                className="action-ghost h-9 w-9 rounded-xl p-0"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <p className="text-sm font-semibold capitalize text-slate-900 dark:text-white">
+                {calendarMonthLabel}
+              </p>
+              <button
+                type="button"
+                aria-label="Próximo mês"
+                onClick={() => handleCalendarMonthChange(1)}
+                className="action-ghost h-9 w-9 rounded-xl p-0"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold uppercase text-slate-400 dark:text-slate-500">
+              {WEEKDAY_LABELS.map((label, index) => (
+                <span key={`${label}-${index}`} className="py-1">
+                  {label}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {calendarDays.map((day) => {
+                const dayKey = formatDateKey(day);
+                const isCurrentMonth = day.getMonth() === calendarCursor.getMonth();
+                const isToday = dayKey === todayKey;
+                const isInRange = Boolean(activeDateRange && dayKey >= activeDateRange.start && dayKey <= activeDateRange.end);
+                const isRangeEdge = Boolean(activeDateRange && (dayKey === activeDateRange.start || dayKey === activeDateRange.end));
+
                 return (
-                  <ControlButton
-                    key={option.value}
+                  <button
+                    key={dayKey}
                     type="button"
-                    data-testid={`task-priority-filter-${option.value}`}
-                    onClick={() => handlePriorityFilterChange(option.value)}
-                    aria-pressed={isActive}
-                    active={isActive}
-                    className={option.value === 'all' ? 'sm:col-span-2' : ''}
+                    onClick={() => handleCalendarDayClick(dayKey)}
+                    aria-pressed={isInRange}
+                    className={[
+                      'h-9 rounded-xl text-xs font-semibold transition-all',
+                      isRangeEdge
+                        ? 'bg-blue-600 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.8)]'
+                        : isInRange
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-400/15 dark:text-blue-200'
+                          : isToday
+                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
+                            : isCurrentMonth
+                              ? 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/[0.08]'
+                              : 'text-slate-300 hover:bg-slate-50 dark:text-slate-700 dark:hover:bg-white/[0.04]',
+                    ].join(' ')}
                   >
-                    <Flag size={14} />
-                    {option.label}
-                  </ControlButton>
+                    {day.getDate()}
+                  </button>
                 );
               })}
+            </div>
+
+            <p className="mt-3 rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500 dark:bg-white/[0.05] dark:text-slate-300">
+              {dateFilterMode === 'all' ? 'Calendário pronto para selecionar uma data.' : activeDateLabel}
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <div className="relative">
+            <Search className="field-icon" size={18} />
+            <input
+              type="text"
+              data-testid="task-search-input"
+              placeholder="Buscar lembretes por título, descrição ou tag"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              className="field-control field-control-with-icon"
+            />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                  <SlidersHorizontal size={15} />
+                </span>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">Ordenação</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {SORT_OPTIONS.map((option) => {
+                  const isActive = sortMode === option.value;
+                  return (
+                    <ControlButton
+                      key={option.value}
+                      type="button"
+                      data-testid={`task-sort-${option.value}`}
+                      onClick={() => handleSortChange(option.value)}
+                      aria-pressed={isActive}
+                      active={isActive}
+                    >
+                      {option.value === 'category' ? <ArrowDownAZ size={14} /> : <ArrowUpDown size={14} />}
+                      {option.label}
+                    </ControlButton>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Status</p>
+              <div className="grid gap-2">
+                {STATUS_FILTER_OPTIONS.map((option) => {
+                  const isActive = statusFilter === option.value;
+                  return (
+                    <ControlButton
+                      key={option.value}
+                      type="button"
+                      data-testid={`task-status-filter-${option.value}`}
+                      onClick={() => handleStatusFilterChange(option.value)}
+                      aria-pressed={isActive}
+                      active={isActive}
+                    >
+                      {option.value === 'completed' ? <CircleDot size={14} /> : <Circle size={14} />}
+                      {option.label}
+                    </ControlButton>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div>
+              <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Prioridade</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {PRIORITY_FILTER_OPTIONS.map((option) => {
+                  const isActive = priorityFilter === option.value;
+                  return (
+                    <ControlButton
+                      key={option.value}
+                      type="button"
+                      data-testid={`task-priority-filter-${option.value}`}
+                      onClick={() => handlePriorityFilterChange(option.value)}
+                      aria-pressed={isActive}
+                      active={isActive}
+                      className={option.value === 'all' ? 'sm:col-span-2' : ''}
+                    >
+                      <Flag size={14} />
+                      {option.label}
+                    </ControlButton>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Categorias</p>
+              <div className="flex flex-wrap gap-2">
+                <ControlButton
+                  type="button"
+                  data-testid="task-category-filter-all"
+                  onClick={() => setFilterCategory('Todas')}
+                  aria-pressed={filterCategory === 'Todas'}
+                  active={filterCategory === 'Todas'}
+                >
+                  <Hash size={14} />
+                  Todas
+                </ControlButton>
+                {categories.map((category) => (
+                  <ControlButton
+                    key={category}
+                    type="button"
+                    data-testid={`task-category-filter-${category.toLocaleLowerCase('pt-BR').replace(/\s+/g, '-')}`}
+                    onClick={() => setFilterCategory(category)}
+                    aria-pressed={filterCategory === category}
+                    active={filterCategory === category}
+                  >
+                    <Hash size={14} />
+                    {category}
+                  </ControlButton>
+                ))}
+              </div>
             </div>
           </div>
 
           <div>
-            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Status</p>
-            <div className="grid gap-2">
-              {STATUS_FILTER_OPTIONS.map((option) => {
-                const isActive = statusFilter === option.value;
+            <div className="mb-3 flex items-center gap-2">
+              <span className="icon-slot h-8 w-8 rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300">
+                <Hash size={15} />
+              </span>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Tags</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <ControlButton
+                type="button"
+                data-testid="task-tag-filter-all"
+                onClick={() => handleTagFilterChange('all')}
+                aria-pressed={tagFilter === 'all'}
+                active={tagFilter === 'all'}
+              >
+                <Hash size={14} />
+                Todas as tags
+              </ControlButton>
+
+              {availableTags.map((tag) => {
+                const isActive = tagFilter === tag;
                 return (
                   <ControlButton
-                    key={option.value}
+                    key={tag}
                     type="button"
-                    data-testid={`task-status-filter-${option.value}`}
-                    onClick={() => handleStatusFilterChange(option.value)}
+                    data-testid={`task-tag-filter-${tag.toLocaleLowerCase('pt-BR').replace(/\s+/g, '-')}`}
+                    onClick={() => handleTagFilterChange(tag)}
                     aria-pressed={isActive}
                     active={isActive}
                   >
-                    {option.value === 'completed' ? <CircleDot size={14} /> : <Circle size={14} />}
-                    {option.label}
+                    <Hash size={14} />
+                    {tag}
                   </ControlButton>
                 );
               })}
             </div>
+
+            {availableTags.length === 0 && (
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                Nenhuma tag foi usada ainda nos seus lembretes.
+              </p>
+            )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
@@ -680,7 +1304,45 @@ export function TasksPage({
               >
                 Status: {activeStatusLabel}
               </span>
+              <span
+                data-testid="task-tag-summary"
+                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+              >
+                Tag: {activeTagLabel}
+              </span>
+              <span
+                data-testid="task-date-summary"
+                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+              >
+                Data: {activeDateLabel}
+              </span>
             </div>
+
+            {selectedCount > 0 && (
+              <div className="surface-soft flex flex-col gap-3 rounded-2xl border border-blue-200/70 px-4 py-3 dark:border-blue-400/20 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {selectedCount} lembrete{selectedCount === 1 ? '' : 's'} selecionado{selectedCount === 1 ? '' : 's'}
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAll}
+                    className="action-secondary h-11 rounded-2xl px-4 py-0 text-sm"
+                  >
+                    <CheckCheck size={16} />
+                    {allSelectableSelected ? 'Limpar seleção' : 'Selecionar todos'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelected}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-0 text-sm font-semibold text-white transition-all hover:bg-rose-700"
+                  >
+                    <Trash2 size={16} />
+                    Excluir selecionados
+                  </button>
+                </div>
+              </div>
+            )}
 
             <AnimatePresence initial={false}>
               {filtersOpen && !isMobileViewport && (
@@ -798,7 +1460,10 @@ export function TasksPage({
                     task={task}
                     onToggle={onToggle}
                     onDelete={onDelete}
+                    onSelectionChange={handleSelectionChange}
+                    showSelectionControl
                     onEdit={onEdit}
+                    isSelected={selectedTaskIds.has(task.id)}
                     isDeleting={deletingTaskIds?.has(task.id)}
                     isToggling={togglingTaskIds?.has(task.id)}
                   />
@@ -849,7 +1514,10 @@ export function TasksPage({
                 task={task}
                 onToggle={onToggle}
                 onDelete={onDelete}
+                onSelectionChange={handleSelectionChange}
+                showSelectionControl
                 onEdit={onEdit}
+                isSelected={selectedTaskIds.has(task.id)}
                 isCompletedSection
                 isDeleting={deletingTaskIds?.has(task.id)}
                 isToggling={togglingTaskIds?.has(task.id)}

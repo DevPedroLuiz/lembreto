@@ -1,6 +1,6 @@
 ﻿import React from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Circle, Clock3, Loader2, PencilLine, Tag, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Circle, Clock3, Loader2, PencilLine, Tag, Trash2 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
@@ -18,6 +18,12 @@ const PRIORITY_COLORS: Record<Priority, string> = {
   high: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300',
 };
 
+const PRIORITY_ACCENTS: Record<Priority, string> = {
+  low: 'from-slate-300 via-slate-200 to-slate-300 dark:from-slate-600 dark:via-slate-500 dark:to-slate-600',
+  medium: 'from-amber-400 via-orange-300 to-amber-400',
+  high: 'from-rose-500 via-red-400 to-rose-500',
+};
+
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
   medium: 'Média',
@@ -30,10 +36,14 @@ interface TaskItemProps {
   onToggle: (t: Task) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onEdit: (t: Task) => void;
+  onSelectionChange?: (task: Task, selected: boolean) => void;
+  showSelectionControl?: boolean;
+  showToggleControl?: boolean;
   compact?: boolean;
   isCompletedSection?: boolean;
   isDeleting?: boolean;
   isToggling?: boolean;
+  isSelected?: boolean;
 }
 
 function TaskItemComponent({
@@ -41,9 +51,13 @@ function TaskItemComponent({
   onToggle,
   onDelete,
   onEdit,
+  onSelectionChange,
+  showSelectionControl = false,
+  showToggleControl = false,
   compact,
   isDeleting = false,
   isToggling = false,
+  isSelected = false,
 }: TaskItemProps) {
   const safeDate = () => {
     try {
@@ -61,6 +75,21 @@ function TaskItemComponent({
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
   const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
+  const statusLabel = isCompleted ? 'Concluído' : isOverdue ? 'Atrasado' : 'Pendente';
+  const statusToneClass = isCompleted
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+    : overdueKind === 'timed'
+      ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+      : overdueKind === 'all-day'
+        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+        : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
+  const cardToneClass = isCompleted
+    ? 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.035]'
+    : overdueKind === 'timed'
+      ? 'border-rose-200/90 bg-gradient-to-br from-white via-rose-50/88 to-white shadow-[0_24px_58px_-38px_rgba(244,63,94,0.42)] dark:border-rose-500/25 dark:from-rose-950/22 dark:via-slate-950/80 dark:to-slate-950/70'
+      : overdueKind === 'all-day'
+        ? 'border-amber-200/90 bg-gradient-to-br from-white via-amber-50/82 to-white shadow-[0_24px_58px_-38px_rgba(245,158,11,0.36)] dark:border-amber-500/25 dark:from-amber-950/18 dark:via-slate-950/80 dark:to-slate-950/70'
+        : 'border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-50/88 dark:border-white/10 dark:from-slate-950/78 dark:via-slate-950/68 dark:to-white/[0.035]';
 
   const formatDate = () => {
     try {
@@ -96,55 +125,100 @@ function TaskItemComponent({
         onEdit(task);
       }}
       className={cn(
-        'surface-soft group relative flex items-start gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4 md:p-5',
+        'group relative flex items-start gap-3 overflow-hidden rounded-[26px] border p-3 shadow-[0_18px_52px_-38px_rgba(15,23,42,0.55)] backdrop-blur-xl transition-all sm:gap-4 sm:p-4 md:p-5',
+        'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-white/80 before:content-[""] dark:before:bg-white/10',
+        !(showSelectionControl || showToggleControl) && 'pl-7 sm:pl-8 md:pl-9',
+        cardToneClass,
         isBusy && 'opacity-75',
-        isOverdue && !isCompleted && (
-          overdueKind === 'timed'
-            ? 'border-rose-200 bg-rose-50/85 shadow-[0_22px_42px_-32px_rgba(244,63,94,0.45)] dark:border-rose-500/25 dark:bg-rose-500/[0.08]'
-            : 'border-amber-200 bg-amber-50/80 shadow-[0_22px_42px_-32px_rgba(245,158,11,0.4)] dark:border-amber-500/25 dark:bg-amber-500/[0.08]'
-        ),
-        !isBusy && 'cursor-pointer hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
-        isCompleted && 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.03]',
+        !isBusy && 'cursor-pointer hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_22px_62px_-36px_rgba(15,23,42,0.62)] dark:hover:border-white/20',
+        isSelected && 'ring-4 ring-blue-500/12 dark:ring-blue-400/12',
       )}
     >
       <div
         className={cn(
-          'absolute inset-y-3 left-3 w-1 rounded-full sm:inset-y-4',
-          task.priority === 'high'
-            ? 'bg-rose-400/80'
-            : task.priority === 'medium'
-              ? 'bg-amber-400/80'
-              : 'bg-slate-300 dark:bg-slate-600',
+          'absolute inset-y-3 left-3 w-1.5 rounded-full bg-gradient-to-b shadow-[0_0_18px_rgba(15,23,42,0.12)] sm:inset-y-4',
+          PRIORITY_ACCENTS[task.priority],
         )}
       />
 
-      <button
-        data-testid="task-toggle"
-        disabled={isBusy}
-        aria-label={isCompleted ? `Reabrir lembrete ${task.title}` : `Concluir lembrete ${task.title}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle(task);
-        }}
-        className={cn(
-          'ml-1.5 mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait disabled:opacity-60 sm:ml-3 sm:h-11 sm:w-11',
-          isCompleted
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
-            : 'border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400 dark:hover:border-blue-400/30 dark:hover:text-blue-300',
-        )}
-      >
-        {isToggling ? (
-          <Loader2 size={22} className="animate-spin" />
-        ) : isCompleted ? (
-          <CheckCircle2 size={22} />
-        ) : (
-          <Circle size={22} />
-        )}
-      </button>
+      {(showSelectionControl || showToggleControl) && (
+        <div className="ml-1 mt-0.5 flex shrink-0 items-center gap-2 sm:ml-3">
+          {showSelectionControl && (
+            <button
+              type="button"
+              aria-label={isSelected ? `Remover ${task.title} da seleção` : `Selecionar lembrete ${task.title}`}
+              aria-pressed={isSelected}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectionChange?.(task, !isSelected);
+              }}
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition-all sm:h-11 sm:w-11',
+                isSelected
+                  ? 'border-blue-500 bg-blue-600 text-white shadow-[0_18px_34px_-22px_rgba(37,99,235,0.75)]'
+                  : 'border-slate-200 bg-white/90 text-slate-400 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-500 dark:hover:border-blue-400/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300',
+              )}
+            >
+              {isSelected ? <Check size={18} /> : <div className="h-4 w-4 rounded-md border border-current/70" />}
+            </button>
+          )}
+
+          {showToggleControl && (
+            <button
+              data-testid="task-toggle"
+              disabled={isBusy}
+              aria-label={isCompleted ? `Reabrir lembrete ${task.title}` : `Concluir lembrete ${task.title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(task);
+              }}
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition-all disabled:cursor-wait disabled:opacity-60 sm:h-11 sm:w-11',
+                isCompleted
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                  : 'border-slate-200 bg-white/90 text-slate-400 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-blue-400/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300',
+              )}
+            >
+              {isToggling ? (
+                <Loader2 size={22} className="animate-spin" />
+              ) : isCompleted ? (
+                <CheckCircle2 size={22} />
+              ) : (
+                <Circle size={22} />
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2.5 sm:gap-4">
           <div className="min-w-0">
+            <div className={cn('mb-2 flex flex-wrap items-center gap-2', compact && 'mb-1.5 gap-1.5')}>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold',
+                  compact && 'px-2 py-0.5 text-[10px]',
+                  statusToneClass,
+                )}
+              >
+                {isCompleted ? <CheckCircle2 size={12} /> : isOverdue ? <AlertTriangle size={12} /> : <Circle size={12} />}
+                {statusLabel}
+              </span>
+
+              {!isCompleted && (
+                <span
+                  className={cn(
+                    'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase',
+                    compact && 'px-2 py-0.5 text-[10px]',
+                    PRIORITY_COLORS[task.priority],
+                  )}
+                >
+                  {PRIORITY_LABELS[task.priority]}
+                </span>
+              )}
+            </div>
+
             <div className="flex items-start gap-2">
               <h3
                 className={cn(
@@ -178,32 +252,20 @@ function TaskItemComponent({
             aria-label={`Excluir lembrete ${task.title}`}
             onClick={(event) => onDelete(task.id, event)}
             className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
               isDeleting
-                ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300'
-                : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:bg-rose-500/10 dark:hover:text-rose-300',
+                ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+                : 'border-slate-200 bg-white/85 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-rose-500/20 dark:hover:bg-rose-500/10 dark:hover:text-rose-300',
             )}
           >
             {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
           </button>
         </div>
 
-        <div className={cn('mt-3 flex flex-wrap items-center gap-2', compact && 'gap-1.5')}>
-          {!isCompleted && (
-            <span
-              className={cn(
-                'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
-                compact && 'px-2 py-0.5 text-[10px]',
-                PRIORITY_COLORS[task.priority],
-              )}
-            >
-              {PRIORITY_LABELS[task.priority]}
-            </span>
-          )}
-
+        <div className={cn('mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/60 pt-3 dark:border-white/10', compact && 'gap-1.5 pt-2')}>
           <span
             className={cn(
-              'inline-flex max-w-[96px] items-center gap-1 truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
+              'inline-flex max-w-[96px] items-center gap-1 truncate rounded-full border border-slate-200 bg-white/85 px-2 py-1 text-[10px] font-semibold text-slate-600 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
               compact && 'hidden sm:inline-flex',
             )}
           >
@@ -215,7 +277,7 @@ function TaskItemComponent({
             <span
               key={item}
               className={cn(
-                'inline-flex max-w-[88px] items-center gap-1 truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
+                'inline-flex max-w-[88px] items-center gap-1 truncate rounded-full border border-blue-200 bg-blue-50/90 px-2 py-1 text-[10px] font-semibold text-blue-700 sm:max-w-[120px] sm:px-2.5 sm:text-[11px] dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
                 compact && 'hidden sm:inline-flex',
               )}
             >
@@ -236,7 +298,7 @@ function TaskItemComponent({
             title={timeDescription}
             aria-label={`${formatDate()} - ${timeDescription}`}
             className={cn(
-              'inline-flex max-w-[98px] items-center gap-1 truncate rounded-full border px-2 py-1 text-[10px] font-semibold sm:max-w-none sm:px-2.5 sm:text-[11px]',
+              'ml-auto inline-flex max-w-[98px] items-center gap-1 truncate rounded-full border px-2 py-1 text-[10px] font-bold sm:max-w-none sm:px-2.5 sm:text-[11px]',
               compact && 'max-w-[84px] px-2 py-0.5',
               overdueKind === 'timed'
                 ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
@@ -253,7 +315,7 @@ function TaskItemComponent({
             <span
               data-testid="task-time-badge"
               className={cn(
-                'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold',
+                'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold',
                 isOverdue
                   ? 'border-rose-200 bg-rose-100 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/15 dark:text-rose-300'
                   : 'border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
@@ -302,8 +364,11 @@ export const TaskItem = React.memo(
     prev.task.category === next.task.category &&
     JSON.stringify(prev.task.tags ?? []) === JSON.stringify(next.task.tags ?? []) &&
     prev.task.status === next.task.status &&
+    prev.showSelectionControl === next.showSelectionControl &&
+    prev.showToggleControl === next.showToggleControl &&
     prev.compact === next.compact &&
     prev.isDeleting === next.isDeleting &&
-    prev.isToggling === next.isToggling,
+    prev.isToggling === next.isToggling &&
+    prev.isSelected === next.isSelected,
 );
 

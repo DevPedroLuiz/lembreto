@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDelete, apiPost } from '../api/client';
 
 const PUSH_SERVICE_WORKER_PATH = '/push-sw.js';
@@ -39,6 +39,9 @@ export function usePushNotifications({
 }: UsePushNotificationsOptions) {
   const registrationPromiseRef = useRef<Promise<ServiceWorkerRegistration> | null>(null);
   const syncedEndpointRef = useRef<string | null>(null);
+  const [subscriptionEndpoint, setSubscriptionEndpoint] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
   const ensureRegistration = useCallback(async () => {
     if (!isPushSupported()) {
@@ -51,50 +54,95 @@ export function usePushNotifications({
       });
     }
 
-    return registrationPromiseRef.current;
+    await registrationPromiseRef.current;
+    return navigator.serviceWorker.ready;
   }, []);
 
   useEffect(() => {
     syncedEndpointRef.current = null;
+    setSubscriptionEndpoint(null);
+    setPushError(null);
   }, [token]);
 
   const syncPushSubscription = useCallback(async () => {
-    if (!isPushSupported()) return;
-
-    const registration = await ensureRegistration();
-    const existingSubscription = await registration.pushManager.getSubscription();
-    const explicitlyDisabled = !enabled || notificationPermission !== 'granted';
-
-    if (explicitlyDisabled) {
-      if (existingSubscription) {
-        if (token) {
-          await apiDelete('/api/notifications/push-subscriptions', token, {
-            endpoint: existingSubscription.endpoint,
-          }).catch(() => {
-            // best effort cleanup
-          });
-        }
-
-        await existingSubscription.unsubscribe().catch(() => {
-          // best effort unsubscribe
-        });
-      }
-
-      syncedEndpointRef.current = null;
+    if (!isPushSupported()) {
+      setSubscriptionEndpoint(null);
+      setPushError('Este navegador não oferece suporte a notificações push.');
       return;
     }
 
-    if (!existingSubscription) {
-      if (!token || !pushPublicKey) return;
+    setIsSyncing(true);
+    setPushError(null);
 
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
-      });
+    try {
+      const registration = await ensureRegistration();
+      const existingSubscription = await registration.pushManager.getSubscription();
+      const explicitlyDisabled = !enabled || notificationPermission !== 'granted';
 
-      const json = subscription.toJSON();
+      if (explicitlyDisabled) {
+        if (existingSubscription) {
+          if (token) {
+            await apiDelete('/api/notifications/push-subscriptions', token, {
+              endpoint: existingSubscription.endpoint,
+            }).catch(() => {
+              // best effort cleanup
+            });
+          }
+
+          await existingSubscription.unsubscribe().catch(() => {
+            // best effort unsubscribe
+          });
+        }
+
+        syncedEndpointRef.current = null;
+        setSubscriptionEndpoint(null);
+        return;
+      }
+
+      if (!existingSubscription) {
+        if (!token || !pushPublicKey) {
+          setSubscriptionEndpoint(null);
+          return;
+        }
+
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(pushPublicKey),
+        });
+
+        const json = subscription.toJSON();
+        if (!json.keys?.p256dh || !json.keys.auth) {
+          throw new Error('O navegador retornou uma assinatura push inválida.');
+        }
+
+        await apiPost(
+          '/api/notifications/push-subscriptions',
+          {
+            endpoint: json.endpoint,
+            expirationTime: json.expirationTime ?? null,
+            keys: {
+              p256dh: json.keys.p256dh,
+              auth: json.keys.auth,
+            },
+            userAgent: navigator.userAgent,
+          },
+          token,
+        );
+
+        syncedEndpointRef.current = subscription.endpoint;
+        setSubscriptionEndpoint(subscription.endpoint);
+        return;
+      }
+
+      setSubscriptionEndpoint(existingSubscription.endpoint);
+
+      if (!token || !pushPublicKey || syncedEndpointRef.current === existingSubscription.endpoint) {
+        return;
+      }
+
+      const json = existingSubscription.toJSON();
       if (!json.keys?.p256dh || !json.keys.auth) {
-        throw new Error('The browser returned an invalid push subscription.');
+        throw new Error('O navegador retornou uma assinatura push inválida.');
       }
 
       await apiPost(
@@ -111,34 +159,18 @@ export function usePushNotifications({
         token,
       );
 
-      syncedEndpointRef.current = subscription.endpoint;
-      return;
+      syncedEndpointRef.current = existingSubscription.endpoint;
+      setSubscriptionEndpoint(existingSubscription.endpoint);
+    } catch (error) {
+      setPushError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível conectar este navegador às notificações do Windows.',
+      );
+      throw error;
+    } finally {
+      setIsSyncing(false);
     }
-
-    if (!token || !pushPublicKey || syncedEndpointRef.current === existingSubscription.endpoint) {
-      return;
-    }
-
-    const json = existingSubscription.toJSON();
-    if (!json.keys?.p256dh || !json.keys.auth) {
-      throw new Error('The browser returned an invalid push subscription.');
-    }
-
-    await apiPost(
-      '/api/notifications/push-subscriptions',
-      {
-        endpoint: json.endpoint,
-        expirationTime: json.expirationTime ?? null,
-        keys: {
-          p256dh: json.keys.p256dh,
-          auth: json.keys.auth,
-        },
-        userAgent: navigator.userAgent,
-      },
-      token,
-    );
-
-    syncedEndpointRef.current = existingSubscription.endpoint;
   }, [enabled, ensureRegistration, notificationPermission, pushPublicKey, token]);
 
   useEffect(() => {
@@ -180,6 +212,9 @@ export function usePushNotifications({
 
   return {
     pushSupported: isPushSupported(),
+    subscriptionReady: subscriptionEndpoint !== null && notificationPermission === 'granted',
+    isSyncing,
+    pushError,
     syncPushSubscription,
   };
 }

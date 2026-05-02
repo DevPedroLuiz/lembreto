@@ -119,12 +119,14 @@ export function TaskDetailsDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="task-details-title"
-            className="fixed inset-x-3 bottom-3 top-auto z-[111] mx-auto flex max-h-[86dvh] w-auto flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:w-full sm:max-w-4xl sm:-translate-y-1/2 sm:rounded-[32px] lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
+            className="fixed inset-x-3 bottom-3 top-auto z-[111] mx-auto flex max-h-[86dvh] w-auto flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:w-full sm:max-w-5xl sm:-translate-y-1/2 sm:rounded-[32px] lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
             data-testid="task-details-dialog"
           >
-            <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
+            <div className="relative overflow-hidden border-b border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-blue-50/70 px-5 py-5 dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-blue-950/20 md:px-7 md:py-6">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/90 dark:bg-white/10" />
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)_auto] xl:items-start">
+                <div className="min-w-0 pr-12 xl:pr-0">
                   <div className="flex flex-wrap items-center gap-2">
                     {onBack && backLabel && (
                       <button
@@ -132,7 +134,7 @@ export function TaskDetailsDialog({
                         onClick={onBack}
                         disabled={isBusy}
                         data-testid="task-details-back"
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
                       >
                         <ArrowLeft size={14} />
                         {backLabel}
@@ -146,49 +148,25 @@ export function TaskDetailsDialog({
                       Visão do lembrete
                     </span>
                   </div>
+
                   <h2
                     id="task-details-title"
-                    className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white"
+                    className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-3xl"
                   >
                     {task.title}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                     Criado em {formatCreatedAt(task)}
                   </p>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isBusy}
-                  aria-label="Fechar visualização do lembrete"
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_340px]">
-                <section className="surface-soft p-5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${PRIORITY_STYLES[task.priority]}`}>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${PRIORITY_STYLES[task.priority]}`}>
                       {PRIORITY_LABELS[task.priority]}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/75 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
                       <Tag size={12} />
                       {task.category || 'Geral'}
                     </span>
-                    {task.tags?.map((item) => (
-                      <span
-                        key={item}
-                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300"
-                      >
-                        <Tag size={12} />
-                        {item}
-                      </span>
-                    ))}
                     <span
                       className={[
                         'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
@@ -201,22 +179,128 @@ export function TaskDetailsDialog({
                       {isCompleted ? 'Concluído' : 'Pendente'}
                     </span>
                   </div>
+                </div>
 
-                  <div className="mt-5 space-y-4">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Descrição</h3>
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-500 dark:text-slate-400">
-                        {task.description?.trim() || 'Nenhum detalhe adicional foi registrado para este lembrete.'}
-                      </p>
+                {!isCompleted && (
+                  <div className="rounded-[26px] border border-slate-200/80 bg-white/82 p-3 shadow-[0_18px_52px_-38px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.055]">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Ajustes rápidos</p>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          Reagende sem abrir edição.
+                        </p>
+                      </div>
+                      {isRescheduling && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                          <Sparkles size={12} />
+                          Salvando
+                        </span>
+                      )}
                     </div>
 
-                    <div className="rounded-[28px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                      <button
+                        type="button"
+                        data-testid="task-details-snooze-later"
+                        onClick={() => onQuickReschedule(task, 'laterToday')}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      >
+                        <Clock3 size={16} />
+                        <span>Mais tarde</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">+2h</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="task-details-snooze-tomorrow"
+                        onClick={() => onQuickReschedule(task, 'tomorrowMorning')}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      >
+                        <CalendarDays size={16} />
+                        Amanhã cedo
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="task-details-snooze-next-week"
+                        onClick={() => onQuickReschedule(task, 'nextWeek')}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      >
+                        <CalendarClock size={16} />
+                        Próxima semana
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={isBusy}
+                  aria-label="Fechar visualização do lembrete"
+                  className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/86 text-slate-500 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.55)] transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08] xl:static"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-slate-50/45 px-5 py-5 dark:bg-white/[0.015] md:px-7 md:py-6">
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <section className="surface-soft overflow-hidden p-0">
+                  <div className="border-b border-slate-200/70 bg-white/70 px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+                    <h3 className="text-base font-semibold text-slate-950 dark:text-white">
+                      Detalhes do lembrete
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Contexto, prazo e histórico reunidos em um só lugar.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 p-5">
+                    <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                      <div className="flex items-start gap-3">
+                        <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                          <PencilLine size={17} />
+                        </span>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Descrição</h4>
+                          <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-500 dark:text-slate-400">
+                        {task.description?.trim() || 'Nenhum detalhe adicional foi registrado para este lembrete.'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {(task.tags?.length ?? 0) > 0 && (
+                      <div className="rounded-[28px] border border-blue-200/70 bg-blue-50/50 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700/70 dark:text-blue-300/70">
+                          Tags
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {task.tags?.map((item) => (
+                            <span
+                              key={item}
+                              className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-white/[0.06] dark:text-blue-300"
+                            >
+                              <Tag size={12} />
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-4 dark:border-white/10 dark:bg-white/[0.04]">
                       <div className="flex items-center gap-2">
                         <span className="icon-slot h-9 w-9 rounded-2xl bg-slate-100 text-slate-600 dark:bg-white/[0.07] dark:text-slate-300">
                           <CalendarClock size={16} />
                         </span>
                         <div>
-                          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Histórico rápido</h3>
+                          <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Histórico rápido</h4>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
                             Um resumo objetivo para situar este lembrete.
                           </p>
@@ -357,57 +441,6 @@ export function TaskDetailsDialog({
                       </div>
                     </div>
                   </section>
-
-                  {!isCompleted && (
-                    <section className="surface-soft p-5">
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Ajustes rápidos</h3>
-                      <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                        Quando a rotina muda, você consegue adiar este lembrete sem entrar na edição completa.
-                      </p>
-
-                      <div className="mt-4 grid gap-3">
-                        <button
-                          type="button"
-                          data-testid="task-details-snooze-later"
-                          onClick={() => onQuickReschedule(task, 'laterToday')}
-                          disabled={isBusy}
-                          className="action-secondary w-full justify-between disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <span className="inline-flex items-center gap-2">
-                            <Clock3 size={18} />
-                            Mais tarde hoje
-                          </span>
-                          <span className="text-xs text-slate-400 dark:text-slate-500">
-                            +2 horas
-                          </span>
-                        </button>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <button
-                            type="button"
-                            data-testid="task-details-snooze-tomorrow"
-                            onClick={() => onQuickReschedule(task, 'tomorrowMorning')}
-                            disabled={isBusy}
-                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                          >
-                            <CalendarDays size={18} />
-                            Amanhã cedo
-                          </button>
-
-                          <button
-                            type="button"
-                            data-testid="task-details-snooze-next-week"
-                            onClick={() => onQuickReschedule(task, 'nextWeek')}
-                            disabled={isBusy}
-                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                          >
-                            <CalendarClock size={18} />
-                            Próxima semana
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  )}
 
                   <section className="surface-soft p-5">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Ações</h3>

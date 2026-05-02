@@ -25,12 +25,19 @@ export function useToast() {
   );
 
   const requestPermission = useCallback(async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
+    if (!('Notification' in window)) {
+      setNotifPerm('denied');
+      return 'denied' as NotificationPermission;
+    }
+
+    if (Notification.permission === 'default') {
       const perm = await Notification.requestPermission();
       setNotifPerm(perm);
-    } else if ('Notification' in window) {
-      setNotifPerm(Notification.permission);
+      return perm;
     }
+
+    setNotifPerm(Notification.permission);
+    return Notification.permission;
   }, []);
 
   useEffect(() => {

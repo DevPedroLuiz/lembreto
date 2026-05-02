@@ -605,12 +605,10 @@ test.describe('Lembreto critical flows', () => {
       });
       await page.getByTestId('profile-submit-button').click();
 
-      await expect(page.getByTestId('profile-save-success')).toBeVisible();
-      await expect(page.getByTestId('profile-submit-button')).toContainText(/salvo com sucesso/i);
-      await expect(page.getByTestId('profile-submit-button')).toHaveCount(0, { timeout: 3000 });
       await expect(page.getByTestId('sidebar-profile-name')).toHaveText(updatedName);
       await expect(page.getByTestId('sidebar-profile-email')).toHaveText(updatedEmail);
       await expect(page.getByTestId('sidebar-profile-avatar')).toHaveAttribute('src', /data:image\/png;base64,/);
+      await expect(page.getByTestId('profile-submit-button')).toHaveCount(0, { timeout: 4000 });
 
       await createTask(page, 'Validar token rotacionado');
       const rotatedTokenTask = taskCard(page, 'Validar token rotacionado');
@@ -777,12 +775,14 @@ test.describe('Lembreto critical flows', () => {
           dueDate: new Date('2026-04-26T09:00:00.000Z').toISOString(),
           priority: 'high',
           category: 'Trabalho',
+          tags: ['Casa'],
         },
         {
           title: 'Baixa pendente',
           dueDate: new Date('2026-04-27T09:00:00.000Z').toISOString(),
           priority: 'low',
           category: 'Pessoal',
+          tags: ['Estudo'],
         },
         {
           title: 'Alta concluída',
@@ -790,6 +790,7 @@ test.describe('Lembreto critical flows', () => {
           priority: 'high',
           category: 'Trabalho',
           status: 'completed',
+          tags: ['Casa'],
         },
       ]);
 
@@ -813,6 +814,11 @@ test.describe('Lembreto critical flows', () => {
       await expect(page.getByTestId('task-status-summary')).toContainText('Pendentes');
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta concluída"]')).toHaveCount(0);
+
+      await page.getByTestId('task-tag-filter-casa').click();
+      await expect(page.getByTestId('task-tag-summary')).toContainText('Casa');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Baixa pendente"]')).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

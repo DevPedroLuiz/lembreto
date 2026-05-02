@@ -205,6 +205,7 @@ export default function App() {
   const {
     notifications,
     serverEnabled: serverNotificationsEnabled,
+    pushConfigured,
     pushPublicKey,
     loaded: notificationsLoaded,
     refreshNotifications,
@@ -273,6 +274,10 @@ export default function App() {
     id: string;
     title: string;
   } | null>(null);
+  const [pendingDeleteTaskSelection, setPendingDeleteTaskSelection] = useState<{
+    ids: string[];
+    count: number;
+  } | null>(null);
   const [pendingDeleteNote, setPendingDeleteNote] = useState<{
     id: string;
     title: string;
@@ -308,13 +313,33 @@ export default function App() {
   const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
-  const pushPermissionRequestedRef = useRef(false);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
     () => (categories.length > 0 ? categories : [...DEFAULT_CATEGORIES]),
     [categories],
   );
+  const tagOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+
+    const append = (value: string) => {
+      const normalized = value.trim();
+      if (!normalized) return;
+      const key = normalized.toLocaleLowerCase('pt-BR');
+      if (seen.has(key)) return;
+      seen.add(key);
+      ordered.push(normalized);
+    };
+
+    tags.forEach(append);
+    tasks.forEach((task) => task.tags.forEach(append));
+    notes.forEach((note) => note.tags.forEach(append));
+
+    return ordered.sort((left, right) =>
+      left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }),
+    );
+  }, [notes, tags, tasks]);
   const noteContextTask = useMemo(
     () => (noteContextTaskId ? tasks.find((task) => task.id === noteContextTaskId) ?? null : null),
     [noteContextTaskId, tasks],
@@ -327,7 +352,13 @@ export default function App() {
     });
   }, [auth.token, refreshNotifications]);
 
-  usePushNotifications({
+  const {
+    pushSupported,
+    subscriptionReady: desktopNotificationsReady,
+    isSyncing: isSyncingDesktopNotifications,
+    pushError: desktopPushError,
+    syncPushSubscription,
+  } = usePushNotifications({
     token: isResetPasswordRoute ? null : auth.token,
     enabled: notificationsEnabled,
     pushPublicKey,
@@ -427,7 +458,6 @@ export default function App() {
       welcomedUserIdRef.current = null;
       notificationPreferenceHydratedRef.current = false;
       notificationsOverrideRef.current = null;
-      pushPermissionRequestedRef.current = false;
       return;
     }
 
@@ -449,18 +479,6 @@ export default function App() {
       }
     });
   }, [auth.token, notifications, notificationsEnabled, notificationsLoaded, triggerToastNotification]);
-
-  useEffect(() => {
-    if (!auth.token || isResetPasswordRoute) return;
-    if (!pushPublicKey) return;
-    if (!notificationsEnabled || notifPerm !== 'default') return;
-    if (pushPermissionRequestedRef.current) return;
-
-    pushPermissionRequestedRef.current = true;
-    void requestPermission().catch(() => {
-      // best effort permission prompt
-    });
-  }, [auth.token, isResetPasswordRoute, notifPerm, notificationsEnabled, pushPublicKey, requestPermission]);
 
   useEffect(() => {
     if (!auth.token || !auth.currentUser || welcomedUserIdRef.current === auth.currentUser.id) return;
@@ -992,6 +1010,70 @@ export default function App() {
     }
   }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly, updateNotificationsEnabled]);
 
+  const handleEnableDesktopNotifications = useCallback(async () => {
+    if (!auth.token) {
+      triggerToastOnly('Faça login primeiro', 'Entre na sua conta para conectar este navegador às notificações do Windows.');
+      return;
+    }
+
+    if (!pushConfigured || !pushPublicKey) {
+      triggerToastOnly('Push indisponível', 'As chaves de notificação ainda não foram configuradas neste ambiente.');
+      return;
+    }
+
+    let enabledNotifications = notificationsEnabled;
+
+    try {
+      if (!enabledNotifications) {
+        notificationsOverrideRef.current = true;
+        saveConfig({ notifications: true });
+        setNotificationsEnabled(true);
+        await updateNotificationsEnabled(true);
+        enabledNotifications = true;
+      }
+
+      const permission = await requestPermission();
+      if (permission !== 'granted') {
+        triggerToastOnly(
+          'Permissão necessária',
+          permission === 'denied'
+            ? 'O navegador bloqueou as notificações. Libere a permissão nas configurações do site.'
+            : 'Permita notificações no navegador para receber avisos do Windows.',
+        );
+        return;
+      }
+
+      await syncPushSubscription();
+      triggerToastOnly(
+        'Notificações do Windows ativadas',
+        'Este navegador foi conectado e passará a receber seus lembretes fora da aba.',
+      );
+    } catch (error) {
+      if (!enabledNotifications) {
+        notificationsOverrideRef.current = false;
+        saveConfig({ notifications: false });
+        setNotificationsEnabled(false);
+      }
+
+      triggerToastOnly(
+        'Não foi possível ativar',
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível ativar as notificações do Windows neste navegador.',
+      );
+    }
+  }, [
+    auth.token,
+    notificationsEnabled,
+    pushConfigured,
+    pushPublicKey,
+    requestPermission,
+    saveConfig,
+    syncPushSubscription,
+    triggerToastOnly,
+    updateNotificationsEnabled,
+  ]);
+
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -1196,6 +1278,65 @@ export default function App() {
     }
   }, [configConfirmDelete, deleteTask, deletingTaskIds, emitNotification, selectedTask?.id, tasks]);
 
+  const handleDeleteSelectedTasks = useCallback(async (ids: string[]) => {
+    const uniqueIds = Array.from(new Set(ids)).filter(Boolean);
+    if (uniqueIds.length === 0) return;
+
+    if (configConfirmDelete) {
+      setPendingDeleteTaskSelection({
+        ids: uniqueIds,
+        count: uniqueIds.length,
+      });
+      return;
+    }
+
+    try {
+      setDeletingTaskIds((prev) => {
+        const next = new Set(prev);
+        uniqueIds.forEach((id) => next.add(id));
+        return next;
+      });
+
+      let deletedCount = 0;
+      for (const id of uniqueIds) {
+        try {
+          await deleteTask(id);
+          deletedCount += 1;
+        } catch {
+          // continue deleting what is still possible
+        }
+      }
+
+      if (selectedTask && uniqueIds.includes(selectedTask.id)) {
+        setSelectedTask(null);
+        setShowTaskDetails(false);
+      }
+
+      if (deletedCount === uniqueIds.length) {
+        emitNotification(
+          'Lembretes removidos',
+          `${deletedCount} lembrete${deletedCount === 1 ? '' : 's'} foram excluídos com sucesso.`,
+          'info',
+          { toastOnly: true },
+        );
+      } else if (deletedCount > 0) {
+        emitNotification(
+          'Exclusão parcial',
+          `${deletedCount} de ${uniqueIds.length} lembretes foram excluídos.`,
+          'warning',
+        );
+      } else {
+        emitNotification('Erro', 'Falha ao excluir os lembretes selecionados.', 'error');
+      }
+    } finally {
+      setDeletingTaskIds((prev) => {
+        const next = new Set(prev);
+        uniqueIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
+  }, [configConfirmDelete, deleteTask, emitNotification, selectedTask]);
+
   const handleDeleteFromDetails = useCallback((task: Task) => {
     if (deletingTaskIds.has(task.id)) return;
 
@@ -1260,6 +1401,60 @@ export default function App() {
     }
   }, [deleteTask, deletingTaskIds, emitNotification, pendingDeleteTask, selectedTask]);
 
+  const handleConfirmDeleteSelection = useCallback(async () => {
+    if (!pendingDeleteTaskSelection || pendingDeleteTaskSelection.ids.length === 0) return;
+
+    const idsToDelete = pendingDeleteTaskSelection.ids;
+
+    try {
+      setDeletingTaskIds((prev) => {
+        const next = new Set(prev);
+        idsToDelete.forEach((id) => next.add(id));
+        return next;
+      });
+
+      let deletedCount = 0;
+      for (const id of idsToDelete) {
+        try {
+          await deleteTask(id);
+          deletedCount += 1;
+        } catch {
+          // keep going to avoid trapping the whole batch on one item
+        }
+      }
+
+      if (selectedTask && idsToDelete.includes(selectedTask.id)) {
+        setSelectedTask(null);
+        setShowTaskDetails(false);
+      }
+
+      setPendingDeleteTaskSelection(null);
+
+      if (deletedCount === idsToDelete.length) {
+        emitNotification(
+          'Lembretes removidos',
+          `${deletedCount} lembrete${deletedCount === 1 ? '' : 's'} foram excluídos com sucesso.`,
+          'info',
+          { toastOnly: true },
+        );
+      } else if (deletedCount > 0) {
+        emitNotification(
+          'Exclusão parcial',
+          `${deletedCount} de ${idsToDelete.length} lembretes foram excluídos.`,
+          'warning',
+        );
+      } else {
+        emitNotification('Erro', 'Falha ao excluir os lembretes selecionados.', 'error');
+      }
+    } finally {
+      setDeletingTaskIds((prev) => {
+        const next = new Set(prev);
+        idsToDelete.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
+  }, [deleteTask, emitNotification, pendingDeleteTaskSelection, selectedTask]);
+
   const handleConfirmDeleteNote = useCallback(async () => {
     if (!pendingDeleteNote) return;
 
@@ -1313,7 +1508,7 @@ export default function App() {
         setShowProfileDrawer(false);
         setProfileSaveSuccess(false);
         profileCloseTimerRef.current = null;
-      }, 1000);
+      }, 1600);
     } catch (err: unknown) {
       setProfileSaveSuccess(false);
       emitNotification('Erro', err instanceof Error ? err.message : 'Falha ao atualizar perfil.', 'error');
@@ -1733,6 +1928,13 @@ export default function App() {
     setPendingDeleteTask(null);
   }, [deletingTaskIds, pendingDeleteTask]);
 
+  const cancelDeleteSelection = useCallback(() => {
+    if (!pendingDeleteTaskSelection) return;
+    const isConfirmingSelection = pendingDeleteTaskSelection.ids.some((id) => deletingTaskIds.has(id));
+    if (isConfirmingSelection) return;
+    setPendingDeleteTaskSelection(null);
+  }, [deletingTaskIds, pendingDeleteTaskSelection]);
+
   const cancelDeleteNote = useCallback(() => {
     if (!pendingDeleteNote) return;
     setPendingDeleteNote(null);
@@ -1754,6 +1956,9 @@ export default function App() {
       const isDeleteConfirming = Boolean(
         pendingDeleteTask && deletingTaskIds.has(pendingDeleteTask.id),
       );
+      const isDeleteSelectionConfirming = Boolean(
+        pendingDeleteTaskSelection && pendingDeleteTaskSelection.ids.some((id) => deletingTaskIds.has(id)),
+      );
 
       if (event.key === 'Escape') {
         if (pendingDeleteNote) {
@@ -1765,6 +1970,12 @@ export default function App() {
         if (pendingDeleteTask && !isDeleteConfirming) {
           event.preventDefault();
           cancelDelete();
+          return;
+        }
+
+        if (pendingDeleteTaskSelection && !isDeleteSelectionConfirming) {
+          event.preventDefault();
+          cancelDeleteSelection();
           return;
         }
 
@@ -1819,6 +2030,7 @@ export default function App() {
           showSettings ||
           showNotificationsInbox ||
           Boolean(pendingDeleteTask) ||
+          Boolean(pendingDeleteTaskSelection) ||
           Boolean(dashboardMetricDialog);
 
         if (!auth.currentUser || !auth.token || hasOverlayOpen || isTypingTarget(event.target)) return;
@@ -1839,6 +2051,21 @@ export default function App() {
         ) {
           event.preventDefault();
           void handleConfirmDelete();
+        }
+      }
+
+      if (event.key === 'Enter' && pendingDeleteTaskSelection && !isDeleteSelectionConfirming) {
+        const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+        const activeElement = document.activeElement;
+
+        if (
+          dialog &&
+          activeElement instanceof HTMLElement &&
+          dialog.contains(activeElement) &&
+          activeElement.tagName !== 'TEXTAREA'
+        ) {
+          event.preventDefault();
+          void handleConfirmDeleteSelection();
         }
       }
 
@@ -1864,6 +2091,7 @@ export default function App() {
     auth.currentUser,
     auth.token,
     cancelDelete,
+    cancelDeleteSelection,
     cancelDeleteNote,
     closeDashboardMetric,
     closeNotificationsInbox,
@@ -1873,10 +2101,12 @@ export default function App() {
     dashboardMetricDialog,
     deletingTaskIds,
     handleConfirmDelete,
+    handleConfirmDeleteSelection,
     handleConfirmDeleteNote,
     openNewTask,
     pendingDeleteNote,
     pendingDeleteTask,
+    pendingDeleteTaskSelection,
     resetTaskForm,
     resetNoteForm,
     showNotificationsInbox,
@@ -2121,6 +2351,7 @@ export default function App() {
                   pendingTasks={pendingTasks}
                   completedTasks={completedTasks}
                   categories={categoryOptions}
+                  tags={tagOptions}
                   filterCategory={filterCategory}
                   setFilterCategory={setFilterCategory}
                   search={search}
@@ -2129,6 +2360,7 @@ export default function App() {
                   onNewTask={openNewTask}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
+                  onDeleteSelected={handleDeleteSelectedTasks}
                   onEdit={openTaskDetails}
                   deletingTaskIds={deletingTaskIds}
                   togglingTaskIds={togglingTaskIds}
@@ -2283,7 +2515,7 @@ export default function App() {
         categoryOptions={categoryOptions}
         tags={formTags}
         setTags={setFormTags}
-        tagOptions={tags}
+        tagOptions={tagOptions}
         recurrenceEnabled={formRecurrenceEnabled}
         setRecurrenceEnabled={setFormRecurrenceEnabled}
         recurrenceMode={formRecurrenceMode}
@@ -2315,7 +2547,7 @@ export default function App() {
         categoryOptions={categoryOptions}
         tags={noteTags}
         setTags={setNoteTags}
-        tagOptions={tags}
+        tagOptions={tagOptions}
         mode={noteMode}
         setMode={setNoteMode}
         taskId={noteTaskId}
@@ -2352,6 +2584,15 @@ export default function App() {
         onToggleNotifications={() => {
           void handleToggleNotifications();
         }}
+        desktopNotificationsSupported={pushSupported}
+        desktopNotificationsReady={desktopNotificationsReady}
+        desktopNotificationsPermission={notifPerm}
+        desktopNotificationsConfigured={pushConfigured}
+        desktopNotificationsError={desktopPushError}
+        isSyncingDesktopNotifications={isSyncingDesktopNotifications}
+        onEnableDesktopNotifications={() => {
+          void handleEnableDesktopNotifications();
+        }}
         onOpenNotificationsCenter={openNotificationsCenter}
         onOpenProfile={openProfile}
         sound={configSound}
@@ -2361,7 +2602,7 @@ export default function App() {
         showCompleted={configShowCompleted}
         onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
         categories={categoryOptions}
-        tags={tags}
+        tags={tagOptions}
         onCreateCategory={createCategory}
         onCreateTag={createTag}
         onDeleteCategory={handleDeleteCategory}
@@ -2390,26 +2631,62 @@ export default function App() {
       <Toast toast={toastMsg} onDismiss={dismissToast} />
 
       <ConfirmDialog
-        open={Boolean(pendingDeleteTask || pendingDeleteNote)}
-        title={pendingDeleteTask ? 'Excluir lembrete?' : 'Excluir nota?'}
+        open={Boolean(pendingDeleteTask || pendingDeleteTaskSelection || pendingDeleteNote)}
+        title={
+          pendingDeleteTask
+            ? 'Excluir lembrete?'
+            : pendingDeleteTaskSelection
+              ? `Excluir ${pendingDeleteTaskSelection.count} lembretes?`
+              : 'Excluir nota?'
+        }
         message={
           pendingDeleteTask
             ? `Você está prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
+            : pendingDeleteTaskSelection
+              ? `Você está prestes a excluir ${pendingDeleteTaskSelection.count} lembrete${pendingDeleteTaskSelection.count === 1 ? '' : 's'} permanentemente.`
             : pendingDeleteNote
               ? `Você está prestes a excluir "${pendingDeleteNote.title}" permanentemente.`
               : ''
         }
-        confirmLabel={pendingDeleteTask ? 'Excluir lembrete' : 'Excluir nota'}
-        cancelLabel={pendingDeleteTask ? 'Manter lembrete' : 'Manter nota'}
-        isConfirming={pendingDeleteTask ? deletingTaskIds.has(pendingDeleteTask.id) : false}
+        confirmLabel={
+          pendingDeleteTask
+            ? 'Excluir lembrete'
+            : pendingDeleteTaskSelection
+              ? 'Excluir lembretes'
+              : 'Excluir nota'
+        }
+        cancelLabel={
+          pendingDeleteTask
+            ? 'Manter lembrete'
+            : pendingDeleteTaskSelection
+              ? 'Manter lembretes'
+              : 'Manter nota'
+        }
+        isConfirming={
+          pendingDeleteTask
+            ? deletingTaskIds.has(pendingDeleteTask.id)
+            : pendingDeleteTaskSelection
+              ? pendingDeleteTaskSelection.ids.some((id) => deletingTaskIds.has(id))
+              : false
+        }
         onConfirm={() => {
           if (pendingDeleteTask) {
             void handleConfirmDelete();
             return;
           }
+          if (pendingDeleteTaskSelection) {
+            void handleConfirmDeleteSelection();
+            return;
+          }
           void handleConfirmDeleteNote();
         }}
-        onCancel={pendingDeleteTask ? cancelDelete : cancelDeleteNote}
+        onCancel={
+          pendingDeleteTask
+            ? cancelDelete
+            : pendingDeleteTaskSelection
+              ? cancelDeleteSelection
+              : cancelDeleteNote
+        }
       />
     </div>
   );
