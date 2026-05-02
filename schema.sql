@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   category    TEXT        NOT NULL DEFAULT 'Geral',
   suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE,
   status      TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
+  history     JSONB       NOT NULL DEFAULT '[]'::JSONB,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -37,6 +38,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS history JSONB NOT NULL DEFAULT '[]'::JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin ON tasks USING GIN(tags);
 

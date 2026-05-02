@@ -26,6 +26,23 @@ export interface Task {
   suppressHolidayNotifications: boolean;
   status: Status;
   createdAt: string;
+  history?: TaskHistoryEvent[];
+}
+
+export type TaskHistoryAction =
+  | 'created'
+  | 'updated'
+  | 'rescheduled'
+  | 'completed'
+  | 'reopened';
+
+export interface TaskHistoryEvent {
+  id: string;
+  action: TaskHistoryAction;
+  title: string;
+  description: string;
+  createdAt: string;
+  details?: string[];
 }
 
 export interface TaskTaxonomy {

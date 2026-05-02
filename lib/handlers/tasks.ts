@@ -1,4 +1,5 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
+import { randomUUID } from 'node:crypto';
 import {
   buildHolidayCalendar,
   detectBrazilLocationFromCoordinates,
@@ -30,6 +31,23 @@ import {
   methodNotAllowed,
 } from './core.js';
 
+type TaskHistoryAction = 'created' | 'updated' | 'rescheduled' | 'completed' | 'reopened';
+
+interface TaskHistoryEntry {
+  id: string;
+  action: TaskHistoryAction;
+  title: string;
+  description: string;
+  createdAt: string;
+  details?: string[];
+}
+
+const PRIORITY_HISTORY_LABELS: Record<string, string> = {
+  low: 'baixa',
+  medium: 'media',
+  high: 'alta',
+};
+
 function resolveTaskId(context: HandlerContext): string | null {
   const paramId = context.request.params?.id;
   if (paramId) return paramId;
@@ -60,6 +78,107 @@ async function requireTaskAuth(context: HandlerContext) {
 async function syncTaskTaxonomy(sql: HandlerContext['sql'], userId: string, category: string, tags: string[]) {
   await upsertUserCategory(sql, userId, category);
   await upsertUserTags(sql, userId, tags);
+}
+
+function createHistoryEntry(
+  action: TaskHistoryAction,
+  title: string,
+  description: string,
+  details: string[] = [],
+): TaskHistoryEntry {
+  return {
+    id: randomUUID(),
+    action,
+    title,
+    description,
+    createdAt: new Date().toISOString(),
+    ...(details.length > 0 ? { details } : {}),
+  };
+}
+
+function normalizeDateValue(value: unknown): string | null {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function buildCreatedHistoryEntry(input: {
+  dueDate?: string | null;
+  priority: string;
+  category: string;
+  tags: string[];
+}): TaskHistoryEntry {
+  const details = [
+    input.dueDate ? 'Prazo inicial definido.' : 'Criado sem prazo definido.',
+    `Prioridade inicial: ${PRIORITY_HISTORY_LABELS[input.priority] ?? input.priority}.`,
+    `Categoria inicial: ${input.category}.`,
+  ];
+
+  if (input.tags.length > 0) {
+    details.push(`Tags iniciais: ${input.tags.join(', ')}.`);
+  }
+
+  return createHistoryEntry('created', 'Lembrete criado', 'O lembrete foi registrado.', details);
+}
+
+function buildUpdateHistoryEntry(
+  current: Record<string, unknown>,
+  next: {
+    title: unknown;
+    description: unknown;
+    dueDate: unknown;
+    priority: unknown;
+    category: unknown;
+    tags: string[];
+    suppressHolidayNotifications: unknown;
+    status: unknown;
+  },
+): TaskHistoryEntry | null {
+  const changedDetails: string[] = [];
+  const currentTags = normalizeStringArray(current.tags);
+
+  if (String(current.title ?? '') !== String(next.title ?? '')) changedDetails.push('Titulo atualizado.');
+  if (String(current.description ?? '') !== String(next.description ?? '')) changedDetails.push('Descricao atualizada.');
+  if (normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate)) changedDetails.push('Prazo alterado.');
+  if (String(current.priority ?? '') !== String(next.priority ?? '')) changedDetails.push('Prioridade alterada.');
+  if (String(current.category ?? '') !== String(next.category ?? '')) changedDetails.push('Categoria alterada.');
+  if (!areStringArraysEqual(currentTags, next.tags)) changedDetails.push('Tags atualizadas.');
+  if (Boolean(current.suppress_holiday_notifications) !== Boolean(next.suppressHolidayNotifications)) {
+    changedDetails.push('Preferencia de notificacoes em feriados alterada.');
+  }
+  if (String(current.status ?? '') !== String(next.status ?? '')) changedDetails.push('Status alterado.');
+
+  if (changedDetails.length === 0) return null;
+
+  const currentStatus = String(current.status ?? 'pending');
+  const nextStatus = String(next.status ?? currentStatus);
+  const dueDateChanged = normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate);
+  const onlyStatusChanged = changedDetails.length === 1 && changedDetails[0] === 'Status alterado.';
+
+  if (onlyStatusChanged && currentStatus !== nextStatus) {
+    if (nextStatus === 'completed') {
+      return createHistoryEntry('completed', 'Lembrete concluido', 'O usuario marcou este lembrete como concluido.');
+    }
+
+    return createHistoryEntry('reopened', 'Lembrete reaberto', 'O usuario devolveu este lembrete para pendente.');
+  }
+
+  if (dueDateChanged) {
+    return createHistoryEntry('rescheduled', 'Prazo reagendado', 'O prazo do lembrete foi atualizado.', changedDetails);
+  }
+
+  return createHistoryEntry('updated', 'Lembrete atualizado', 'As informacoes do lembrete foram alteradas.', changedDetails);
 }
 
 function resolveCalendarYear(context: HandlerContext) {
@@ -109,6 +228,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
+          history,
           created_at  AS "createdAt"
         FROM tasks
         WHERE user_id = ${user.id}
@@ -136,6 +256,14 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       suppressHolidayNotifications,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
+    const history = JSON.stringify([
+      buildCreatedHistoryEntry({
+        dueDate,
+        priority,
+        category,
+        tags,
+      }),
+    ]);
 
     try {
       const rows = await sql`
@@ -147,7 +275,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           priority,
           category,
           tags,
-          suppress_holiday_notifications
+          suppress_holiday_notifications,
+          history
         )
         VALUES (
           ${user.id},
@@ -157,7 +286,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${priority},
           ${category},
           ${tags},
-          ${suppressHolidayNotifications}
+          ${suppressHolidayNotifications},
+          ${history}::jsonb
         )
         RETURNING
           id,
@@ -170,6 +300,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
+          history,
           created_at  AS "createdAt"
       `;
 
@@ -226,7 +357,8 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           status,
-          suppress_holiday_notifications
+          suppress_holiday_notifications,
+          history
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
       `;
       if (current.length === 0) {
@@ -236,21 +368,32 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       const cur = current[0] as Record<string, unknown>;
       const categoryValue = category !== undefined ? category : String(cur.category ?? 'Geral');
       const tagsValue = nextTags ?? ((cur.tags as string[] | undefined) ?? []);
+      const nextValues = {
+        title: title !== undefined ? title : cur.title,
+        description: description !== undefined ? description : cur.description,
+        dueDate: dueDate !== undefined ? dueDate || null : cur.due_date,
+        priority: priority !== undefined ? priority : cur.priority,
+        category: categoryValue,
+        tags: tagsValue,
+        suppressHolidayNotifications: suppressHolidayNotifications !== undefined
+          ? suppressHolidayNotifications
+          : cur.suppress_holiday_notifications,
+        status: status !== undefined ? status : cur.status,
+      };
+      const historyEntry = buildUpdateHistoryEntry(cur, nextValues);
+      const historyUpdate = historyEntry ? JSON.stringify([historyEntry]) : null;
 
       const rows = await sql`
         UPDATE tasks SET
-          title       = ${title !== undefined ? title : cur.title},
-          description = ${description !== undefined ? description : cur.description},
-          due_date    = ${dueDate !== undefined ? dueDate || null : cur.due_date},
-          priority    = ${priority !== undefined ? priority : cur.priority},
-          category    = ${categoryValue},
-          tags        = ${tagsValue},
-          suppress_holiday_notifications = ${
-            suppressHolidayNotifications !== undefined
-              ? suppressHolidayNotifications
-              : cur.suppress_holiday_notifications
-          },
-          status      = ${status !== undefined ? status : cur.status}
+          title       = ${nextValues.title},
+          description = ${nextValues.description},
+          due_date    = ${nextValues.dueDate},
+          priority    = ${nextValues.priority},
+          category    = ${nextValues.category},
+          tags        = ${nextValues.tags},
+          suppress_holiday_notifications = ${nextValues.suppressHolidayNotifications},
+          status      = ${nextValues.status},
+          history     = COALESCE(history, '[]'::jsonb) || COALESCE(${historyUpdate}::jsonb, '[]'::jsonb)
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
           id,
@@ -263,6 +406,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
+          history,
           created_at  AS "createdAt"
       `;
 

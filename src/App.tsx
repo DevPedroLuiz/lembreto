@@ -1215,7 +1215,7 @@ export default function App() {
 
     try {
       setTogglingTaskIds((prev) => new Set(prev).add(task.id));
-      const { newStatus } = await toggleStatus(task);
+      const { task: updatedTask, newStatus } = await toggleStatus(task);
 
       if (newStatus === 'completed') {
         playSuccessSound();
@@ -1224,7 +1224,7 @@ export default function App() {
         });
       }
 
-      return newStatus;
+      return { task: updatedTask, newStatus };
     } catch {
       emitNotification('Erro', 'Falha ao atualizar o status do lembrete.', 'error');
       return null;
@@ -1238,10 +1238,15 @@ export default function App() {
   }, [emitNotification, playSuccessSound, toggleStatus, togglingTaskIds]);
 
   const handleToggleFromDetails = useCallback(async (task: Task) => {
-    const nextStatus = await handleToggle(task);
-    if (nextStatus === 'completed') {
+    const result = await handleToggle(task);
+    if (result?.newStatus === 'completed') {
       setShowTaskDetails(false);
       setSelectedTask(null);
+      return;
+    }
+
+    if (result?.task) {
+      setSelectedTask(result.task);
     }
   }, [handleToggle]);
 

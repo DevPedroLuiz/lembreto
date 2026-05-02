@@ -33,6 +33,11 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
   `;
 
   await sql`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS history JSONB NOT NULL DEFAULT '[]'::JSONB
+  `;
+
+  await sql`
     CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin
     ON tasks USING GIN(tags)
   `;

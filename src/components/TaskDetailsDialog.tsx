@@ -19,7 +19,7 @@ import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
 import { NoteCard } from './NoteCard';
-import type { Note, Priority, Task } from '../types';
+import type { Note, Priority, Task, TaskHistoryEvent } from '../types';
 
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
@@ -62,11 +62,65 @@ function formatDueDate(task: Task): string {
   }
 }
 
-function formatCreatedAt(task: Task): string {
+function formatHistoryDate(value: string): string {
   try {
-    return format(parseISO(task.createdAt), "dd 'de' MMM 'às' HH:mm", { locale: ptBR });
+    return format(parseISO(value), "dd 'de' MMM 'às' HH:mm", { locale: ptBR });
   } catch {
-    return 'Registro recente';
+    return 'Agora';
+  }
+}
+
+function buildTaskHistory(task: Task): TaskHistoryEvent[] {
+  const savedHistory = Array.isArray(task.history) ? task.history : [];
+
+  if (savedHistory.length > 0) {
+    return [...savedHistory].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  }
+
+  return [
+    {
+      id: `${task.id}-created`,
+      action: 'created',
+      title: 'Lembrete criado',
+      description: 'Registro inicial importado para o histórico.',
+      createdAt: task.createdAt,
+      details: [
+        `Prazo atual: ${formatDueDate(task)}.`,
+        task.status === 'completed' ? 'Situação atual: concluído.' : 'Situação atual: pendente.',
+      ],
+    },
+  ];
+}
+
+function getHistoryIcon(event: TaskHistoryEvent) {
+  switch (event.action) {
+    case 'completed':
+      return <CheckCircle2 size={14} />;
+    case 'reopened':
+      return <Circle size={14} />;
+    case 'rescheduled':
+      return <CalendarDays size={14} />;
+    case 'updated':
+      return <PencilLine size={14} />;
+    case 'created':
+    default:
+      return <Sparkles size={14} />;
+  }
+}
+
+function getHistoryTone(event: TaskHistoryEvent): string {
+  switch (event.action) {
+    case 'completed':
+      return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300';
+    case 'reopened':
+      return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+    case 'rescheduled':
+      return 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300';
+    case 'updated':
+      return 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300';
+    case 'created':
+    default:
+      return 'bg-slate-100 text-slate-600 dark:bg-white/[0.07] dark:text-slate-300';
   }
 }
 
@@ -96,6 +150,7 @@ export function TaskDetailsDialog({
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const isCompleted = task.status === 'completed';
   const isBusy = isDeleting || isToggling || isRescheduling;
+  const historyItems = buildTaskHistory(task);
 
   return (
     <AnimatePresence>
@@ -122,12 +177,12 @@ export function TaskDetailsDialog({
             className="fixed inset-x-3 bottom-3 top-auto z-[111] mx-auto flex max-h-[86dvh] w-auto flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:w-full sm:max-w-5xl sm:-translate-y-1/2 sm:rounded-[32px] lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
             data-testid="task-details-dialog"
           >
-            <div className="relative overflow-hidden border-b border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-blue-50/70 px-5 py-5 dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-blue-950/20 md:px-7 md:py-6">
+            <div className="relative overflow-hidden border-b border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-blue-50/70 px-5 pb-6 pt-5 dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-blue-950/20 md:px-7 md:pb-7 md:pt-6">
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/90 dark:bg-white/10" />
 
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)_auto] xl:items-start">
-                <div className="min-w-0 pr-12 xl:pr-0">
-                  <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 pr-12 xl:pr-0">
                     {onBack && backLabel && (
                       <button
                         type="button"
@@ -149,17 +204,28 @@ export function TaskDetailsDialog({
                     </span>
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    disabled={isBusy}
+                    aria-label="Fechar visualização do lembrete"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/86 text-slate-500 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.55)] transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                  <div className="min-w-0">
+
                   <h2
                     id="task-details-title"
-                    className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-3xl"
+                    className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-3xl"
                   >
                     {task.title}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Criado em {formatCreatedAt(task)}
-                  </p>
 
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2 pb-1">
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase ${PRIORITY_STYLES[task.priority]}`}>
                       {PRIORITY_LABELS[task.priority]}
                     </span>
@@ -181,70 +247,63 @@ export function TaskDetailsDialog({
                   </div>
                 </div>
 
-                {!isCompleted && (
-                  <div className="rounded-[26px] border border-slate-200/80 bg-white/82 p-3 shadow-[0_18px_52px_-38px_rgba(15,23,42,0.45)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.055]">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">Ajustes rápidos</p>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                          Reagende sem abrir edição.
-                        </p>
-                      </div>
-                      {isRescheduling && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
-                          <Sparkles size={12} />
-                          Salvando
-                        </span>
-                      )}
-                    </div>
+                  <div className="flex max-w-[640px] flex-wrap justify-start gap-2 xl:justify-end">
+                    <button
+                      type="button"
+                      data-testid="task-details-edit"
+                      onClick={() => onEdit(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-sky-500 px-4 text-sm font-semibold text-white shadow-[0_16px_28px_-20px_rgba(37,99,235,0.72)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <PencilLine size={16} />
+                      Editar
+                    </button>
 
-                    <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-                      <button
-                        type="button"
-                        data-testid="task-details-snooze-later"
-                        onClick={() => onQuickReschedule(task, 'laterToday')}
-                        disabled={isBusy}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-                      >
-                        <Clock3 size={16} />
-                        <span>Mais tarde</span>
-                        <span className="text-xs text-slate-400 dark:text-slate-500">+2h</span>
-                      </button>
+                    <button
+                      type="button"
+                      data-testid="task-details-toggle"
+                      onClick={() => onToggle(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      {isCompleted ? <Circle size={16} /> : <CheckCircle2 size={16} />}
+                      {isCompleted ? 'Reabrir' : 'Concluir'}
+                    </button>
 
-                      <button
-                        type="button"
-                        data-testid="task-details-snooze-tomorrow"
-                        onClick={() => onQuickReschedule(task, 'tomorrowMorning')}
-                        disabled={isBusy}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-                      >
-                        <CalendarDays size={16} />
-                        Amanhã cedo
-                      </button>
+                    <button
+                      type="button"
+                      data-testid="task-details-share"
+                      onClick={() => onShare(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      <Share2 size={16} />
+                      Compartilhar
+                    </button>
 
-                      <button
-                        type="button"
-                        data-testid="task-details-snooze-next-week"
-                        onClick={() => onQuickReschedule(task, 'nextWeek')}
-                        disabled={isBusy}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-                      >
-                        <CalendarClock size={16} />
-                        Próxima semana
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      data-testid="task-details-duplicate"
+                      onClick={() => onDuplicate(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      <CopyPlus size={16} />
+                      Duplicar
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="task-details-delete"
+                      onClick={() => onDelete(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 text-sm font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
+                    >
+                      <Trash2 size={16} />
+                      Excluir
+                    </button>
                   </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isBusy}
-                  aria-label="Fechar visualização do lembrete"
-                  className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/86 text-slate-500 shadow-[0_16px_36px_-28px_rgba(15,23,42,0.55)] transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08] xl:static"
-                >
-                  <X size={20} />
-                </button>
+                </div>
               </div>
             </div>
 
@@ -302,63 +361,48 @@ export function TaskDetailsDialog({
                         <div>
                           <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Histórico rápido</h4>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Um resumo objetivo para situar este lembrete.
+                            Alterações feitas pelo usuário neste lembrete.
                           </p>
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-3">
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-                          <span className="icon-slot mt-0.5 h-8 w-8 rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
-                            <Sparkles size={14} />
-                          </span>
-                          <div>
-                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                              Registro criado
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                              {formatCreatedAt(task)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-                          <span className="icon-slot mt-0.5 h-8 w-8 rounded-xl bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
-                            <CalendarDays size={14} />
-                          </span>
-                          <div>
-                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                              Prazo definido
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                              {formatDueDate(task)}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              {timeDescription}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-                          <span
-                            className={[
-                              'icon-slot mt-0.5 h-8 w-8 rounded-xl',
-                              isCompleted
-                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                                : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-                            ].join(' ')}
+                      <div data-testid="task-history-list" className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
+                        {historyItems.map((event) => (
+                          <div
+                            key={event.id}
+                            data-testid="task-history-entry"
+                            className="flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]"
                           >
-                            {isCompleted ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                          </span>
-                          <div>
-                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                              Situação atual
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                              {isCompleted ? 'Concluído e arquivado na sua história' : 'Pendente e pronto para receber uma ação'}
-                            </p>
+                            <span className={`icon-slot mt-0.5 h-8 w-8 rounded-xl ${getHistoryTone(event)}`}>
+                              {getHistoryIcon(event)}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                                  {event.title}
+                                </p>
+                                <time className="text-xs font-semibold text-slate-400 dark:text-slate-500">
+                                  {formatHistoryDate(event.createdAt)}
+                                </time>
+                              </div>
+                              <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
+                                {event.description}
+                              </p>
+                              {(event.details?.length ?? 0) > 0 && (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {event.details?.map((detail) => (
+                                    <span
+                                      key={detail}
+                                      className="rounded-full border border-slate-200 bg-white/70 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
+                                    >
+                                      {detail}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -442,67 +486,64 @@ export function TaskDetailsDialog({
                     </div>
                   </section>
 
-                  <section className="surface-soft p-5">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Ações</h3>
-                    <div className="mt-4 grid gap-3">
-                      <button
-                        type="button"
-                        data-testid="task-details-edit"
-                        onClick={() => onEdit(task)}
-                        disabled={isBusy}
-                        className="action-primary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        <PencilLine size={18} />
-                        Editar lembrete
-                      </button>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          data-testid="task-details-duplicate"
-                          onClick={() => onDuplicate(task)}
-                          disabled={isBusy}
-                          className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <CopyPlus size={18} />
-                          Duplicar
-                        </button>
-
-                        <button
-                          type="button"
-                          data-testid="task-details-share"
-                          onClick={() => onShare(task)}
-                          disabled={isBusy}
-                          className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <Share2 size={18} />
-                          Compartilhar
-                        </button>
+                  {!isCompleted && (
+                    <section className="surface-soft p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Reagendar</h3>
+                          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                            Atalhos para mover o prazo sem abrir a edição.
+                          </p>
+                        </div>
+                        {isRescheduling && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                            <Sparkles size={12} />
+                            Salvando
+                          </span>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        data-testid="task-details-toggle"
-                        onClick={() => onToggle(task)}
-                        disabled={isBusy}
-                        className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {isCompleted ? <Circle size={18} /> : <CheckCircle2 size={18} />}
-                        {isCompleted ? 'Reabrir lembrete' : 'Marcar como concluído'}
-                      </button>
+                      <div className="mt-4 grid gap-3">
+                        <button
+                          type="button"
+                          data-testid="task-details-snooze-later"
+                          onClick={() => onQuickReschedule(task, 'laterToday')}
+                          disabled={isBusy}
+                          className="action-secondary w-full justify-between disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Clock3 size={18} />
+                            Mais tarde hoje
+                          </span>
+                          <span className="text-xs text-slate-400 dark:text-slate-500">+2 horas</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        data-testid="task-details-delete"
-                        onClick={() => onDelete(task)}
-                        disabled={isBusy}
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
-                      >
-                        <Trash2 size={18} />
-                        Excluir lembrete
-                      </button>
-                    </div>
-                  </section>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            data-testid="task-details-snooze-tomorrow"
+                            onClick={() => onQuickReschedule(task, 'tomorrowMorning')}
+                            disabled={isBusy}
+                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <CalendarDays size={18} />
+                            Amanhã cedo
+                          </button>
+
+                          <button
+                            type="button"
+                            data-testid="task-details-snooze-next-week"
+                            onClick={() => onQuickReschedule(task, 'nextWeek')}
+                            disabled={isBusy}
+                            className="action-secondary w-full disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <CalendarClock size={18} />
+                            Próxima semana
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  )}
                 </aside>
               </div>
             </div>

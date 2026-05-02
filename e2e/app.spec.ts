@@ -511,8 +511,10 @@ test.describe('Lembreto critical flows', () => {
       tomorrow.setDate(tomorrow.getDate() + 1);
 
       expect(formatDateLocal(new Date(String(updatedTask.dueDate)))).toBe(formatDateLocal(tomorrow));
+      expect(String(JSON.stringify(updatedTask.history ?? []))).toContain('Prazo reagendado');
       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
       await expect(page.getByTestId('task-details-dialog')).toContainText('Revisar contrato importante');
+      await expect(page.getByTestId('task-history-list')).toContainText('Prazo reagendado');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }
@@ -540,6 +542,7 @@ test.describe('Lembreto critical flows', () => {
       const taskDetailsDialog = page.getByTestId('task-details-dialog');
       await expect(taskDetailsDialog).toBeVisible();
       await expect(taskDetailsDialog.getByRole('heading', { name: initialTaskTitle })).toBeVisible();
+      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Lembrete criado');
       await page.getByTestId('task-details-duplicate').click();
       await expect(page.getByTestId('task-title-input')).toHaveValue(new RegExp(`${initialTaskTitle} \\(c.pia\\)$`, 'i'));
       await page.getByRole('button', { name: /Fechar formul/i }).click();
@@ -556,6 +559,9 @@ test.describe('Lembreto critical flows', () => {
 
       await updatedTask.click();
       await expect(taskDetailsDialog).toBeVisible();
+      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Lembrete atualizado');
+      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Titulo atualizado.');
+      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Categoria alterada.');
       await page.getByTestId('task-details-toggle').click();
       await expect(taskDetailsDialog).toHaveCount(0);
       await expect(updatedTask).toHaveAttribute('data-task-status', 'completed');
