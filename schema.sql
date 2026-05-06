@@ -115,7 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_token_blacklist_user_expires
 CREATE TABLE IF NOT EXISTS auth_rate_limit (
   id           BIGSERIAL   PRIMARY KEY,
   ip           TEXT        NOT NULL,
-  route        TEXT        NOT NULL CHECK (route IN ('login', 'register')),
+  route        TEXT        NOT NULL CHECK (route IN ('login', 'register', 'recover')),
   attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

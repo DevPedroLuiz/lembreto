@@ -58,8 +58,12 @@ export function useAuth() {
     }
   };
 
-  const login = async (email: string, password: string) => {
-    const data = await apiPost<{ user: User; token: string }>('/api/auth/login', { email, password });
+  const login = async (email: string, password: string, recaptchaToken?: string) => {
+    const data = await apiPost<{ user: User; token: string }>('/api/auth/login', {
+      email,
+      password,
+      ...(recaptchaToken ? { recaptchaToken } : {}),
+    });
     setToken(data.token);
     setCurrentUser(data.user);
     LS.saveUser(data.user);
@@ -67,11 +71,12 @@ export function useAuth() {
     return data.user;
   };
 
-  const register = async (name: string, email: string, password: string) => {
+  const register = async (name: string, email: string, password: string, recaptchaToken?: string) => {
     const data = await apiPost<{ user: User; token: string }>('/api/auth/register', {
       name: name.trim(),
       email,
       password,
+      ...(recaptchaToken ? { recaptchaToken } : {}),
     });
     setToken(data.token);
     setCurrentUser(data.user);
@@ -108,8 +113,11 @@ export function useAuth() {
     await Promise.allSettled(requests);
   };
 
-  const recoverPassword = async (email: string) => {
-    return apiPost<{ message: string }>('/api/auth/recover', { email });
+  const recoverPassword = async (email: string, recaptchaToken?: string) => {
+    return apiPost<{ message: string }>('/api/auth/recover', {
+      email,
+      ...(recaptchaToken ? { recaptchaToken } : {}),
+    });
   };
 
   const loginWithGoogle = () => {

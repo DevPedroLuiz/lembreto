@@ -10,6 +10,7 @@ import {
 const nameSchema = z.string().trim().min(1, 'Nome obrigatorio').max(80, 'Nome muito longo');
 const emailSchema = z.string().trim().email('Email invalido').max(254, 'Email muito longo');
 const passwordSchema = z.string().min(6, 'A senha deve ter no minimo 6 caracteres').max(72, 'Senha muito longa');
+const recaptchaTokenSchema = z.string().trim().min(1, 'Confirme que voce nao e um robo').max(4096, 'Verificacao invalida').optional();
 const titleSchema = z.string().trim().min(1, 'Titulo obrigatorio').max(140, 'Titulo muito longo');
 const descriptionSchema = z.string().max(4000, 'Descricao muito longa');
 const categorySchema = z.string().trim().min(1, 'Categoria obrigatoria').max(40, 'Categoria muito longa');
@@ -50,15 +51,18 @@ export const registerSchema = z.object({
   name: nameSchema,
   email: emailSchema,
   password: passwordSchema,
+  recaptchaToken: recaptchaTokenSchema,
 }).strict();
 
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Senha obrigatoria'),
+  recaptchaToken: recaptchaTokenSchema,
 }).strict();
 
 export const recoverPasswordSchema = z.object({
   email: emailSchema,
+  recaptchaToken: recaptchaTokenSchema,
 }).strict();
 
 export const resetPasswordSchema = z.object({

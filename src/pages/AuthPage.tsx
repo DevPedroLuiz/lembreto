@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Lock, Mail, ShieldCheck, Target, User as UserIcon } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
 import { LS } from '../lib/storage';
+import { RecaptchaCheckbox } from '../components/RecaptchaCheckbox';
 
 interface AuthPageProps {
   auth: ReturnType<typeof useAuth>;
@@ -54,6 +55,8 @@ function getPasswordStrength(password: string): {
 }
 
 export function AuthPage({ auth, toastNotify }: AuthPageProps) {
+  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
+  const recaptchaEnabled = Boolean(recaptchaSiteKey);
   const [isLogin, setIsLogin] = useState(true);
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoverSuccess, setRecoverSuccess] = useState(false);
@@ -65,6 +68,8 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const [recoverEmail, setRecoverEmail] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState('');
+  const [recaptchaResetKey, setRecaptchaResetKey] = useState(0);
 
   const passwordStrength = useMemo(
     () => getPasswordStrength(authPassword),
@@ -109,20 +114,35 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
     }
   }, [authEmail, isLogin, rememberEmail]);
 
+  const resetRecaptcha = useCallback(() => {
+    setRecaptchaToken('');
+    setRecaptchaResetKey((value) => value + 1);
+  }, []);
+
+  const validateRecaptcha = useCallback(() => {
+    if (!recaptchaEnabled || recaptchaToken) return true;
+    setAuthError('Confirme que voce nao e um robo.');
+    return false;
+  }, [recaptchaEnabled, recaptchaToken]);
+
   const handleAuth = async (event: React.FormEvent) => {
     event.preventDefault();
     setAuthError('');
+
+    if (!validateRecaptcha()) return;
+
     setAuthLoading(true);
 
     try {
       const normalizedEmail = authEmail.trim();
       const user = isLogin
-        ? await auth.login(normalizedEmail, authPassword)
-        : await auth.register(authName, normalizedEmail, authPassword);
+        ? await auth.login(normalizedEmail, authPassword, recaptchaToken)
+        : await auth.register(authName, normalizedEmail, authPassword, recaptchaToken);
 
       toastNotify('Bem-vindo!', `Olá, ${user.name}!`);
     } catch (error: unknown) {
       setAuthError(error instanceof Error ? error.message : 'Falha na comunicação com o servidor.');
+      resetRecaptcha();
     } finally {
       setAuthLoading(false);
     }
@@ -131,13 +151,17 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const handleRecover = async (event: React.FormEvent) => {
     event.preventDefault();
     setAuthError('');
+
+    if (!validateRecaptcha()) return;
+
     setAuthLoading(true);
 
     try {
-      await auth.recoverPassword(recoverEmail.trim());
+      await auth.recoverPassword(recoverEmail.trim(), recaptchaToken);
       setRecoverSuccess(true);
     } catch (error: unknown) {
       setAuthError(error instanceof Error ? error.message : 'Erro ao recuperar a senha.');
+      resetRecaptcha();
     } finally {
       setAuthLoading(false);
     }
@@ -247,6 +271,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       setRecoverSuccess(false);
                       setRecoverEmail(LS.loadRememberedEmail() || authEmail);
                       setAuthError('');
+                      resetRecaptcha();
                     }}
                     className="action-primary w-full"
                   >
@@ -269,6 +294,12 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                         className="field-control field-control-with-icon"
                       />
                     </div>
+
+                    <RecaptchaCheckbox
+                      siteKey={recaptchaSiteKey}
+                      resetKey={recaptchaResetKey}
+                      onChange={setRecaptchaToken}
+                    />
 
                     {authError && (
                       <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
@@ -293,6 +324,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       onClick={() => {
                         setIsRecovering(false);
                         setAuthError('');
+                        resetRecaptcha();
                       }}
                       className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                     >
@@ -310,6 +342,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       onClick={() => {
                         setIsLogin(true);
                         setAuthError('');
+                        resetRecaptcha();
                       }}
                       className={[
                         'rounded-2xl px-4 py-3 text-sm font-semibold transition-colors',
@@ -326,6 +359,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       onClick={() => {
                         setIsLogin(false);
                         setAuthError('');
+                        resetRecaptcha();
                       }}
                       className={[
                         'rounded-2xl px-4 py-3 text-sm font-semibold transition-colors',
@@ -431,6 +465,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                           setIsRecovering(true);
                           setRecoverEmail(authEmail || LS.loadRememberedEmail());
                           setAuthError('');
+                          resetRecaptcha();
                         }}
                         className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-300"
                       >
@@ -438,6 +473,12 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       </button>
                     </div>
                   )}
+
+                  <RecaptchaCheckbox
+                    siteKey={recaptchaSiteKey}
+                    resetKey={recaptchaResetKey}
+                    onChange={setRecaptchaToken}
+                  />
 
                   {authError && (
                     <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
@@ -491,6 +532,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     onClick={() => {
                       setIsLogin((value) => !value);
                       setAuthError('');
+                      resetRecaptcha();
                     }}
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                   >

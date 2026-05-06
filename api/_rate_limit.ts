@@ -13,7 +13,7 @@ function getErrorMessage(error: unknown): string {
  */
 export async function checkRateLimit(
   ip: string,
-  route: 'login' | 'register',
+  route: 'login' | 'register' | 'recover',
 ): Promise<{ allowed: boolean; retryAfterSeconds?: number }> {
   const windowStart = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString();
 
@@ -56,7 +56,7 @@ export async function checkRateLimit(
 /**
  * Remove as tentativas de um IP após login bem-sucedido.
  */
-export async function clearRateLimit(ip: string, route: 'login' | 'register'): Promise<void> {
+export async function clearRateLimit(ip: string, route: 'login' | 'register' | 'recover'): Promise<void> {
   try {
     await sql`
       DELETE FROM auth_rate_limit

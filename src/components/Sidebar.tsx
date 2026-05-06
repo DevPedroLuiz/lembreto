@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  CalendarDays,
   ChevronRight,
   LayoutDashboard,
   ListTodo,
@@ -15,8 +16,8 @@ import type { Task, User } from '../types';
 
 interface SidebarProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'tasks' | 'notes' | 'notifications';
-  setActiveTab: (tab: 'dashboard' | 'tasks' | 'notes' | 'notifications') => void;
+  activeTab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
+  setActiveTab: (tab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications') => void;
   categories: string[];
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
@@ -88,6 +89,13 @@ export function Sidebar({
             icon={<LayoutDashboard size={20} />}
             label="Painel"
             testId="sidebar-dashboard"
+          />
+          <SidebarItem
+            active={activeTab === 'calendar'}
+            onClick={() => setActiveTab('calendar')}
+            icon={<CalendarDays size={20} />}
+            label="Calendário"
+            testId="sidebar-calendar"
           />
           <SidebarItem
             active={activeTab === 'tasks'}

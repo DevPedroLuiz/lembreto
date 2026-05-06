@@ -7,6 +7,7 @@
 } from 'react';
 import {
   BellRing,
+  CalendarDays,
   ListTodo,
   NotebookPen,
   Plus,
@@ -67,6 +68,7 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { ResetPage } from './pages/ResetPage';
 import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
+import { CalendarPage } from './pages/CalendarPage';
 
 type AppConfigPatch = Partial<{
   darkMode: boolean;
@@ -77,7 +79,7 @@ type AppConfigPatch = Partial<{
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
-type ViewTab = 'dashboard' | 'tasks' | 'notes' | 'notifications';
+type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -523,9 +525,10 @@ export default function App() {
   useEffect(() => {
     const tabOrder: Record<ViewTab, number> = {
       dashboard: 0,
-      tasks: 1,
-      notes: 2,
-      notifications: 3,
+      calendar: 1,
+      tasks: 2,
+      notes: 3,
+      notifications: 4,
     };
 
     const previousTab = previousTabRef.current;
@@ -1828,6 +1831,11 @@ export default function App() {
     setActiveTab('dashboard');
   }, [closeFloatingSurfacesForNavigation]);
 
+  const openCalendarTab = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
+    setActiveTab('calendar');
+  }, [closeFloatingSurfacesForNavigation]);
+
   const openNotificationsCenter = useCallback(() => {
     closeFloatingSurfacesForNavigation();
     setActiveTab('notifications');
@@ -2152,6 +2160,8 @@ export default function App() {
   const greetingName = auth.currentUser.name.split(' ')[0];
   const pageTitle = activeTab === 'dashboard'
     ? `Olá, ${greetingName}`
+    : activeTab === 'calendar'
+      ? 'Seu calendário'
     : activeTab === 'tasks'
       ? 'Sua agenda'
       : activeTab === 'notes'
@@ -2159,6 +2169,8 @@ export default function App() {
       : 'Notificações';
   const pageDescription = activeTab === 'dashboard'
     ? ''
+    : activeTab === 'calendar'
+      ? 'Visualize seus lembretes por dia, semana e mês em uma grade de calendário.'
     : activeTab === 'tasks'
       ? 'Organize lembretes, refine prioridades e avance com tranquilidade.'
       : activeTab === 'notes'
@@ -2266,9 +2278,13 @@ export default function App() {
                   <span className="section-eyebrow">
                     {activeTab === 'dashboard'
                       ? 'Painel principal'
+                      : activeTab === 'calendar'
+                        ? 'Calendário'
                       : activeTab === 'notes'
                         ? 'Caderno pessoal'
-                        : 'Gestão de lembretes'}
+                        : activeTab === 'notifications'
+                          ? 'Central de notificações'
+                          : 'Gestão de lembretes'}
                   </span>
                   <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
                     {pageTitle}
@@ -2351,6 +2367,19 @@ export default function App() {
                   togglingTaskIds={togglingTaskIds}
                 />
               )}
+              {activeTab === 'calendar' && (
+                <CalendarPage
+                  tasks={tasks}
+                  categories={categoryOptions}
+                  tags={tagOptions}
+                  onNewTask={openNewTask}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onEdit={openTaskDetails}
+                  deletingTaskIds={deletingTaskIds}
+                  togglingTaskIds={togglingTaskIds}
+                />
+              )}
               {activeTab === 'tasks' && (
                 <TasksPage
                   pendingTasks={pendingTasks}
@@ -2405,7 +2434,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 lg:hidden">
-        <div className="grid grid-cols-[1fr_1fr_auto_1fr] items-center gap-1 p-2">
+        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -2417,14 +2446,14 @@ export default function App() {
               <Sparkles size={24} />
             </button>
           <button
-            onClick={openNotesTab}
-            aria-label="Abrir notas"
+            onClick={openCalendarTab}
+            aria-label="Abrir calendário"
             className={cn(
               'flex flex-col items-center rounded-2xl p-3 transition-colors',
-              activeTab === 'notes' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
+              activeTab === 'calendar' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
             )}
           >
-            <NotebookPen size={24} />
+            <CalendarDays size={24} />
           </button>
           <div className="relative -top-6">
             <button
@@ -2449,6 +2478,16 @@ export default function App() {
                 {Math.min(pendingSummary.overdueCount, 99)}
               </span>
             )}
+          </button>
+          <button
+            onClick={openNotesTab}
+            aria-label="Abrir notas"
+            className={cn(
+              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              activeTab === 'notes' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
+            )}
+          >
+            <NotebookPen size={24} />
           </button>
         </div>
       </nav>

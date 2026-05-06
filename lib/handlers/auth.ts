@@ -25,6 +25,7 @@ import {
   getGoogleOAuthStateFromCookieHeader,
   getSessionTokenFromCookieHeader,
 } from '../session.js';
+import { shouldEnforceRecaptcha, verifyRecaptchaToken } from '../recaptcha.js';
 import {
   formatZodError,
   loginSchema,
@@ -47,6 +48,7 @@ import {
 const GENERIC_RECOVER_RESPONSE = {
   message: 'Se este e-mail estiver cadastrado, voce recebera um link em breve.',
 };
+const RECAPTCHA_ERROR = 'Confirme que voce nao e um robo.';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
@@ -376,9 +378,14 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
     return json(400, { error: formatZodError(parsed.error) });
   }
 
-  const { name, email, password } = parsed.data;
+  const { name, email, password, recaptchaToken } = parsed.data;
 
   try {
+    if (shouldEnforceRecaptcha()) {
+      const recaptchaOk = await verifyRecaptchaToken(recaptchaToken, request);
+      if (!recaptchaOk) return json(400, { error: RECAPTCHA_ERROR });
+    }
+
     await ensureUserProfileSchema(sql);
 
     const existing = await sql`
@@ -438,9 +445,14 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
     return json(400, { error: formatZodError(parsed.error) });
   }
 
-  const { email, password } = parsed.data;
+  const { email, password, recaptchaToken } = parsed.data;
 
   try {
+    if (shouldEnforceRecaptcha()) {
+      const recaptchaOk = await verifyRecaptchaToken(recaptchaToken, request);
+      if (!recaptchaOk) return json(400, { error: RECAPTCHA_ERROR });
+    }
+
     await ensureUserProfileSchema(sql);
 
     const rows = await sql`
@@ -584,7 +596,26 @@ export async function handleAuthRecover(context: HandlerContext): Promise<Handle
     return json(400, { error: formatZodError(parsed.error) });
   }
 
-  const { email } = parsed.data;
+  const { email, recaptchaToken } = parsed.data;
+  const ip = getRequestIp(request);
+
+  const rateLimit = await checkRateLimit(ip, 'recover');
+  if (!rateLimit.allowed) {
+    const minutes = Math.ceil((rateLimit.retryAfterSeconds ?? 60) / 60);
+    logWarn('auth_recover_rate_limited', getRequestMeta(request, {
+      ip,
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    }));
+    return json(429, {
+      error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  if (shouldEnforceRecaptcha()) {
+    const recaptchaOk = await verifyRecaptchaToken(recaptchaToken, request);
+    if (!recaptchaOk) return json(400, { error: RECAPTCHA_ERROR });
+  }
 
   try {
     const rows = await sql`
@@ -617,8 +648,9 @@ export async function handleAuthRecover(context: HandlerContext): Promise<Handle
         logError('auth_recover_email_failed', error, getRequestMeta(request, { userId: user.id }));
       }
     }
+
   } catch (error) {
-    logError('auth_recover_failed', error, getRequestMeta(request, { email }));
+    logError('auth_recover_failed', error, getRequestMeta(request, { ip, email }));
   }
 
   return json(200, GENERIC_RECOVER_RESPONSE);

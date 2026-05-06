@@ -31,6 +31,8 @@ RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
 GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=seu_client_secret_do_google
+VITE_RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
+RECAPTCHA_SECRET_KEY=sua_chave_secreta_recaptcha_v2
 CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 ```
 
@@ -41,6 +43,7 @@ Notas:
 - `APP_URL` deve apontar para a URL publica do app em producao.
 - `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botao "Entrar com Google".
 - No Google Cloud Console, configure o redirect URI autorizado como `{APP_URL}/api/auth/google/callback`.
+- `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperacao de senha.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
 ## Setup local
@@ -57,6 +60,7 @@ npm install
 - `migrate_jwt.sql`
 - `migrate_recovery.sql`
 - `migrate_google_oauth.sql`
+- `migrate_auth_rate_limit_recover.sql`
 - `migrate_passwords.sql` quando fizer a migracao de senhas legadas
 
 3. Inicie o servidor local:
