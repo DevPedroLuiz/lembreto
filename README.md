@@ -1,6 +1,6 @@
 # Lembreto
 
-Sistema de gerenciamento de tarefas com dashboard, autenticacao, recuperacao de senha e API serverless.
+Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação de senha e API serverless.
 
 ## Stack
 
@@ -8,15 +8,15 @@ Sistema de gerenciamento de tarefas com dashboard, autenticacao, recuperacao de 
 - Estilo: Tailwind CSS v4 + Motion
 - API: Vercel Functions + servidor Express para desenvolvimento local
 - Banco: Neon Postgres
-- Autenticacao: JWT + cookie HttpOnly para restauracao de sessao
+- Autenticação: JWT + cookie HttpOnly para restauração de sessão
 
 ## Funcionalidades
 
 - Dashboard com metricas do dia
 - CRUD completo de tarefas
 - Perfil com avatar
-- Login, cadastro, logout e restauracao de sessao
-- Recuperacao e redefinicao de senha
+- Login, cadastro, logout e restauração de sessão
+- Recuperação e redefinição de senha
 - Rate limit em login e cadastro
 - Blacklist de token no logout
 
@@ -38,17 +38,17 @@ CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 
 Notas:
 
-- `JWT_SECRET` e obrigatoria em desenvolvimento e producao.
-- `RESEND_API_KEY` e necessaria para envio real do email de recuperacao.
-- `APP_URL` deve apontar para a URL publica do app em producao.
-- `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botao "Entrar com Google".
+- `JWT_SECRET` é obrigatória em desenvolvimento e produção.
+- `RESEND_API_KEY` é necessária para envio real do e-mail de recuperação.
+- `APP_URL` deve apontar para a URL pública do app em produção.
+- `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botão "Entrar com Google".
 - No Google Cloud Console, configure o redirect URI autorizado como `{APP_URL}/api/auth/google/callback`.
-- `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperacao de senha.
+- `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
 ## Setup local
 
-1. Instale dependencias:
+1. Instale dependências:
 
 ```bash
 npm install
@@ -61,7 +61,7 @@ npm install
 - `migrate_recovery.sql`
 - `migrate_google_oauth.sql`
 - `migrate_auth_rate_limit_recover.sql`
-- `migrate_passwords.sql` quando fizer a migracao de senhas legadas
+- `migrate_passwords.sql` quando fizer a migração de senhas legadas
 
 3. Inicie o servidor local:
 
@@ -69,7 +69,7 @@ npm install
 npm run dev
 ```
 
-Por padrao o servidor local atual sobe em `http://localhost:3001`.
+Por padrão, o servidor local atual sobe em `http://localhost:3001`.
 
 ## Scripts
 
@@ -84,13 +84,13 @@ npm run cleanup:db
 
 ## Testes
 
-A suite cobre os pontos mais sensiveis da base:
+A suíte cobre os pontos mais sensíveis da base:
 
-- helpers de autenticacao
-- cookies e protecao de origem
-- validacao de avatar
+- helpers de autenticação
+- cookies e proteção de origem
+- validação de avatar
 - schemas de auth e tarefas
-- fluxos E2E de cadastro, tarefas, perfil, reset de senha e sessao expirada
+- fluxos E2E de cadastro, tarefas, perfil, reset de senha e sessão expirada
 
 Rode com:
 
@@ -116,28 +116,28 @@ Para o workflow funcionar no GitHub Actions, configure estes secrets no reposit�
 ## Deploy
 
 O deploy protegido fica em [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
-Ele publica em producao apenas quando o workflow `CI` termina com sucesso na branch `main`, ou manualmente via `workflow_dispatch`.
+Ele publica em produção apenas quando o workflow `CI` termina com sucesso na branch `main`, ou manualmente via `workflow_dispatch`.
 
-Secrets necessarios para deploy na Vercel:
+Secrets necessários para deploy na Vercel:
 
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-Se quiser uma camada extra de seguranca, configure o ambiente `production` no GitHub com aprovacao obrigatoria antes do deploy.
+Se quiser uma camada extra de segurança, configure o ambiente `production` no GitHub com aprovação obrigatória antes do deploy.
 
 ## Scheduler externo para lembretes
 
 O projeto inclui um scheduler externo em [`.github/workflows/reminder-scheduler.yml`](.github/workflows/reminder-scheduler.yml).
 Ele chama `GET /api/cron/notifications` a cada 15 minutos para:
 
-- avisar minutos antes do horario definido no lembrete;
+- avisar minutos antes do horário definido no lembrete;
 - repetir alertas de lembretes atrasados em intervalos regulares;
-- persistir esses avisos na central de notificacoes.
+- persistir esses avisos na central de notificações.
 
-Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento fica no GitHub Actions, nao no cron nativo da Vercel.
+Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento fica no GitHub Actions, não no cron nativo da Vercel.
 
-### Secrets necessarios
+### Secrets necessários
 
 No GitHub Actions, configure:
 
@@ -153,8 +153,8 @@ Exemplo:
 
 ### Como funciona
 
-O workflow roda nos minutos `7, 22, 37 e 52` de cada hora para evitar concentracao no topo da hora.
-Cada execucao faz uma chamada autenticada para:
+O workflow roda nos minutos `7, 22, 37 e 52` de cada hora para evitar concentração no topo da hora.
+Cada execução faz uma chamada autenticada para:
 
 ```text
 GET {APP_URL}/api/cron/notifications
@@ -163,7 +163,7 @@ Authorization: Bearer {CRON_SECRET}
 
 Se quiser testar manualmente, abra a aba `Actions` no GitHub e rode `Reminder Scheduler` com `workflow_dispatch`.
 
-## Operacao
+## Operação
 
 ### Limpeza periodica do banco
 
@@ -179,22 +179,22 @@ Use:
 npm run cleanup:db
 ```
 
-Em producao, o ideal e agendar esse script com cron. No plano Hobby da Vercel, o cron precisa rodar no maximo uma vez por dia.
+Em produção, o ideal é agendar esse script com cron. No plano Hobby da Vercel, o cron precisa rodar no máximo uma vez por dia.
 
 ### Seguranca aplicada
 
-- validacao de payload com schemas compartilhados
+- validação de payload com schemas compartilhados
 - limite de tamanho e formato para avatar
-- checagem de origem em rotas de sessao baseadas em cookie
-- invalidacao de token no logout
-- rotacao de token ao trocar email ou senha
-- eventos de sessao expirada no cliente
+- checagem de origem em rotas de sessão baseadas em cookie
+- invalidação de token no logout
+- rotação de token ao trocar e-mail ou senha
+- eventos de sessão expirada no cliente
 
 ## Estrutura
 
 ```text
-api/                 Funcoes serverless
-lib/                 Helpers compartilhados de auth, schemas e seguranca
+api/                 Funções serverless
+lib/                 Helpers compartilhados de auth, schemas e segurança
 scripts/             Scripts operacionais
 e2e/                 Testes end-to-end com Playwright
 src/                 Frontend React

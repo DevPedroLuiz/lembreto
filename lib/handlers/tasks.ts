@@ -148,14 +148,14 @@ function buildUpdateHistoryEntry(
   const changedDetails: string[] = [];
   const currentTags = normalizeStringArray(current.tags);
 
-  if (String(current.title ?? '') !== String(next.title ?? '')) changedDetails.push('Titulo atualizado.');
-  if (String(current.description ?? '') !== String(next.description ?? '')) changedDetails.push('Descricao atualizada.');
+  if (String(current.title ?? '') !== String(next.title ?? '')) changedDetails.push('Título atualizado.');
+  if (String(current.description ?? '') !== String(next.description ?? '')) changedDetails.push('Descrição atualizada.');
   if (normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate)) changedDetails.push('Prazo alterado.');
   if (String(current.priority ?? '') !== String(next.priority ?? '')) changedDetails.push('Prioridade alterada.');
   if (String(current.category ?? '') !== String(next.category ?? '')) changedDetails.push('Categoria alterada.');
   if (!areStringArraysEqual(currentTags, next.tags)) changedDetails.push('Tags atualizadas.');
   if (Boolean(current.suppress_holiday_notifications) !== Boolean(next.suppressHolidayNotifications)) {
-    changedDetails.push('Preferencia de notificacoes em feriados alterada.');
+    changedDetails.push('Preferência de notificações em feriados alterada.');
   }
   if (String(current.status ?? '') !== String(next.status ?? '')) changedDetails.push('Status alterado.');
 
@@ -168,17 +168,17 @@ function buildUpdateHistoryEntry(
 
   if (onlyStatusChanged && currentStatus !== nextStatus) {
     if (nextStatus === 'completed') {
-      return createHistoryEntry('completed', 'Lembrete concluido', 'O usuario marcou este lembrete como concluido.');
+      return createHistoryEntry('completed', 'Lembrete concluído', 'O usuário marcou este lembrete como concluído.');
     }
 
-    return createHistoryEntry('reopened', 'Lembrete reaberto', 'O usuario devolveu este lembrete para pendente.');
+    return createHistoryEntry('reopened', 'Lembrete reaberto', 'O usuário devolveu este lembrete para pendente.');
   }
 
   if (dueDateChanged) {
     return createHistoryEntry('rescheduled', 'Prazo reagendado', 'O prazo do lembrete foi atualizado.', changedDetails);
   }
 
-  return createHistoryEntry('updated', 'Lembrete atualizado', 'As informacoes do lembrete foram alteradas.', changedDetails);
+  return createHistoryEntry('updated', 'Lembrete atualizado', 'As informações do lembrete foram alteradas.', changedDetails);
 }
 
 function resolveCalendarYear(context: HandlerContext) {
@@ -327,7 +327,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
   await ensureTaskTaxonomySchema(sql);
 
   if (!id) {
-    return json(400, { error: 'Tarefa nao encontrada' });
+    return json(400, { error: 'Tarefa não encontrada' });
   }
 
   if (request.method === 'PUT') {
@@ -362,7 +362,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
       `;
       if (current.length === 0) {
-        return json(404, { error: 'Tarefa nao encontrada' });
+        return json(404, { error: 'Tarefa não encontrada' });
       }
 
       const cur = current[0] as Record<string, unknown>;
@@ -495,7 +495,7 @@ export async function handleTaskHolidayLocationDetect(context: HandlerContext): 
   } catch (error) {
     const message = error instanceof Error
       ? error.message
-      : 'Nao foi possivel identificar sua localizacao agora.';
+      : 'Não foi possível identificar sua localização agora.';
     logError('task_holiday_location_detect_failed', error, getRequestMeta(request, { userId: auth.user.id }));
     return json(500, { error: message });
   }
@@ -510,7 +510,7 @@ export async function handleTaskCategoriesCollection(context: HandlerContext): P
   if (request.method === 'DELETE') {
     const name = resolveNameValue(context).trim();
     if (!name) {
-      return json(400, { error: 'Categoria invalida' });
+      return json(400, { error: 'Categoria inválida' });
     }
 
     try {
@@ -519,7 +519,7 @@ export async function handleTaskCategoriesCollection(context: HandlerContext): P
       return json(200, { category: deleted });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao excluir categoria';
-      const status = message.includes('padrao') ? 400 : 500;
+      const status = message.includes('padrão') ? 400 : 500;
       if (status === 500) {
         logError('task_category_delete_failed', error, getRequestMeta(request, { userId: user.id, category: name }));
       }
@@ -553,7 +553,7 @@ export async function handleTaskTagsCollection(context: HandlerContext): Promise
   if (request.method === 'DELETE') {
     const name = resolveNameValue(context).trim();
     if (!name) {
-      return json(400, { error: 'Tag invalida' });
+      return json(400, { error: 'Tag inválida' });
     }
 
     try {

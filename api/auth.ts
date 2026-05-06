@@ -47,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       default:
         return {
           status: 404,
-          body: { error: 'Rota de autenticacao nao encontrada' },
+          body: { error: 'Rota de autenticação não encontrada' },
         };
     }
   })();

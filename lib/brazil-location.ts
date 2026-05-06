@@ -13,7 +13,7 @@ export const BRAZIL_STATES: BrazilStateOption[] = [
   { code: 'DF', name: 'Distrito Federal' },
   { code: 'ES', name: 'Espirito Santo' },
   { code: 'GO', name: 'Goias' },
-  { code: 'MA', name: 'Maranhao' },
+  { code: 'MA', name: 'Maranhão' },
   { code: 'MT', name: 'Mato Grosso' },
   { code: 'MS', name: 'Mato Grosso do Sul' },
   { code: 'MG', name: 'Minas Gerais' },
@@ -28,7 +28,7 @@ export const BRAZIL_STATES: BrazilStateOption[] = [
   { code: 'RO', name: 'Rondonia' },
   { code: 'RR', name: 'Roraima' },
   { code: 'SC', name: 'Santa Catarina' },
-  { code: 'SP', name: 'Sao Paulo' },
+  { code: 'SP', name: 'São Paulo' },
   { code: 'SE', name: 'Sergipe' },
   { code: 'TO', name: 'Tocantins' },
 ];

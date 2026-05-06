@@ -1180,7 +1180,7 @@ export default function App() {
 
       if (editingNote) {
         await updateNote(editingNote.id, payload);
-        emitNotification('Nota atualizada', 'As informacoes da nota foram salvas.', 'success', {
+        emitNotification('Nota atualizada', 'As informações da nota foram salvas.', 'success', {
           target: payload.taskId ? { type: 'task', taskId: payload.taskId } : { type: 'notifications' },
         });
       } else {

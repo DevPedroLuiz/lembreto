@@ -31,13 +31,13 @@ export function estimateBase64Bytes(base64: string): number {
 export function validateAvatarDataUrl(value: string): { valid: boolean; error?: string } {
   const parsed = parseAvatarDataUrl(value);
   if (!parsed) {
-    return { valid: false, error: 'Avatar invalido. Use uma imagem em base64.' };
+    return { valid: false, error: 'Avatar inválido. Use uma imagem em base64.' };
   }
 
   if (!isAllowedAvatarMimeType(parsed.mimeType)) {
     return {
       valid: false,
-      error: 'Formato de avatar invalido. Use PNG, JPG, WEBP ou GIF.',
+      error: 'Formato de avatar inválido. Use PNG, JPG, WEBP ou GIF.',
     };
   }
 

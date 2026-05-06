@@ -37,7 +37,7 @@ function loadRecaptchaScript(): Promise<void> {
     const existing = document.getElementById(RECAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('reCAPTCHA indisponivel')), { once: true });
+      existing.addEventListener('error', () => reject(new Error('reCAPTCHA indisponível')), { once: true });
       return;
     }
 
@@ -46,7 +46,7 @@ function loadRecaptchaScript(): Promise<void> {
     script.src = 'https://www.google.com/recaptcha/api.js?onload=__lembretoRecaptchaReady&render=explicit';
     script.async = true;
     script.defer = true;
-    script.onerror = () => reject(new Error('reCAPTCHA indisponivel'));
+    script.onerror = () => reject(new Error('reCAPTCHA indisponível'));
     document.head.appendChild(script);
   });
 }
@@ -131,11 +131,11 @@ export function RecaptchaCheckbox({
         </div>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
-            Verificacao de seguranca
+          Verificação de segurança
           </p>
           <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
             {verified
-              ? 'Confirmado. Voce pode continuar com seguranca.'
+              ? 'Confirmado. Você pode continuar com segurança.'
               : 'Confirme o desafio para proteger sua conta contra acessos automatizados.'}
           </p>
         </div>
@@ -147,12 +147,12 @@ export function RecaptchaCheckbox({
 
       {status === 'loading' && (
         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-          Carregando verificacao de seguranca...
+          Carregando verificação de segurança...
         </p>
       )}
       {status === 'error' && (
         <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
-          Nao foi possivel carregar o reCAPTCHA. Verifique sua conexao e tente novamente.
+          Não foi possível carregar o reCAPTCHA. Verifique sua conexão e tente novamente.
         </p>
       )}
     </div>

@@ -68,7 +68,7 @@ export function NotificationsInboxDrawer({
                 <div>
                   <span className="section-eyebrow">
                     <BellRing size={14} />
-                    Atualizacoes recentes
+                    Atualizações recentes
                   </span>
                   <h2
                     id="notifications-inbox-title"
@@ -84,7 +84,7 @@ export function NotificationsInboxDrawer({
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label="Fechar notificacoes"
+                  aria-label="Fechar notificações"
                   className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
                 >
                   <X size={20} />
@@ -106,8 +106,8 @@ export function NotificationsInboxDrawer({
                 notifications={recentNotifications}
                 onOpenNotification={onOpenNotification}
                 onPreviewNotification={onPreviewNotification}
-                emptyTitle="Sua caixa esta tranquila"
-                emptyDescription="Quando o sistema tiver novos avisos, eles vao aparecer primeiro aqui."
+                emptyTitle="Sua caixa está tranquila"
+                emptyDescription="Quando o sistema tiver novos avisos, eles vão aparecer primeiro aqui."
                 itemTestId="recent-notification-item"
               />
             </div>
@@ -119,7 +119,7 @@ export function NotificationsInboxDrawer({
                 className="action-secondary w-full justify-center sm:ml-auto sm:w-auto"
                 data-testid="notifications-open-center"
               >
-                Ir para a central de notificacoes
+                Ir para a central de notificações
                 <span className="icon-slot h-4 w-4">
                   <ArrowRight size={16} />
                 </span>

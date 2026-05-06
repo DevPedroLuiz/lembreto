@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       default:
         return {
           status: 404,
-          body: { error: 'Cron nao encontrado' },
+          body: { error: 'Cron não encontrado' },
         };
     }
   })();

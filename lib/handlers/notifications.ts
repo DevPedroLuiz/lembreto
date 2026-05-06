@@ -91,7 +91,7 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
       });
     } catch (error) {
       logError('notifications_list_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao buscar notificacoes' });
+      return json(500, { error: 'Erro ao buscar notificações' });
     }
   }
 
@@ -117,11 +117,11 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
         logWarn('notification_create_skipped_missing_reference', getRequestMeta(request, {
           userId: user.id,
         }));
-        return json(409, { error: 'Referencia da notificacao nao esta mais disponivel' });
+        return json(409, { error: 'Referência da notificação não está mais disponível' });
       }
 
       logError('notification_create_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao registrar notificacao' });
+      return json(500, { error: 'Erro ao registrar notificação' });
     }
   }
 
@@ -132,7 +132,7 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
       return json(200, { deletedCount });
     } catch (error) {
       logError('notifications_clear_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao limpar notificacoes' });
+      return json(500, { error: 'Erro ao limpar notificações' });
     }
   }
 
@@ -148,7 +148,7 @@ export async function handleNotificationById(context: HandlerContext): Promise<H
   const id = resolveNotificationId(context);
 
   if (!id) {
-    return json(400, { error: 'Notificacao nao encontrada' });
+    return json(400, { error: 'Notificação não encontrada' });
   }
 
   if (request.method !== 'PUT') return methodNotAllowed();
@@ -161,14 +161,14 @@ export async function handleNotificationById(context: HandlerContext): Promise<H
   try {
     const notification = await markNotificationReadState(sql, user.id, id, parsed.data.read);
     if (!notification) {
-      return json(404, { error: 'Notificacao nao encontrada' });
+      return json(404, { error: 'Notificação não encontrada' });
     }
 
     logInfo('notification_updated', getRequestMeta(request, { userId: user.id, notificationId: id }));
     return json(200, { notification });
   } catch (error) {
     logError('notification_update_failed', error, getRequestMeta(request, { userId: user.id, notificationId: id }));
-    return json(500, { error: 'Erro ao atualizar notificacao' });
+    return json(500, { error: 'Erro ao atualizar notificação' });
   }
 }
 
@@ -187,7 +187,7 @@ export async function handleNotificationMarkAllRead(context: HandlerContext): Pr
     return json(200, { updatedCount });
   } catch (error) {
     logError('notifications_mark_all_read_failed', error, getRequestMeta(request, { userId: user.id }));
-    return json(500, { error: 'Erro ao marcar notificacoes como lidas' });
+    return json(500, { error: 'Erro ao marcar notificações como lidas' });
   }
 }
 
@@ -208,7 +208,7 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
       });
     } catch (error) {
       logError('notification_settings_get_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao carregar preferencia de notificacoes' });
+      return json(500, { error: 'Erro ao carregar preferência de notificações' });
     }
   }
 
@@ -224,7 +224,7 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
       return json(200, { enabled: parsed.data.enabled });
     } catch (error) {
       logError('notification_settings_update_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao salvar preferencia de notificacoes' });
+      return json(500, { error: 'Erro ao salvar preferência de notificações' });
     }
   }
 
@@ -249,7 +249,7 @@ export async function handleNotificationPushSubscriptions(context: HandlerContex
       return json(201, { ok: true });
     } catch (error) {
       logError('push_subscription_upsert_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao registrar dispositivo para notificacoes' });
+      return json(500, { error: 'Erro ao registrar dispositivo para notificações' });
     }
   }
 
@@ -264,7 +264,7 @@ export async function handleNotificationPushSubscriptions(context: HandlerContex
       return empty(204);
     } catch (error) {
       logError('push_subscription_delete_failed', error, getRequestMeta(request, { userId: user.id }));
-      return json(500, { error: 'Erro ao remover dispositivo de notificacoes' });
+      return json(500, { error: 'Erro ao remover dispositivo de notificações' });
     }
   }
 
@@ -277,7 +277,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   if (request.method !== 'GET') return methodNotAllowed();
 
   if (!isAuthorizedCronRequest(context)) {
-    return json(401, { error: 'Nao autorizado' });
+    return json(401, { error: 'Não autorizado' });
   }
 
   try {
@@ -289,6 +289,6 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
     return json(200, { ok: true, ...result });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));
-    return json(500, { error: 'Erro ao gerar notificacoes agendadas' });
+    return json(500, { error: 'Erro ao gerar notificações agendadas' });
   }
 }

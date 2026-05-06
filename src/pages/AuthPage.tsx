@@ -121,7 +121,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
   const validateRecaptcha = useCallback(() => {
     if (!recaptchaEnabled || recaptchaToken) return true;
-    setAuthError('Confirme que voce nao e um robo.');
+    setAuthError('Confirme que você não é um robô.');
     return false;
   }, [recaptchaEnabled, recaptchaToken]);
 

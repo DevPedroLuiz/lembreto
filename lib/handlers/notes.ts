@@ -158,7 +158,7 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
     try {
       const canLinkTask = await assertTaskOwnership(sql, user.id, taskId);
       if (!canLinkTask) {
-        return json(404, { error: 'Lembrete vinculado nao encontrado' });
+        return json(404, { error: 'Lembrete vinculado não encontrado' });
       }
 
       const rows = await sql`
@@ -209,7 +209,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
   await ensureNotesSchema(sql);
 
   if (!id) {
-    return json(400, { error: 'Nota nao encontrada' });
+    return json(400, { error: 'Nota não encontrada' });
   }
 
   if (request.method === 'PUT') {
@@ -233,14 +233,14 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
       `;
 
       if (currentRows.length === 0) {
-        return json(404, { error: 'Nota nao encontrada' });
+        return json(404, { error: 'Nota não encontrada' });
       }
 
       const current = currentRows[0] as Record<string, unknown>;
       const taskId = parsed.data.taskId !== undefined ? parsed.data.taskId : (current.task_id as string | null | undefined) ?? null;
       const canLinkTask = await assertTaskOwnership(sql, user.id, taskId);
       if (!canLinkTask) {
-        return json(404, { error: 'Lembrete vinculado nao encontrado' });
+        return json(404, { error: 'Lembrete vinculado não encontrado' });
       }
 
       const categoryValue = parsed.data.category !== undefined ? parsed.data.category : String(current.category ?? 'Geral');

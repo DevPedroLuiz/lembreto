@@ -118,7 +118,7 @@ export function NotesPage({
                 data-testid="notes-search-input"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar notas por titulo, conteudo, tag ou lembrete vinculado"
+                placeholder="Buscar notas por título, conteúdo, tag ou lembrete vinculado"
                 className="field-control field-control-with-icon"
               />
             </div>
@@ -179,7 +179,7 @@ export function NotesPage({
             <StickyNote size={34} className="mx-auto mb-4 text-slate-400" />
             <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nenhuma nota encontrada</h4>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Comece com uma nota fixa para referencia rapida ou uma nota temporaria vinculada a um lembrete.
+              Comece com uma nota fixa para referência rápida ou uma nota temporária vinculada a um lembrete.
             </p>
             <button onClick={onNewNote} className="action-primary mt-6">
               Criar primeira nota

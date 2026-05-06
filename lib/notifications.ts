@@ -491,7 +491,7 @@ export async function createNotification(
   }
 
   if (!input.dedupeKey) {
-    throw new Error('Falha ao persistir notificacao');
+    throw new Error('Falha ao persistir notificação');
   }
 
   const existing = await sql`
@@ -511,7 +511,7 @@ export async function createNotification(
   `;
 
   if (existing.length === 0) {
-    throw new Error('Falha ao recuperar notificacao existente');
+    throw new Error('Falha ao recuperar notificação existente');
   }
 
   return {
@@ -643,7 +643,7 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
         title: minutesUntil === 0
           ? 'Lembrete para agora'
           : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
-        message: `"${task.title}" esta chegando. Falta pouco para o horario definido.`,
+        message: `"${task.title}" está chegando. Falta pouco para o horário definido.`,
         tone: minutesUntil <= 5 ? 'warning' : 'info',
         target: { type: 'task', taskId: task.id },
         dedupeKey: `user:${task.userId}:upcoming:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
@@ -661,7 +661,7 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
         userId: task.userId,
         title: 'Lembrete atrasado',
         message: overdueBucket === 0
-          ? `"${task.title}" passou do prazo e precisa da sua atencao.`
+          ? `"${task.title}" passou do prazo e precisa da sua atenção.`
           : `"${task.title}" continua atrasado ha ${minutesOverdue} minuto${minutesOverdue === 1 ? '' : 's'}.`,
         tone: 'warning',
         target: { type: 'task', taskId: task.id },

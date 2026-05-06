@@ -110,7 +110,7 @@ export async function deleteUserCategory(sql: SqlClient, userId: string, name: s
   if (!normalizedName) return null;
 
   if (DEFAULT_CATEGORIES.some((category) => category.localeCompare(normalizedName, 'pt-BR', { sensitivity: 'accent' }) === 0)) {
-    throw new Error('As categorias padrao nao podem ser excluidas.');
+    throw new Error('As categorias padrão não podem ser excluídas.');
   }
 
   await sql`

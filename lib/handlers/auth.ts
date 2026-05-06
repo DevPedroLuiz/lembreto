@@ -46,9 +46,9 @@ import {
 } from './core.js';
 
 const GENERIC_RECOVER_RESPONSE = {
-  message: 'Se este e-mail estiver cadastrado, voce recebera um link em breve.',
+  message: 'Se este e-mail estiver cadastrado, você receberá um link em breve.',
 };
-const RECAPTCHA_ERROR = 'Confirme que voce nao e um robo.';
+const RECAPTCHA_ERROR = 'Confirme que você não é um robô.';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
@@ -259,7 +259,7 @@ async function findOrCreateGoogleUser(
   }
 
   const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
-  const name = profile.name?.trim() || profile.email.split('@')[0] || 'Usuario Google';
+  const name = profile.name?.trim() || profile.email.split('@')[0] || 'Usuário Google';
   const rows = await sql`
     INSERT INTO users (name, email, password, avatar, google_id)
     VALUES (${name}, ${profile.email}, ${generatedPasswordHash}, ${null}, ${profile.sub})
@@ -284,7 +284,7 @@ export async function handleAuthGoogleStart(context: HandlerContext): Promise<Ha
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     logError('auth_google_not_configured', new Error('GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET missing'), getRequestMeta(request));
-    return redirectToAuthError(context, 'Login com Google ainda nao configurado.');
+    return redirectToAuthError(context, 'Login com Google ainda não configurado.');
   }
 
   const state = crypto.randomBytes(32).toString('hex');
@@ -319,7 +319,7 @@ export async function handleAuthGoogleCallback(context: HandlerContext): Promise
 
   if (!code || !state || !expectedState || state !== expectedState) {
     logWarn('auth_google_state_mismatch', getRequestMeta(request));
-    return redirectToAuthError(context, 'Nao foi possivel validar o login com Google.');
+    return redirectToAuthError(context, 'Não foi possível validar o login com Google.');
   }
 
   try {
@@ -327,7 +327,7 @@ export async function handleAuthGoogleCallback(context: HandlerContext): Promise
     const profile = await fetchGoogleUserInfo(accessToken);
 
     if (!profile.sub || !profile.email) {
-      return redirectToAuthError(context, 'A conta Google nao retornou os dados necessarios.');
+      return redirectToAuthError(context, 'A conta Google não retornou os dados necessários.');
     }
 
     if (profile.email_verified === false) {
@@ -392,7 +392,7 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
       SELECT id FROM users WHERE email = ${email}
     `;
     if (existing.length > 0) {
-      return json(400, { error: 'Este email ja esta em uso' });
+      return json(400, { error: 'Este e-mail já está em uso' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -418,7 +418,7 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
     return json(201, { user, token });
   } catch (error) {
     logError('auth_register_failed', error, getRequestMeta(request, { ip, email }));
-    return json(500, { error: 'Erro ao criar usuario' });
+    return json(500, { error: 'Erro ao criar usuário' });
   }
 }
 
@@ -470,13 +470,13 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
     `;
 
     if (rows.length === 0) {
-      return json(401, { error: 'Email ou senha incorretos' });
+      return json(401, { error: 'E-mail ou senha incorretos' });
     }
 
     const user = rows[0] as unknown as LoginUserRow;
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      return json(401, { error: 'Email ou senha incorretos' });
+      return json(401, { error: 'E-mail ou senha incorretos' });
     }
 
     await clearRateLimit(ip, 'login');
@@ -498,7 +498,7 @@ export async function handleAuthLogout(context: HandlerContext): Promise<Handler
 
   const token = extractBearerToken(request.headers.authorization as string | undefined);
   if (!token) {
-    return json(401, { error: 'Nao autorizado' });
+    return json(401, { error: 'Não autorizado' });
   }
 
   try {
@@ -529,7 +529,7 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
       logWarn('auth_me_post_csrf_blocked', getRequestMeta(request, {
         host: request.headers.host,
       }));
-      return json(403, { error: 'Origem nao permitida' });
+      return json(403, { error: 'Origem não permitida' });
     }
 
     try {
@@ -553,7 +553,7 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
   if (request.method === 'GET') {
     const token = getSessionTokenFromCookieHeader(request.headers.cookie as string | undefined);
     if (!token) {
-      return json(401, { error: 'Sem sessao ativa' });
+      return json(401, { error: 'Sem sessão ativa' });
     }
 
     try {
@@ -578,7 +578,7 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
       logWarn('auth_me_delete_csrf_blocked', getRequestMeta(request, {
         host: request.headers.host,
       }));
-      return json(403, { error: 'Origem nao permitida' });
+      return json(403, { error: 'Origem não permitida' });
     }
 
     return json(200, { ok: true }, { 'Set-Cookie': clearSessionCookie() });
@@ -679,7 +679,7 @@ export async function handleAuthResetPassword(context: HandlerContext): Promise<
 
     if (rows.length === 0) {
       return json(400, {
-        error: 'Link invalido ou expirado. Solicite um novo link de recuperacao.',
+        error: 'Link inválido ou expirado. Solicite um novo link de recuperação.',
       });
     }
 
@@ -691,7 +691,7 @@ export async function handleAuthResetPassword(context: HandlerContext): Promise<
 
     logInfo('auth_password_reset_success', getRequestMeta(request, { userId: user_id }));
     return json(200, {
-      message: 'Senha redefinida com sucesso! Voce ja pode fazer login.',
+      message: 'Senha redefinida com sucesso! Você já pode fazer login.',
     });
   } catch (error) {
     logError('auth_password_reset_failed', error, getRequestMeta(request));
@@ -741,7 +741,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         WHERE email = ${email} AND id != ${userId}
       `;
       if (conflict.length > 0) {
-        return json(400, { error: 'Este email ja esta em uso' });
+        return json(400, { error: 'Este e-mail já está em uso' });
       }
     }
 
@@ -758,7 +758,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
       WHERE id = ${userId}
     `;
     if (current.length === 0) {
-      return json(404, { error: 'Usuario nao encontrado' });
+      return json(404, { error: 'Usuário não encontrado' });
     }
 
     const cur = current[0] as unknown as ProfileCurrentUserRow;

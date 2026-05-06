@@ -24,7 +24,7 @@ export async function handleCleanupCron(context: HandlerContext): Promise<Handle
 
   if (!isAuthorized(context)) {
     logWarn('cron_cleanup_unauthorized', getRequestMeta(context.request));
-    return json(401, { error: 'Nao autorizado' });
+    return json(401, { error: 'Não autorizado' });
   }
 
   try {

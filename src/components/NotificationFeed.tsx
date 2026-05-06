@@ -35,13 +35,13 @@ function getToneLabel(tone: AppNotification['tone']): string {
   if (tone === 'success') return 'Sucesso';
   if (tone === 'warning') return 'Aviso';
   if (tone === 'error') return 'Erro';
-  return 'Informacao';
+  return 'Informação';
 }
 
 function getActionLabel(notification: AppNotification): string {
   if (notification.target?.type === 'task') return 'Abrir lembrete';
   if (notification.target?.type === 'profile') return 'Abrir perfil';
-  if (notification.target?.type === 'settings') return 'Abrir configuracoes';
+  if (notification.target?.type === 'settings') return 'Abrir configurações';
   return 'Abrir';
 }
 
@@ -49,8 +49,8 @@ export function NotificationFeed({
   notifications,
   onOpenNotification,
   onPreviewNotification,
-  emptyTitle = 'Nenhuma notificacao por aqui',
-  emptyDescription = 'Quando o sistema gerar novos avisos e confirmacoes, eles vao aparecer aqui.',
+  emptyTitle = 'Nenhuma notificação por aqui',
+  emptyDescription = 'Quando o sistema gerar novos avisos e confirmações, eles vão aparecer aqui.',
   itemTestId = 'notification-item',
 }: NotificationFeedProps) {
   if (notifications.length === 0) {
@@ -78,7 +78,7 @@ export function NotificationFeed({
             data-testid={itemTestId}
             role={isInteractive ? 'button' : undefined}
             tabIndex={isInteractive ? 0 : -1}
-            aria-label={isInteractive ? `Abrir notificacao ${notification.title}` : undefined}
+            aria-label={isInteractive ? `Abrir notificação ${notification.title}` : undefined}
             onClick={isInteractive ? () => onOpenNotification(notification) : undefined}
             onMouseEnter={() => {
               if (!notification.read) {

@@ -303,7 +303,7 @@ export async function detectBrazilLocationFromCoordinates(
   });
 
   if (!response.ok) {
-    throw new Error('Nao foi possivel identificar sua localizacao agora.');
+    throw new Error('Não foi possível identificar sua localização agora.');
   }
 
   const payload = await response.json() as {
@@ -321,7 +321,7 @@ export async function detectBrazilLocationFromCoordinates(
 
   const countryCode = payload.address?.country_code?.toLowerCase();
   if (countryCode && countryCode !== 'br') {
-    throw new Error('A localizacao detectada esta fora do Brasil.');
+    throw new Error('A localização detectada está fora do Brasil.');
   }
 
   const stateCode =

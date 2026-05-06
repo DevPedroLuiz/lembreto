@@ -202,7 +202,7 @@ const settingCards: Array<{
   {
     key: 'confirmDelete',
     section: 'safety',
-    title: 'Confirmar exclusao',
+    title: 'Confirmar exclusão',
     description: 'Pede confirmação antes de excluir um lembrete.',
     helper: 'Segurança',
     icon: ShieldAlert,
@@ -458,7 +458,7 @@ export function SettingsDrawer({
     notifications: {
       active: notificationsEnabled,
       onClick: onToggleNotifications,
-      ariaLabel: 'Alternar notificacoes do sistema',
+      ariaLabel: 'Alternar notificações do sistema',
     },
     sound: {
       active: sound,
@@ -566,10 +566,10 @@ export function SettingsDrawer({
         const desktopNotificationsStatus = (() => {
           if (!desktopNotificationsSupported) {
             return {
-              badge: 'Indisponiveis',
-              title: 'Notificacoes do Windows nao compativeis',
+              badge: 'Indisponíveis',
+              title: 'Notificações do Windows não compatíveis',
               description:
-                'Este navegador ou dispositivo nao oferece suporte a notificacoes push em segundo plano.',
+                'Este navegador ou dispositivo não oferece suporte a notificações push em segundo plano.',
               buttonLabel: null as string | null,
             };
           }
@@ -577,9 +577,9 @@ export function SettingsDrawer({
           if (!desktopNotificationsConfigured) {
             return {
               badge: 'Pendente',
-              title: 'Push ainda nao configurado',
+              title: 'Push ainda não configurado',
               description:
-                'As chaves do ambiente ainda nao foram carregadas, entao este navegador nao pode se conectar ao Windows.',
+                'As chaves do ambiente ainda não foram carregadas, então este navegador não pode se conectar ao Windows.',
               buttonLabel: null as string | null,
             };
           }
@@ -587,9 +587,9 @@ export function SettingsDrawer({
           if (desktopNotificationsReady) {
             return {
               badge: 'Ativas',
-              title: 'Notificacoes do Windows ativas',
+              title: 'Notificações do Windows ativas',
               description:
-                'Este navegador ja esta conectado e recebera avisos mesmo fora da aba do sistema.',
+                'Este navegador já está conectado e receberá avisos mesmo fora da aba do sistema.',
               buttonLabel: 'Conectar novamente',
             };
           }
@@ -597,9 +597,9 @@ export function SettingsDrawer({
           if (desktopNotificationsPermission === 'denied') {
             return {
               badge: 'Bloqueadas',
-              title: 'Permissao bloqueada no navegador',
+              title: 'Permissão bloqueada no navegador',
               description:
-                'Libere a permissao do site nas configuracoes do navegador para voltar a receber avisos do Windows.',
+                'Libere a permissão do site nas configurações do navegador para voltar a receber avisos do Windows.',
               buttonLabel: 'Tentar novamente',
             };
           }
@@ -616,9 +616,9 @@ export function SettingsDrawer({
 
           return {
             badge: 'Pendente',
-            title: 'Ative as notificacoes do Windows',
+            title: 'Ative as notificações do Windows',
             description:
-              'Permita o envio no navegador para receber lembretes mesmo quando o Lembreto nao estiver em foco.',
+              'Permita o envio no navegador para receber lembretes mesmo quando o Lembreto não estiver em foco.',
             buttonLabel: 'Ativar no navegador',
           };
         })();
@@ -637,7 +637,7 @@ export function SettingsDrawer({
             <section className="surface-soft p-5">
               <SectionHeader
                 eyebrow="Windows"
-                title="Notificacoes do sistema"
+                title="Notificações do sistema"
                 description="Conecte este navegador ao Windows para receber lembretes fora da aba."
               />
 
@@ -888,7 +888,7 @@ export function SettingsDrawer({
                           void handleCreateTag();
                         }
                       }}
-                      placeholder="Ex.: Reuniao, Estudo, Urgente..."
+                      placeholder="Ex.: Reunião, Estudo, Urgente..."
                       className="field-control"
                     />
                     <button
@@ -954,8 +954,8 @@ export function SettingsDrawer({
           <section className="surface-soft p-5">
             <SectionHeader
               eyebrow="Segurança"
-              title="Protecao de acoes"
-              description="Reduza o risco de mudancas acidentais e mantenha os lembretes mais protegidos no uso diario."
+              title="Proteção de ações"
+              description="Reduza o risco de mudanças acidentais e mantenha os lembretes mais protegidos no uso diário."
             />
             {renderToggleCards(safetyCards)}
           </section>
@@ -974,9 +974,9 @@ export function SettingsDrawer({
       case 'center':
         return (
           <ActionPanel
-            title="Central de notificacoes"
+            title="Central de notificações"
             description="Abra o histórico completo dos avisos do sistema."
-            buttonLabel="Abrir central de notificacoes"
+            buttonLabel="Abrir central de notificações"
             onAction={onOpenNotificationsCenter}
             testId="settings-open-notifications-center"
           />
@@ -1024,7 +1024,7 @@ export function SettingsDrawer({
                 <div className="min-w-0">
                   <span className="section-eyebrow">
                     <Settings size={14} />
-                    Preferencias
+                    Preferências
                   </span>
                   <h2 id="settings-drawer-title" className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-3xl">
                     Configurações
@@ -1037,7 +1037,7 @@ export function SettingsDrawer({
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label="Fechar configuracoes"
+                  aria-label="Fechar configurações"
                   className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
                 >
                   <X size={20} />
@@ -1058,13 +1058,13 @@ export function SettingsDrawer({
                           Painel de preferências
                         </h3>
                         <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-300">
-                          Escolha uma area ao lado para ver apenas o que importa agora.
+                          Escolha uma área ao lado para ver apenas o que importa agora.
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Secoes de configuracoes">
+                  <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Seções de configurações">
                     {settingsViews.map((view) => {
                       const Icon = view.icon;
                       const isActive = activeView === view.key;
@@ -1112,7 +1112,7 @@ export function SettingsDrawer({
                       </div>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-                          Area ativa
+                          Área ativa
                         </p>
                         <h3 className="mt-1 text-lg font-semibold text-slate-950 dark:text-white">
                           {activeViewMeta.title}
@@ -1132,7 +1132,7 @@ export function SettingsDrawer({
 
             <div className="border-t border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
               <p className="text-center text-xs text-slate-400 dark:text-slate-500">
-                As configuracoes sao salvas neste navegador e aplicadas imediatamente.
+                As configurações são salvas neste navegador e aplicadas imediatamente.
               </p>
             </div>
           </motion.section>

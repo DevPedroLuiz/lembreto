@@ -67,7 +67,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           <div className="mt-4">
             <h3 className="text-base font-semibold text-slate-950 dark:text-white">{note.title}</h3>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-500 dark:text-slate-400">
-              {note.content.trim() || 'Sem anotacoes adicionais.'}
+              {note.content.trim() || 'Sem anotações adicionais.'}
             </p>
           </div>
 

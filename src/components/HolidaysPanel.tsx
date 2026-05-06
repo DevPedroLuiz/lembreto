@@ -39,7 +39,7 @@ function typeLabel(entry: HolidayEntry) {
   if (entry.type === 'public') return 'Feriado';
   if (entry.type === 'optional') return 'Data opcional';
   if (entry.type === 'observance') return 'Comemorativa';
-  if (entry.type === 'bank') return 'Bancario';
+  if (entry.type === 'bank') return 'Bancário';
   return 'Especial';
 }
 
@@ -121,10 +121,10 @@ export function HolidaysPanel({
               Feriados e datas
             </span>
             <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
-              Planeje seus lembretes olhando tambem para o calendario real.
+              Planeje seus lembretes olhando também para o calendário real.
             </h3>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-              Mostramos os feriados nacionais para todos e, quando sua regiao esta configurada, adicionamos os feriados estaduais e municipais que ajudam a antecipar a rotina.
+              Mostramos os feriados nacionais para todos e, quando sua região está configurada, adicionamos os feriados estaduais e municipais que ajudam a antecipar a rotina.
             </p>
           </div>
 
@@ -136,7 +136,7 @@ export function HolidaysPanel({
               className="action-secondary min-h-[48px] justify-center whitespace-nowrap px-5 disabled:cursor-wait disabled:opacity-70"
             >
               {isDetectingLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
-              Usar minha localizacao
+              Usar minha localização
             </button>
             <button
               type="button"
@@ -144,7 +144,7 @@ export function HolidaysPanel({
               className="action-secondary min-h-[48px] justify-center whitespace-nowrap px-5"
             >
               <MapPin size={16} />
-              Ajustar regiao
+              Ajustar região
             </button>
             <button
               type="button"
@@ -166,14 +166,14 @@ export function HolidaysPanel({
               </span>
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-                  Regiao ativa
+                  Região ativa
                 </p>
                 <h4 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">{locationLabel}</h4>
                 <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                   {calendar?.location.municipalSupported
                     ? `A base atual reconheceu ${calendar.location.matchedRegionName ?? calendar.location.cityName} para feriados municipais.`
                     : calendar?.location.stateCode
-                      ? 'Os feriados nacionais e estaduais ja estao ativos. Os municipais dependem da cobertura disponivel para a cidade.'
+                      ? 'Os feriados nacionais e estaduais já estão ativos. Os municipais dependem da cobertura disponível para a cidade.'
                       : 'Configure seu estado e cidade para incluir os feriados regionais.'}
                 </p>
               </div>
@@ -194,13 +194,13 @@ export function HolidaysPanel({
 
           <div className="surface-soft p-5">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-              Neste mes
+              Neste mês
             </p>
             <p className="mt-3 text-4xl font-semibold text-slate-950 dark:text-white">
               {calendar?.monthHighlights.length ?? 0}
             </p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Feriados e datas relevantes no calendario atual.
+              Feriados e datas relevantes no calendário atual.
             </p>
           </div>
         </div>
@@ -208,8 +208,8 @@ export function HolidaysPanel({
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
         <HolidayList
-          title="Proximos feriados"
-          description="Uma visao clara do que pode alterar expediente, deslocamento ou disponibilidade."
+          title="Próximos feriados"
+          description="Uma visão clara do que pode alterar expediente, deslocamento ou disponibilidade."
           entries={calendar?.upcoming.filter((entry) => entry.type === 'public' || entry.type === 'bank') ?? []}
           emptyLabel="Nenhum feriado oficial encontrado para o periodo consultado."
         />
@@ -218,15 +218,15 @@ export function HolidaysPanel({
           title="Datas comemorativas"
           description="Datas observadas e comemorativas que tambem podem orientar seu planejamento."
           entries={calendar?.commemorative ?? []}
-          emptyLabel="Nao encontramos datas comemorativas relevantes para este recorte."
+          emptyLabel="Não encontramos datas comemorativas relevantes para este recorte."
         />
       </div>
 
       <HolidayList
-        title="Destaques do mes"
-        description="Tudo o que aparece neste mes para voce encaixar lembretes, reunioes e descansos com mais contexto."
+        title="Destaques do mês"
+        description="Tudo o que aparece neste mês para você encaixar lembretes, reuniões e descansos com mais contexto."
         entries={calendar?.monthHighlights ?? []}
-        emptyLabel="Este mes nao tem eventos registrados na base atual."
+        emptyLabel="Este mês não tem eventos registrados na base atual."
       />
 
       {!calendar?.location.stateCode && (
@@ -238,7 +238,7 @@ export function HolidaysPanel({
             <div>
               <h4 className="text-lg font-semibold text-slate-950 dark:text-white">Quer feriados regionais?</h4>
               <p className="mt-2 text-sm leading-7 text-slate-500 dark:text-slate-400">
-                Neste momento estamos mostrando apenas os feriados nacionais. Para incluir os estaduais e municipais, use sua localizacao ou ajuste sua regiao em Configuracoes.
+                Neste momento estamos mostrando apenas os feriados nacionais. Para incluir os estaduais e municipais, use sua localização ou ajuste sua região em Configurações.
               </p>
             </div>
           </div>

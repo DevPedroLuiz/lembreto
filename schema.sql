@@ -139,7 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_prt_user_id    ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_prt_expires_at ON password_reset_tokens(expires_at);
 
 -- ============================================================
--- Central de notificacoes
+-- Central de notificações
 -- ============================================================
 CREATE TABLE IF NOT EXISTS notifications (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
