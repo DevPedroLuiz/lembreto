@@ -4,6 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 declare global {
   interface Window {
     grecaptcha?: {
+      ready?: (callback: () => void) => void;
       render: (
         container: HTMLElement,
         options: {
@@ -20,6 +21,7 @@ declare global {
 }
 
 const RECAPTCHA_SCRIPT_ID = 'google-recaptcha-api';
+let recaptchaScriptPromise: Promise<void> | null = null;
 
 interface RecaptchaCheckboxProps {
   siteKey?: string;
@@ -29,14 +31,29 @@ interface RecaptchaCheckboxProps {
 }
 
 function loadRecaptchaScript(): Promise<void> {
-  if (window.grecaptcha) return Promise.resolve();
+  if (window.grecaptcha?.render) return Promise.resolve();
+  if (recaptchaScriptPromise) return recaptchaScriptPromise;
 
-  return new Promise((resolve, reject) => {
-    window.__lembretoRecaptchaReady = () => resolve();
+  recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const resolveWhenReady = () => {
+      if (window.grecaptcha?.ready) {
+        window.grecaptcha.ready(resolve);
+        return;
+      }
+
+      if (window.grecaptcha?.render) {
+        resolve();
+        return;
+      }
+
+      reject(new Error('reCAPTCHA indisponível'));
+    };
+
+    window.__lembretoRecaptchaReady = resolveWhenReady;
 
     const existing = document.getElementById(RECAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('load', resolveWhenReady, { once: true });
       existing.addEventListener('error', () => reject(new Error('reCAPTCHA indisponível')), { once: true });
       return;
     }
@@ -49,6 +66,8 @@ function loadRecaptchaScript(): Promise<void> {
     script.onerror = () => reject(new Error('reCAPTCHA indisponível'));
     document.head.appendChild(script);
   });
+
+  return recaptchaScriptPromise;
 }
 
 export function RecaptchaCheckbox({
@@ -80,28 +99,41 @@ export function RecaptchaCheckbox({
       .then(() => {
         if (cancelled || !containerRef.current || !window.grecaptcha) return;
 
-        if (widgetIdRef.current !== null) {
-          window.grecaptcha.reset(widgetIdRef.current);
-          setStatus('ready');
-          return;
-        }
+        try {
+          if (widgetIdRef.current !== null) {
+            window.grecaptcha.reset(widgetIdRef.current);
+            setStatus('ready');
+            return;
+          }
 
-        widgetIdRef.current = window.grecaptcha.render(containerRef.current, {
-          sitekey: siteKey,
-          callback: (token) => {
-            setVerified(true);
-            onChange(token);
-          },
-          'expired-callback': () => {
-            setVerified(false);
-            onChange('');
-          },
-          'error-callback': () => {
-            setVerified(false);
-            onChange('');
-          },
-        });
-        setStatus('ready');
+          containerRef.current.innerHTML = '';
+          widgetIdRef.current = window.grecaptcha.render(containerRef.current, {
+            sitekey: siteKey,
+            callback: (token) => {
+              setVerified(true);
+              onChange(token);
+            },
+            'expired-callback': () => {
+              setVerified(false);
+              onChange('');
+              if (widgetIdRef.current !== null) {
+                window.grecaptcha?.reset(widgetIdRef.current);
+              }
+            },
+            'error-callback': () => {
+              setVerified(false);
+              onChange('');
+              if (widgetIdRef.current !== null) {
+                window.grecaptcha?.reset(widgetIdRef.current);
+              }
+            },
+          });
+          setStatus('ready');
+        } catch {
+          widgetIdRef.current = null;
+          setStatus('error');
+          onUnavailable?.();
+        }
       })
       .catch(() => {
         if (cancelled) return;

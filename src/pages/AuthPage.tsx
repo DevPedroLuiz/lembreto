@@ -71,6 +71,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const [authLoading, setAuthLoading] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState('');
   const [recaptchaResetKey, setRecaptchaResetKey] = useState(0);
+  const [recaptchaUnavailable, setRecaptchaUnavailable] = useState(false);
 
   const passwordStrength = useMemo(
     () => getPasswordStrength(authPassword),
@@ -117,14 +118,23 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
   const resetRecaptcha = useCallback(() => {
     setRecaptchaToken('');
+    setRecaptchaUnavailable(false);
     setRecaptchaResetKey((value) => value + 1);
+  }, []);
+
+  const handleRecaptchaUnavailable = useCallback(() => {
+    setRecaptchaUnavailable(true);
   }, []);
 
   const validateRecaptcha = useCallback(() => {
     if (!recaptchaEnabled || recaptchaToken) return true;
+    if (recaptchaUnavailable) {
+      setAuthError('Não foi possível carregar o reCAPTCHA. Atualize a página e tente novamente.');
+      return false;
+    }
     setAuthError('Confirme que você não é um robô.');
     return false;
-  }, [recaptchaEnabled, recaptchaToken]);
+  }, [recaptchaEnabled, recaptchaToken, recaptchaUnavailable]);
 
   const handleAuth = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -300,6 +310,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
                       resetKey={recaptchaResetKey}
                       onChange={setRecaptchaToken}
+                      onUnavailable={handleRecaptchaUnavailable}
                     />
 
                     {authError && (
@@ -479,6 +490,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
                     resetKey={recaptchaResetKey}
                     onChange={setRecaptchaToken}
+                    onUnavailable={handleRecaptchaUnavailable}
                   />
 
                   {authError && (
