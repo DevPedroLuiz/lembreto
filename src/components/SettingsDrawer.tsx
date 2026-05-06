@@ -5,9 +5,11 @@ import {
   BellRing,
   CheckCircle2,
   Compass,
+  Download,
   FolderPlus,
   Loader2,
   MapPin,
+  MonitorSmartphone,
   Moon,
   Plus,
   Settings,
@@ -18,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
+import { usePwaInstall } from '../hooks/usePwaInstall';
 import { BRAZIL_STATES } from '../../lib/brazil-location';
 import { isDefaultCategory, normalizeTaxonomyValue } from '../lib/taxonomy';
 import type { HolidayRegionOption } from '../types';
@@ -309,6 +312,12 @@ export function SettingsDrawer({
   const [deletingTagName, setDeletingTagName] = React.useState<string | null>(null);
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
   const [holidayFeedback, setHolidayFeedback] = React.useState('');
+  const {
+    canInstall,
+    isInstalled,
+    installHelpText,
+    promptInstall,
+  } = usePwaInstall();
 
   const swipe = useSwipeToClose({
     enabled: open,
@@ -643,17 +652,67 @@ export function SettingsDrawer({
     </section>
   );
 
+  const renderInstallPanel = () => (
+    <section className="surface-soft p-5">
+      <SectionHeader
+        eyebrow="PWA"
+        title="Instalar app"
+        description="Abra o Lembreto pela tela inicial do celular ou pelo menu de aplicativos do desktop."
+      />
+
+      <div className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+            <span className="inline-flex rounded-full border border-slate-200/80 bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-400">
+              {isInstalled ? 'Instalado' : canInstall ? 'Disponivel' : 'Manual'}
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                {isInstalled ? 'Lembreto instalado' : 'Adicionar o Lembreto ao dispositivo'}
+              </h3>
+              <p className="mt-2 max-w-xl text-sm leading-7 text-slate-500 dark:text-slate-400">
+                {installHelpText}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200">
+            <MonitorSmartphone size={18} />
+          </div>
+        </div>
+
+        {!isInstalled && canInstall ? (
+          <button
+            type="button"
+            data-testid="settings-install-pwa"
+            onClick={() => {
+              void promptInstall();
+            }}
+            className="action-primary mt-5 w-full justify-between"
+          >
+            Instalar Lembreto
+            <Download size={16} />
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+
   const renderActiveView = () => {
     switch (activeView) {
       case 'appearance':
         return (
-          <section className="surface-soft p-5">
+          <section className="space-y-4">
+            <section className="surface-soft p-5">
             <SectionHeader
               eyebrow="Aparência"
               title="Visual do sistema"
               description="Ajuste o visual para deixar o uso mais confortável."
             />
-            {renderToggleCards(appearanceCards)}
+              {renderToggleCards(appearanceCards)}
+            </section>
+
+            {renderInstallPanel()}
           </section>
         );
 
