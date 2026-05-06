@@ -266,12 +266,13 @@ test.describe('Lembreto critical flows', () => {
     try {
       await registerUser(page, user);
 
-      await page.getByTestId('sidebar-settings-button').click();
-      await page.getByTestId('settings-nav-organization').click();
-      await page.getByTestId('settings-category-create-input').fill('Saúde');
-      await page.getByTestId('settings-category-create-button').click();
+      await page.getByTestId('sidebar-category-manager-button').click();
+      await page.getByTestId('sidebar-category-create-input').fill('Saúde');
+      await page.getByTestId('sidebar-category-create-button').click();
       await expect(page.getByText('Categoria "Saúde" criada com sucesso.')).toBeVisible();
 
+      await page.getByTestId('sidebar-settings-button').click();
+      await page.getByTestId('settings-nav-organization').click();
       await page.getByTestId('settings-tag-create-input').fill('Consulta');
       await page.getByTestId('settings-tag-create-button').click();
       await expect(page.getByText('Tag "Consulta" criada com sucesso.')).toBeVisible();
@@ -307,10 +308,12 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('settings-nav-organization').click();
       const settingsDialog = page.getByRole('dialog', { name: /config/i });
       await page.getByRole('button', { name: 'Excluir tag Consulta' }).click();
-      await page.getByRole('button', { name: 'Excluir categoria Saúde' }).click();
-      await expect(settingsDialog.getByRole('button', { name: 'Excluir categoria Saúde' })).toHaveCount(0);
       await expect(settingsDialog.getByRole('button', { name: 'Excluir tag Consulta' })).toHaveCount(0);
       await page.getByRole('button', { name: /fechar configura/i }).click();
+      await page.getByTestId('sidebar-category-manager-button').click();
+      await page.getByRole('button', { name: 'Excluir categoria Saúde' }).click();
+      await expect(page.getByRole('dialog', { name: 'Gerenciar categorias' }).getByRole('button', { name: 'Excluir categoria Saúde' })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Fechar categorias' }).click();
 
       await page.locator('aside').getByText('Todas', { exact: true }).click();
       await createdTask.click();

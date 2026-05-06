@@ -38,7 +38,9 @@ import {
 } from './lib/taskDueDate';
 import {
   buildRecurringDates,
+  countDateKeyMatches,
   getRecurrenceSuggestion,
+  getRecurrenceValidationError,
   type RecurrenceMode,
   type RecurrenceSuggestion,
 } from './lib/taskRecurrence';
@@ -195,7 +197,12 @@ export default function App() {
     createTag,
     deleteCategory,
     deleteTag,
-  } = useTasks(isResetPasswordRoute ? null : auth.token);
+    pendingOfflineTaskCount,
+    isSyncingOfflineTasks,
+  } = useTasks(
+    isResetPasswordRoute ? null : auth.token,
+    isResetPasswordRoute ? null : auth.currentUser,
+  );
   const {
     notes,
     notesByTask,
@@ -315,6 +322,7 @@ export default function App() {
   const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
+  const previousPendingOfflineTaskCountRef = useRef(0);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
@@ -481,6 +489,15 @@ export default function App() {
       }
     });
   }, [auth.token, notifications, notificationsEnabled, notificationsLoaded, triggerToastNotification]);
+
+  useEffect(() => {
+    const previousCount = previousPendingOfflineTaskCountRef.current;
+    previousPendingOfflineTaskCountRef.current = pendingOfflineTaskCount;
+
+    if (previousCount > 0 && pendingOfflineTaskCount === 0 && auth.token) {
+      triggerToastOnly('Lembretes sincronizados', 'Tudo que foi criado offline ja esta salvo na sua conta.');
+    }
+  }, [auth.token, pendingOfflineTaskCount, triggerToastOnly]);
 
   useEffect(() => {
     if (!auth.token || !auth.currentUser || welcomedUserIdRef.current === auth.currentUser.id) return;
@@ -947,21 +964,16 @@ export default function App() {
 
   const recurringHolidaySuppressedCount = useMemo(() => {
     if (!formRecurrenceEnabled || !formSuppressHolidayNotifications || recurringDates.length === 0) return 0;
-
-    return recurringDates.reduce((count, dateValue) => (
-      holidayDateKeys.has(dateValue) ? count + 1 : count
-    ), 0);
+    return countDateKeyMatches(recurringDates, holidayDateKeys);
   }, [formRecurrenceEnabled, formSuppressHolidayNotifications, holidayDateKeys, recurringDates]);
 
-  const recurrenceError = useMemo(() => {
-    if (editingTask || !formRecurrenceEnabled) return '';
-    if (!formDate) return '';
-    if (!formRecurrenceUntil) return 'Defina a data final da repetição.';
-    if (formRecurrenceUntil < formDate) return 'A repetição precisa terminar na mesma data ou depois do início.';
-    if (recurringDates.length === 0) return 'Nenhuma data do intervalo corresponde a esse padrão de repetição.';
-    if (recurringDates.length > 120) return 'Reduza o intervalo para no máximo 120 lembretes por criação.';
-    return '';
-  }, [editingTask, formDate, formRecurrenceEnabled, formRecurrenceUntil, recurringDates.length]);
+  const recurrenceError = useMemo(() => getRecurrenceValidationError({
+    isEditing: Boolean(editingTask),
+    enabled: formRecurrenceEnabled,
+    startDateValue: formDate,
+    endDateValue: formRecurrenceUntil,
+    occurrenceCount: recurringDates.length,
+  }), [editingTask, formDate, formRecurrenceEnabled, formRecurrenceUntil, recurringDates.length]);
 
   const applyRecurrenceSuggestion = useCallback((suggestion: RecurrenceSuggestion) => {
     const nextSuggestion = getRecurrenceSuggestion(formDate, suggestion);
@@ -1114,23 +1126,36 @@ export default function App() {
           });
         } else {
           if (formRecurrenceEnabled && recurringDates.length > 1) {
+            let offlineCount = 0;
             for (const dateValue of recurringDates) {
-              await createTask({
+              const created = await createTask({
                 ...payload,
                 dueDate: buildDueDateFromForm(dateValue, formTime),
               });
+              if (created.syncStatus === 'pending') offlineCount += 1;
             }
 
             emitNotification(
-              'Lembretes criados!',
-              `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
-              'success',
+              offlineCount > 0 ? 'Lembretes salvos offline' : 'Lembretes criados!',
+              offlineCount > 0
+                ? `${offlineCount} lembrete${offlineCount === 1 ? '' : 's'} ficara${offlineCount === 1 ? '' : 'o'} na fila e sincronizara${offlineCount === 1 ? '' : 'o'} quando a conexao voltar.`
+                : `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
+              offlineCount > 0 ? 'info' : 'success',
             );
           } else {
             const created = await createTask(payload);
-            emitNotification('Lembrete criado!', `"${created.title}" foi adicionado.`, 'success', {
-              target: { type: 'task', taskId: created.id },
-            });
+            if (created.syncStatus === 'pending') {
+              emitNotification(
+                'Lembrete salvo offline',
+                `"${created.title}" sera sincronizado quando a conexao voltar.`,
+                'info',
+                { toastOnly: true },
+              );
+            } else {
+              emitNotification('Lembrete criado!', `"${created.title}" foi adicionado.`, 'success', {
+                target: { type: 'task', taskId: created.id },
+              });
+            }
           }
         }
 
@@ -1854,27 +1879,34 @@ export default function App() {
     if (auth.restoring) return;
 
     const params = new URLSearchParams(locationSearch);
+    const action = params.get('action');
     const notificationTarget = params.get('notificationTarget');
-    if (!notificationTarget) return;
 
-    if (!auth.token) return;
+    if (action === 'new-task' && auth.currentUser) {
+      openNewTask();
+      params.delete('action');
+    } else if (notificationTarget) {
+      if (!auth.token) return;
 
-    if (notificationTarget === 'task') {
-      const taskId = params.get('taskId');
-      if (taskId) {
-        setActiveTab('tasks');
-        setPendingNotificationTaskId(taskId);
+      if (notificationTarget === 'task') {
+        const taskId = params.get('taskId');
+        if (taskId) {
+          setActiveTab('tasks');
+          setPendingNotificationTaskId(taskId);
+        }
+      } else if (notificationTarget === 'profile') {
+        openProfile();
+      } else if (notificationTarget === 'settings') {
+        openSettings();
+      } else {
+        openNotificationsCenter();
       }
-    } else if (notificationTarget === 'profile') {
-      openProfile();
-    } else if (notificationTarget === 'settings') {
-      openSettings();
-    } else {
-      openNotificationsCenter();
-    }
 
-    params.delete('notificationTarget');
-    params.delete('taskId');
+      params.delete('notificationTarget');
+      params.delete('taskId');
+    } else {
+      return;
+    }
 
     const nextSearch = params.toString();
     const nextUrl = nextSearch.length > 0
@@ -1884,10 +1916,12 @@ export default function App() {
     window.history.replaceState({}, '', nextUrl);
     setLocationSearch(nextSearch.length > 0 ? `?${nextSearch}` : '');
   }, [
+    auth.currentUser,
     auth.restoring,
     auth.token,
     locationSearch,
     openNotificationsCenter,
+    openNewTask,
     openProfile,
     openSettings,
   ]);
@@ -2146,7 +2180,7 @@ export default function App() {
     return <LoadingScreen />;
   }
 
-  if (!auth.currentUser || !auth.token) {
+  if (!auth.currentUser) {
     return (
       <AuthPage
         auth={auth}
@@ -2219,6 +2253,8 @@ export default function App() {
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
+        onCreateCategory={createCategory}
+        onDeleteCategory={handleDeleteCategory}
         onLogout={auth.logout}
       />
 
@@ -2236,6 +2272,15 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {pendingOfflineTaskCount > 0 && (
+              <span
+                data-testid="offline-sync-badge-mobile"
+                className="inline-flex h-9 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+              >
+                {isSyncingOfflineTasks ? 'Sync' : pendingOfflineTaskCount}
+              </span>
+            )}
+
             <motion.button
               onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
               aria-label="Abrir notificações recentes"
@@ -2297,6 +2342,17 @@ export default function App() {
                 </div>
 
                 <div className="hidden items-center gap-3 lg:flex">
+                  {pendingOfflineTaskCount > 0 && (
+                    <span
+                      data-testid="offline-sync-badge"
+                      className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+                    >
+                      {isSyncingOfflineTasks
+                        ? 'Sincronizando...'
+                        : `${pendingOfflineTaskCount} offline`}
+                    </span>
+                  )}
+
                   <motion.button
                     type="button"
                     onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}

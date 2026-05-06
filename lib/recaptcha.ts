@@ -13,6 +13,12 @@ export function isRecaptchaConfigured(): boolean {
   return Boolean(process.env.RECAPTCHA_SECRET_KEY);
 }
 
+export function getRecaptchaSiteKey(): string | null {
+  const siteKey = process.env.VITE_RECAPTCHA_SITE_KEY ?? process.env.RECAPTCHA_SITE_KEY;
+  const normalizedSiteKey = siteKey?.trim();
+  return normalizedSiteKey ? normalizedSiteKey : null;
+}
+
 export function shouldSkipRecaptchaForTest(): boolean {
   return process.env.RECAPTCHA_SKIP_VERIFY === 'true';
 }

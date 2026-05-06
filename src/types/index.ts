@@ -26,6 +26,7 @@ export interface Task {
   suppressHolidayNotifications: boolean;
   status: Status;
   createdAt: string;
+  syncStatus?: 'pending';
   history?: TaskHistoryEvent[];
 }
 

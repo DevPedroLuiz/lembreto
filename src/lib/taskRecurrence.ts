@@ -1,6 +1,16 @@
 export type RecurrenceMode = 'daily' | 'weekdays' | 'weekends' | 'weekly';
 export type RecurrenceSuggestion = 'weekdays' | 'weekends' | 'month' | 'weekly' | 'next7Days';
 
+export const MAX_RECURRENCE_OCCURRENCES = 120;
+
+type RecurrenceValidationInput = {
+  isEditing: boolean;
+  enabled: boolean;
+  startDateValue: string;
+  endDateValue: string;
+  occurrenceCount: number;
+};
+
 function parseDateOnly(dateValue: string): Date | null {
   const [year, month, day] = dateValue.split('-').map(Number);
   if (!year || !month || !day) return null;
@@ -26,41 +36,75 @@ function endOfMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0, 12, 0, 0, 0);
 }
 
-function matchesRecurrence(date: Date, mode: RecurrenceMode): boolean {
+function getUtcDateOnlyTime(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function getDaysSince(startDate: Date, date: Date): number {
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((getUtcDateOnlyTime(date) - getUtcDateOnlyTime(startDate)) / millisecondsPerDay);
+}
+
+function matchesRecurrence(date: Date, mode: RecurrenceMode, startDate: Date): boolean {
   const day = date.getDay();
 
-  if (mode === 'daily') return true;
-  if (mode === 'weekdays') return day >= 1 && day <= 5;
-  if (mode === 'weekends') return day === 0 || day === 6;
-  return day === parseDateOnly(formatDateOnly(date))?.getDay();
+  switch (mode) {
+    case 'daily':
+      return true;
+    case 'weekdays':
+      return day >= 1 && day <= 5;
+    case 'weekends':
+      return day === 0 || day === 6;
+    case 'weekly':
+      return getDaysSince(startDate, date) % 7 === 0;
+  }
 }
 
 export function buildRecurringDates(
   startDateValue: string,
   endDateValue: string,
   mode: RecurrenceMode,
+  limit = MAX_RECURRENCE_OCCURRENCES + 1,
 ): string[] {
   const startDate = parseDateOnly(startDateValue);
   const endDate = parseDateOnly(endDateValue);
 
   if (!startDate || !endDate || endDate < startDate) return [];
 
-  if (mode === 'weekly') {
-    const dates: string[] = [];
-    for (let current = new Date(startDate); current <= endDate; current = addDays(current, 7)) {
-      dates.push(formatDateOnly(current));
-    }
-    return dates;
-  }
-
   const dates: string[] = [];
+
   for (let current = new Date(startDate); current <= endDate; current = addDays(current, 1)) {
-    if (matchesRecurrence(current, mode)) {
+    if (matchesRecurrence(current, mode, startDate)) {
       dates.push(formatDateOnly(current));
+      if (dates.length >= limit) break;
     }
   }
 
   return dates;
+}
+
+export function getRecurrenceValidationError({
+  isEditing,
+  enabled,
+  startDateValue,
+  endDateValue,
+  occurrenceCount,
+}: RecurrenceValidationInput): string {
+  if (isEditing || !enabled) return '';
+  if (!startDateValue) return '';
+  if (!endDateValue) return 'Defina a data final da repetição.';
+  if (endDateValue < startDateValue) return 'A repetição precisa terminar na mesma data ou depois do início.';
+  if (occurrenceCount === 0) return 'Nenhuma data do intervalo corresponde a esse padrão de repetição.';
+  if (occurrenceCount > MAX_RECURRENCE_OCCURRENCES) {
+    return `Reduza o intervalo para no máximo ${MAX_RECURRENCE_OCCURRENCES} lembretes por criação.`;
+  }
+  return '';
+}
+
+export function countDateKeyMatches(dateValues: readonly string[], dateKeys: ReadonlySet<string>): number {
+  return dateValues.reduce((count, dateValue) => (
+    dateKeys.has(dateValue) ? count + 1 : count
+  ), 0);
 }
 
 export function getRecurrenceSuggestion(

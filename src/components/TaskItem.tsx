@@ -176,7 +176,7 @@ function TaskItemComponent({
                 'flex h-9 w-9 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition-all disabled:cursor-wait disabled:opacity-60 sm:h-11 sm:w-11',
                 isCompleted
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
-                  : 'border-slate-200 bg-white/90 text-slate-400 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-blue-400/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300',
+                  : 'border-slate-200 bg-white/90 text-slate-400 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 hover:shadow-[0_18px_34px_-24px_rgba(16,185,129,0.8)] dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300',
               )}
             >
               {isToggling ? (
@@ -347,6 +347,16 @@ function TaskItemComponent({
               {isCompleted ? 'Reabrindo' : 'Concluindo'}
             </span>
           )}
+
+          {task.syncStatus === 'pending' && (
+            <span
+              data-testid="task-sync-pending"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+            >
+              <Loader2 size={12} className="animate-spin" />
+              Offline
+            </span>
+          )}
         </div>
       </div>
     </motion.div>
@@ -364,6 +374,7 @@ export const TaskItem = React.memo(
     prev.task.category === next.task.category &&
     JSON.stringify(prev.task.tags ?? []) === JSON.stringify(next.task.tags ?? []) &&
     prev.task.status === next.task.status &&
+    prev.task.syncStatus === next.task.syncStatus &&
     prev.showSelectionControl === next.showSelectionControl &&
     prev.showToggleControl === next.showToggleControl &&
     prev.compact === next.compact &&

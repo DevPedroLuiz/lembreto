@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiPost, apiPut } from '../api/client';
 import { LS } from '../lib/storage';
 import type { User } from '../types';
@@ -14,33 +14,50 @@ export function useAuth() {
   const [restoring, setRestoring] = useState(true);
   const restoredRef = useRef(false);
 
+  const restoreSession = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me', { credentials: 'include' });
+
+      if (response.ok) {
+        const data = await response.json() as { user: User; token: string };
+        setCurrentUser(data.user);
+        setToken(data.token);
+        LS.saveUser(data.user);
+      } else {
+        LS.clearUser();
+        setCurrentUser(null);
+        setToken(null);
+      }
+    } catch {
+      const cachedUser = LS.loadUser();
+      setCurrentUser(cachedUser);
+      setToken(null);
+    } finally {
+      setRestoring(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
 
-    (async () => {
-      try {
-        const response = await fetch('/api/auth/me', { credentials: 'include' });
+    void restoreSession();
+  }, [restoreSession]);
 
-        if (response.ok) {
-          const data = await response.json() as { user: User; token: string };
-          setCurrentUser(data.user);
-          setToken(data.token);
-          LS.saveUser(data.user);
-        } else {
-          LS.clearUser();
-          setCurrentUser(null);
-          setToken(null);
-        }
-      } catch {
-        LS.clearUser();
-        setCurrentUser(null);
-        setToken(null);
-      } finally {
-        setRestoring(false);
-      }
-    })();
-  }, []);
+  useEffect(() => {
+    if (token) return undefined;
+
+    const restoreIfPossible = () => {
+      void restoreSession();
+    };
+
+    window.addEventListener('online', restoreIfPossible);
+    window.addEventListener('focus', restoreIfPossible);
+    return () => {
+      window.removeEventListener('online', restoreIfPossible);
+      window.removeEventListener('focus', restoreIfPossible);
+    };
+  }, [restoreSession, token]);
 
   const persistTokenCookie = async (newToken: string) => {
     try {

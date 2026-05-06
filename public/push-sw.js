@@ -1,9 +1,96 @@
+self.__LEMBRETO_SW_VERSION = '2026-05-06-1';
+
+const APP_CACHE = `lembreto-app-${self.__LEMBRETO_SW_VERSION}`;
+const RUNTIME_CACHE = `lembreto-runtime-${self.__LEMBRETO_SW_VERSION}`;
+const APP_SHELL_URLS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon.png',
+];
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil((async () => {
+    const cache = await caches.open(APP_CACHE);
+    await cache.addAll(APP_SHELL_URLS);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter((cacheName) => cacheName.startsWith('lembreto-') && ![APP_CACHE, RUNTIME_CACHE].includes(cacheName))
+        .map((cacheName) => caches.delete(cacheName)),
+    );
+    await self.clients.claim();
+  })());
+});
+
+function isApiRequest(url) {
+  return url.pathname.startsWith('/api/');
+}
+
+async function networkFirst(request) {
+  const cache = await caches.open(RUNTIME_CACHE);
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    return cache.match(request);
+  }
+}
+
+async function appShellFallback(request) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(APP_CACHE);
+    if (response.ok) {
+      await cache.put('/index.html', response.clone());
+    }
+    return response;
+  } catch {
+    return caches.match('/index.html');
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response.ok) {
+    const cache = await caches.open(RUNTIME_CACHE);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  if (url.origin !== self.location.origin || request.method !== 'GET' || isApiRequest(url)) {
+    return;
+  }
+
+  if (request.mode === 'navigate') {
+    event.respondWith(appShellFallback(request));
+    return;
+  }
+
+  if (request.destination === 'script' || request.destination === 'style') {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(request));
 });
 
 function normalizeNotificationPayload(payload) {

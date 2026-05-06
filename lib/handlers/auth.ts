@@ -25,7 +25,7 @@ import {
   getGoogleOAuthStateFromCookieHeader,
   getSessionTokenFromCookieHeader,
 } from '../session.js';
-import { shouldEnforceRecaptcha, verifyRecaptchaToken } from '../recaptcha.js';
+import { getRecaptchaSiteKey, shouldEnforceRecaptcha, verifyRecaptchaToken } from '../recaptcha.js';
 import {
   formatZodError,
   loginSchema,
@@ -100,6 +100,15 @@ interface ProfileCurrentUserRow {
   state_code: string | null;
   city_name: string | null;
   holiday_region_code: string | null;
+}
+
+export async function handleAuthConfig({ request }: HandlerContext): Promise<HandlerResult> {
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  return json(200, {
+    recaptchaRequired: shouldEnforceRecaptcha(),
+    recaptchaSiteKey: getRecaptchaSiteKey(),
+  });
 }
 
 function getStringQueryParam(value: unknown): string | null {

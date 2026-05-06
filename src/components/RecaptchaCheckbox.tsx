@@ -21,6 +21,8 @@ declare global {
 }
 
 const RECAPTCHA_SCRIPT_ID = 'google-recaptcha-api';
+const RECAPTCHA_LOAD_TIMEOUT_MS = 10000;
+const RECAPTCHA_RENDER_CHECK_MS = 2500;
 let recaptchaScriptPromise: Promise<void> | null = null;
 
 interface RecaptchaCheckboxProps {
@@ -35,17 +37,28 @@ function loadRecaptchaScript(): Promise<void> {
   if (recaptchaScriptPromise) return recaptchaScriptPromise;
 
   recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const loadTimeout = window.setTimeout(() => {
+      recaptchaScriptPromise = null;
+      reject(new Error('reCAPTCHA indisponível'));
+    }, RECAPTCHA_LOAD_TIMEOUT_MS);
+
     const resolveWhenReady = () => {
       if (window.grecaptcha?.ready) {
-        window.grecaptcha.ready(resolve);
+        window.grecaptcha.ready(() => {
+          window.clearTimeout(loadTimeout);
+          resolve();
+        });
         return;
       }
 
       if (window.grecaptcha?.render) {
+        window.clearTimeout(loadTimeout);
         resolve();
         return;
       }
 
+      window.clearTimeout(loadTimeout);
+      recaptchaScriptPromise = null;
       reject(new Error('reCAPTCHA indisponível'));
     };
 
@@ -54,16 +67,24 @@ function loadRecaptchaScript(): Promise<void> {
     const existing = document.getElementById(RECAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener('load', resolveWhenReady, { once: true });
-      existing.addEventListener('error', () => reject(new Error('reCAPTCHA indisponível')), { once: true });
+      existing.addEventListener('error', () => {
+        window.clearTimeout(loadTimeout);
+        recaptchaScriptPromise = null;
+        reject(new Error('reCAPTCHA indisponível'));
+      }, { once: true });
       return;
     }
 
     const script = document.createElement('script');
     script.id = RECAPTCHA_SCRIPT_ID;
-    script.src = 'https://www.google.com/recaptcha/api.js?onload=__lembretoRecaptchaReady&render=explicit';
+    script.src = 'https://www.google.com/recaptcha/api.js?onload=__lembretoRecaptchaReady&render=explicit&hl=pt-BR';
     script.async = true;
     script.defer = true;
-    script.onerror = () => reject(new Error('reCAPTCHA indisponível'));
+    script.onerror = () => {
+      window.clearTimeout(loadTimeout);
+      recaptchaScriptPromise = null;
+      reject(new Error('reCAPTCHA indisponível'));
+    };
     document.head.appendChild(script);
   });
 
@@ -93,6 +114,7 @@ export function RecaptchaCheckbox({
     }
 
     let cancelled = false;
+    let renderCheckTimeout: number | undefined;
     setStatus('loading');
 
     loadRecaptchaScript()
@@ -122,13 +144,25 @@ export function RecaptchaCheckbox({
             },
             'error-callback': () => {
               setVerified(false);
+              setStatus('error');
               onChange('');
+              onUnavailable?.();
               if (widgetIdRef.current !== null) {
                 window.grecaptcha?.reset(widgetIdRef.current);
               }
             },
           });
           setStatus('ready');
+
+          renderCheckTimeout = window.setTimeout(() => {
+            if (cancelled || !containerRef.current) return;
+
+            const iframe = containerRef.current.querySelector<HTMLIFrameElement>('iframe[src*="recaptcha"]');
+            if (!iframe || iframe.clientWidth === 0 || iframe.clientHeight === 0) {
+              setStatus('error');
+              onUnavailable?.();
+            }
+          }, RECAPTCHA_RENDER_CHECK_MS);
         } catch {
           widgetIdRef.current = null;
           setStatus('error');
@@ -143,6 +177,7 @@ export function RecaptchaCheckbox({
 
     return () => {
       cancelled = true;
+      if (renderCheckTimeout) window.clearTimeout(renderCheckTimeout);
     };
   }, [onChange, onUnavailable, resetKey, siteKey]);
 

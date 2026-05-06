@@ -59,6 +59,7 @@ async function main() {
     getAuthFailureResponse,
     requireAuthFromToken,
   } = await import('../lib/auth.js');
+  const { getRecaptchaSiteKey } = await import('../lib/recaptcha.js');
 
   await run('buildTokenJti composes subject and iat', () => {
     assert.equal(buildTokenJti({ sub: 'user-1', iat: 42 }), 'user-1_42');
@@ -131,6 +132,32 @@ async function main() {
       }),
       false,
     );
+  });
+
+  await run('recaptcha site key prefers Vite env and falls back to runtime env', () => {
+    const previousViteKey = process.env.VITE_RECAPTCHA_SITE_KEY;
+    const previousRuntimeKey = process.env.RECAPTCHA_SITE_KEY;
+
+    try {
+      delete process.env.VITE_RECAPTCHA_SITE_KEY;
+      process.env.RECAPTCHA_SITE_KEY = ' runtime-site-key ';
+      assert.equal(getRecaptchaSiteKey(), 'runtime-site-key');
+
+      process.env.VITE_RECAPTCHA_SITE_KEY = ' vite-site-key ';
+      assert.equal(getRecaptchaSiteKey(), 'vite-site-key');
+    } finally {
+      if (previousViteKey === undefined) {
+        delete process.env.VITE_RECAPTCHA_SITE_KEY;
+      } else {
+        process.env.VITE_RECAPTCHA_SITE_KEY = previousViteKey;
+      }
+
+      if (previousRuntimeKey === undefined) {
+        delete process.env.RECAPTCHA_SITE_KEY;
+      } else {
+        process.env.RECAPTCHA_SITE_KEY = previousRuntimeKey;
+      }
+    }
   });
 
   await run('avatar validator enforces mime type and size limit', () => {

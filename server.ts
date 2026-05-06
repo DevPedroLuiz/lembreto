@@ -11,6 +11,7 @@ import {
   sendHandlerResult,
 } from './lib/handlers/core.js';
 import {
+  handleAuthConfig,
   handleAuthGoogleCallback,
   handleAuthGoogleStart,
   handleAuthLogin,
@@ -100,6 +101,7 @@ async function startServer() {
 
   app.post('/api/auth/register', run(handleAuthRegister));
   app.post('/api/auth/login', run(handleAuthLogin));
+  app.get('/api/auth/config', run(handleAuthConfig));
   app.get('/api/auth/google/start', run(handleAuthGoogleStart));
   app.get('/api/auth/google/callback', run(handleAuthGoogleCallback));
   app.post('/api/auth/logout', run(handleAuthLogout));

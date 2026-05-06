@@ -11,6 +11,11 @@ interface AuthPageProps {
 
 type PasswordStrength = 'weak' | 'medium' | 'strong';
 
+interface AuthConfig {
+  recaptchaRequired?: boolean;
+  recaptchaSiteKey?: string | null;
+}
+
 function getPasswordStrength(password: string): {
   level: PasswordStrength;
   label: string;
@@ -54,10 +59,31 @@ function getPasswordStrength(password: string): {
   };
 }
 
+function SecurityVerificationUnavailable() {
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+          <ShieldCheck size={17} />
+        </div>
+        <div>
+          <p className="font-semibold">Verificação de segurança indisponível</p>
+          <p className="mt-1 leading-6">
+            Atualize a página e tente novamente. Se continuar assim, a chave pública do reCAPTCHA precisa ser configurada no ambiente.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AuthPage({ auth, toastNotify }: AuthPageProps) {
-  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
+  const configuredRecaptchaSiteKey = (import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined)?.trim() ?? '';
   const recaptchaDisabledForTest = import.meta.env.VITE_DISABLE_RECAPTCHA === 'true';
+  const [recaptchaSiteKey, setRecaptchaSiteKey] = useState(configuredRecaptchaSiteKey);
+  const [recaptchaRequired, setRecaptchaRequired] = useState(Boolean(import.meta.env.PROD));
   const recaptchaEnabled = Boolean(recaptchaSiteKey) && !recaptchaDisabledForTest;
+  const recaptchaMissingRequired = recaptchaRequired && !recaptchaEnabled && !recaptchaDisabledForTest;
   const [isLogin, setIsLogin] = useState(true);
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoverSuccess, setRecoverSuccess] = useState(false);
@@ -86,6 +112,35 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
     setRecoverEmail(rememberedEmail);
     setRememberEmail(true);
   }, []);
+
+  useEffect(() => {
+    if (recaptchaDisabledForTest) return;
+
+    let cancelled = false;
+
+    fetch('/api/auth/config', { credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Configuração de autenticação indisponível');
+        return response.json() as Promise<AuthConfig>;
+      })
+      .then((config) => {
+        if (cancelled) return;
+
+        const runtimeSiteKey = config.recaptchaSiteKey?.trim();
+        if (!configuredRecaptchaSiteKey && runtimeSiteKey) {
+          setRecaptchaSiteKey(runtimeSiteKey);
+        }
+        setRecaptchaRequired(Boolean(config.recaptchaRequired));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRecaptchaRequired(Boolean(import.meta.env.PROD));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configuredRecaptchaSiteKey, recaptchaDisabledForTest]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -127,6 +182,10 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   }, []);
 
   const validateRecaptcha = useCallback(() => {
+    if (recaptchaMissingRequired) {
+      setAuthError('A verificação de segurança não está disponível. Atualize a página e tente novamente.');
+      return false;
+    }
     if (!recaptchaEnabled || recaptchaToken) return true;
     if (recaptchaUnavailable) {
       setAuthError('Não foi possível carregar o reCAPTCHA. Atualize a página e tente novamente.');
@@ -134,7 +193,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
     }
     setAuthError('Confirme que você não é um robô.');
     return false;
-  }, [recaptchaEnabled, recaptchaToken, recaptchaUnavailable]);
+  }, [recaptchaEnabled, recaptchaMissingRequired, recaptchaToken, recaptchaUnavailable]);
 
   const handleAuth = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -306,12 +365,16 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                       />
                     </div>
 
-                    <RecaptchaCheckbox
-                      siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
-                      resetKey={recaptchaResetKey}
-                      onChange={setRecaptchaToken}
-                      onUnavailable={handleRecaptchaUnavailable}
-                    />
+                    {recaptchaMissingRequired ? (
+                      <SecurityVerificationUnavailable />
+                    ) : (
+                      <RecaptchaCheckbox
+                        siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
+                        resetKey={recaptchaResetKey}
+                        onChange={setRecaptchaToken}
+                        onUnavailable={handleRecaptchaUnavailable}
+                      />
+                    )}
 
                     {authError && (
                       <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
@@ -486,12 +549,16 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     </div>
                   )}
 
-                  <RecaptchaCheckbox
-                    siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
-                    resetKey={recaptchaResetKey}
-                    onChange={setRecaptchaToken}
-                    onUnavailable={handleRecaptchaUnavailable}
-                  />
+                  {recaptchaMissingRequired ? (
+                    <SecurityVerificationUnavailable />
+                  ) : (
+                    <RecaptchaCheckbox
+                      siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
+                      resetKey={recaptchaResetKey}
+                      onChange={setRecaptchaToken}
+                      onUnavailable={handleRecaptchaUnavailable}
+                    />
+                  )}
 
                   {authError && (
                     <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">

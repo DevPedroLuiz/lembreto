@@ -264,7 +264,12 @@ export function TaskDetailsDialog({
                       data-testid="task-details-toggle"
                       onClick={() => onToggle(task)}
                       disabled={isBusy}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      className={[
+                        'inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
+                        isCompleted
+                          ? 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_16px_30px_-22px_rgba(16,185,129,0.75)] hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 hover:shadow-[0_20px_36px_-24px_rgba(16,185,129,0.9)] dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-200',
+                      ].join(' ')}
                     >
                       {isCompleted ? <Circle size={16} /> : <CheckCircle2 size={16} />}
                       {isCompleted ? 'Reabrir' : 'Concluir'}

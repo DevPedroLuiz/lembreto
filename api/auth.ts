@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import {
+  handleAuthConfig,
   handleAuthGoogleCallback,
   handleAuthGoogleStart,
   handleAuthLogin,
@@ -30,6 +31,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return handleAuthGoogleStart({ sql, request });
       case 'google-callback':
         return handleAuthGoogleCallback({ sql, request });
+      case 'config':
+        return handleAuthConfig({ sql, request });
       case 'register':
         return handleAuthRegister({ sql, request });
       case 'login':

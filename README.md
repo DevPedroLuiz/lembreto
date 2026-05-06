@@ -32,6 +32,7 @@ APP_URL=http://localhost:3001
 GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=seu_client_secret_do_google
 VITE_RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
+RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
 RECAPTCHA_SECRET_KEY=sua_chave_secreta_recaptcha_v2
 CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 ```
@@ -43,7 +44,7 @@ Notas:
 - `APP_URL` deve apontar para a URL pública do app em produção.
 - `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botão "Entrar com Google".
 - No Google Cloud Console, configure o redirect URI autorizado como `{APP_URL}/api/auth/google/callback`.
-- `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha.
+- `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha. Em produção, `RECAPTCHA_SITE_KEY` pode ser usada como fallback runtime pela rota `/api/auth/config`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
 ## Setup local

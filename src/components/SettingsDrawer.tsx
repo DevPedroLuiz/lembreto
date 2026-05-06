@@ -12,7 +12,6 @@ import {
   Plus,
   Settings,
   ShieldAlert,
-  Sparkles,
   Tag,
   UserCircle2,
   Volume2,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { BRAZIL_STATES } from '../../lib/brazil-location';
+import { isDefaultCategory, normalizeTaxonomyValue } from '../lib/taxonomy';
 import type { HolidayRegionOption } from '../types';
 
 function Toggle({
@@ -105,8 +105,7 @@ export type SettingsView =
   | 'notifications'
   | 'organization'
   | 'safety'
-  | 'account'
-  | 'center';
+  | 'account';
 
 type SettingToggleKey =
   | 'darkMode'
@@ -150,12 +149,6 @@ const settingsViews: Array<{
     title: 'Conta',
     description: 'Perfil e acesso.',
     icon: UserCircle2,
-  },
-  {
-    key: 'center',
-    title: 'Central',
-    description: 'Histórico de notificações.',
-    icon: Settings,
   },
 ];
 
@@ -208,16 +201,6 @@ const settingCards: Array<{
     icon: ShieldAlert,
   },
 ];
-
-function normalizeTaxonomyValue(value: string) {
-  return value.trim().replace(/\s+/g, ' ');
-}
-
-function isDefaultCategory(value: string) {
-  return ['Geral', 'Trabalho', 'Pessoal', 'Estudos'].some(
-    (category) => category.localeCompare(value, 'pt-BR', { sensitivity: 'accent' }) === 0,
-  );
-}
 
 function SectionHeader({
   eyebrow,
@@ -325,6 +308,7 @@ export function SettingsDrawer({
   const [deletingCategoryName, setDeletingCategoryName] = React.useState<string | null>(null);
   const [deletingTagName, setDeletingTagName] = React.useState<string | null>(null);
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
+  const [holidayFeedback, setHolidayFeedback] = React.useState('');
 
   const swipe = useSwipeToClose({
     enabled: open,
@@ -337,6 +321,7 @@ export function SettingsDrawer({
     setCategoryDraft('');
     setTagDraft('');
     setTaxonomyFeedback('');
+    setHolidayFeedback('');
     setDeletingCategoryName(null);
     setDeletingTagName(null);
     setHolidayStateDraft(holidayStateCode ?? '');
@@ -426,9 +411,9 @@ export function SettingsDrawer({
         stateCode: nextStateCode,
         cityName: nextCityName,
       });
-      setTaxonomyFeedback('Região de feriados atualizada com sucesso.');
+      setHolidayFeedback('Região de feriados atualizada com sucesso.');
     } catch (error) {
-      setTaxonomyFeedback(
+      setHolidayFeedback(
         error instanceof Error
           ? error.message
           : 'Não foi possível salvar a região agora. Tente novamente.',
@@ -439,9 +424,9 @@ export function SettingsDrawer({
   const handleDetectHolidayLocation = React.useCallback(async () => {
     try {
       await onDetectHolidayLocation();
-      setTaxonomyFeedback('Localização detectada e aplicada com sucesso.');
+      setHolidayFeedback('Localização detectada e aplicada com sucesso.');
     } catch (error) {
-      setTaxonomyFeedback(
+      setHolidayFeedback(
         error instanceof Error
           ? error.message
           : 'Não foi possível detectar sua localização agora.',
@@ -548,6 +533,116 @@ export function SettingsDrawer({
     </div>
   );
 
+  const renderHolidayRegionPanel = () => (
+    <section className="surface-soft p-5">
+      <SectionHeader
+        eyebrow="Feriados"
+        title="Região para feriados"
+        description="Escolha seu estado e cidade para incluir feriados estaduais e municipais junto aos nacionais."
+      />
+
+      <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="mt-1 grid gap-3 sm:grid-cols-2">
+          <label className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+              Estado
+            </span>
+            <select
+              value={holidayStateDraft}
+              onChange={(event) => setHolidayStateDraft(event.target.value)}
+              className="field-control"
+            >
+              <option value="">Selecionar estado</option>
+              {BRAZIL_STATES.map((state) => (
+                <option key={state.code} value={state.code}>
+                  {state.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+              Cidade
+            </span>
+            <input
+              type="text"
+              value={holidayCityDraft}
+              onChange={(event) => setHolidayCityDraft(event.target.value)}
+              placeholder="Ex.: São Paulo, Recife, Belo Horizonte"
+              className="field-control"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-300">
+          {holidayStateCode ? (
+            holidayMunicipalSupported ? (
+              <span>
+                Feriados municipais ativos para <strong>{holidayMatchedRegionName ?? holidayCityName ?? 'sua cidade'}</strong>.
+              </span>
+            ) : (
+              <span>
+                Os feriados nacionais e estaduais já estão ativos. Para municípios, a cobertura depende da cidade informada.
+              </span>
+            )
+          ) : (
+            <span>Sem região definida. Hoje o sistema mostra apenas os feriados nacionais.</span>
+          )}
+        </div>
+
+        {holidaySupportedCities.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+              Cidades reconhecidas neste estado
+            </p>
+            <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+              {holidaySupportedCities.map((city) => (
+                <span
+                  key={city.code}
+                  className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
+                >
+                  {city.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => {
+              void handleDetectHolidayLocation();
+            }}
+            disabled={isDetectingHolidayLocation}
+            className="action-secondary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isDetectingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
+            Usar minha localização
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleSaveHolidayLocation();
+            }}
+            disabled={isSavingHolidayLocation || !holidayStateDraft.trim()}
+            className="action-primary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSavingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+            Salvar região
+          </button>
+        </div>
+      </div>
+
+      {holidayFeedback && (
+        <p className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+          {holidayFeedback}
+        </p>
+      )}
+    </section>
+  );
+
   const renderActiveView = () => {
     switch (activeView) {
       case 'appearance':
@@ -626,11 +721,11 @@ export function SettingsDrawer({
         return (
           <section className="space-y-4">
             <section className="surface-soft p-5">
-            <SectionHeader
-              eyebrow="Notificações"
-              title="Alertas e sinais"
-              description="Defina como o Lembreto chama sua atenção."
-            />
+              <SectionHeader
+                eyebrow="Notificações"
+                title="Alertas e sinais"
+                description="Defina como o Lembreto chama sua atenção."
+              />
               {renderToggleCards(notificationCards)}
             </section>
 
@@ -681,6 +776,14 @@ export function SettingsDrawer({
                 ) : null}
               </div>
             </section>
+
+            <ActionPanel
+              title="Central de notificações"
+              description="Abra o histórico completo dos avisos do sistema."
+              buttonLabel="Abrir central de notificações"
+              onAction={onOpenNotificationsCenter}
+              testId="settings-open-notifications-center"
+            />
           </section>
         );
       }
@@ -705,108 +808,6 @@ export function SettingsDrawer({
               />
 
               <div className="space-y-5">
-                <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                    <MapPin size={16} />
-                    Região para feriados
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    Escolha seu estado e cidade para incluir feriados estaduais e municipais junto aos nacionais.
-                  </p>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                        Estado
-                      </span>
-                      <select
-                        value={holidayStateDraft}
-                        onChange={(event) => setHolidayStateDraft(event.target.value)}
-                        className="field-control"
-                      >
-                        <option value="">Selecionar estado</option>
-                        {BRAZIL_STATES.map((state) => (
-                          <option key={state.code} value={state.code}>
-                            {state.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                        Cidade
-                      </span>
-                      <input
-                        type="text"
-                        value={holidayCityDraft}
-                        onChange={(event) => setHolidayCityDraft(event.target.value)}
-                        placeholder="Ex.: São Paulo, Recife, Belo Horizonte"
-                        className="field-control"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-slate-950/40 dark:text-slate-300">
-                    {holidayStateCode ? (
-                      holidayMunicipalSupported ? (
-                        <span>
-                          Feriados municipais ativos para <strong>{holidayMatchedRegionName ?? holidayCityName ?? 'sua cidade'}</strong>.
-                        </span>
-                      ) : (
-                        <span>
-                          Os feriados nacionais e estaduais já estão ativos. Para municípios, a cobertura depende da cidade informada.
-                        </span>
-                      )
-                    ) : (
-                      <span>Sem região definida. Hoje o sistema mostra apenas os feriados nacionais.</span>
-                    )}
-                  </div>
-
-                  {holidaySupportedCities.length > 0 && (
-                    <div className="mt-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                        Cidades reconhecidas neste estado
-                      </p>
-                      <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
-                        {holidaySupportedCities.map((city) => (
-                          <span
-                            key={city.code}
-                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300"
-                          >
-                            {city.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleDetectHolidayLocation();
-                      }}
-                      disabled={isDetectingHolidayLocation}
-                      className="action-secondary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isDetectingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
-                      Usar minha localização
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSaveHolidayLocation();
-                      }}
-                      disabled={isSavingHolidayLocation || !holidayStateDraft.trim()}
-                      className="action-primary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isSavingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
-                      Salvar região
-                    </button>
-                  </div>
-                </div>
-
                 <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                     <FolderPlus size={16} />
@@ -963,23 +964,15 @@ export function SettingsDrawer({
 
       case 'account':
         return (
-          <ActionPanel
-            title="Conta e identidade"
-            description="Atualize nome, e-mail, senha e avatar sem sair daqui."
-            buttonLabel="Abrir perfil"
-            onAction={onOpenProfile}
-          />
-        );
-
-      case 'center':
-        return (
-          <ActionPanel
-            title="Central de notificações"
-            description="Abra o histórico completo dos avisos do sistema."
-            buttonLabel="Abrir central de notificações"
-            onAction={onOpenNotificationsCenter}
-            testId="settings-open-notifications-center"
-          />
+          <section className="space-y-4">
+            <ActionPanel
+              title="Conta e identidade"
+              description="Atualize nome, e-mail, senha e avatar sem sair daqui."
+              buttonLabel="Abrir perfil"
+              onAction={onOpenProfile}
+            />
+            {renderHolidayRegionPanel()}
+          </section>
         );
 
       default:
@@ -1048,23 +1041,7 @@ export function SettingsDrawer({
             <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
               <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]">
                 <aside className="surface-soft h-fit p-4">
-                  <div className="rounded-[24px] border border-blue-200/70 bg-gradient-to-br from-blue-50 to-sky-50 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
-                    <div className="flex items-start gap-3">
-                      <span className="icon-slot h-11 w-11 rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_16px_32px_-20px_rgba(37,99,235,0.7)]">
-                        <Sparkles size={18} />
-                      </span>
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
-                          Painel de preferências
-                        </h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-300">
-                          Escolha uma área ao lado para ver apenas o que importa agora.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Seções de configurações">
+                  <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Seções de configurações">
                     {settingsViews.map((view) => {
                       const Icon = view.icon;
                       const isActive = activeView === view.key;
