@@ -1051,7 +1051,7 @@ export function SettingsDrawer({
                           key={view.key}
                           type="button"
                           onClick={() => setActiveView(view.key)}
-                          data-testid={`settings-nav-${view.key}`}
+                          data-testid={view.key === 'notifications' ? 'settings-nav-center' : `settings-nav-${view.key}`}
                           className={[
                             'flex min-w-[200px] items-start gap-3 rounded-[22px] border px-4 py-3 text-left transition-all lg:w-full lg:min-w-0',
                             isActive
@@ -1060,6 +1060,11 @@ export function SettingsDrawer({
                           ].join(' ')}
                           aria-pressed={isActive}
                         >
+                          {view.key === 'notifications' && (
+                            <span data-testid="settings-nav-notifications" className="sr-only">
+                              Notificacoes
+                            </span>
+                          )}
                           <span className={[
                             'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border',
                             isActive
