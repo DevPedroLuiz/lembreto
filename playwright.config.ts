@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.local' });
 
+process.env.VITE_DISABLE_RECAPTCHA = 'true';
+process.env.RECAPTCHA_SKIP_VERIFY = 'true';
+
 const PORT = Number(process.env.PORT ?? 3001);
 const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 const useSystemEdge = process.env.CI !== 'true' && process.env.PLAYWRIGHT_CHANNEL !== 'chromium';

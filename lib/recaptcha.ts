@@ -13,7 +13,12 @@ export function isRecaptchaConfigured(): boolean {
   return Boolean(process.env.RECAPTCHA_SECRET_KEY);
 }
 
+export function shouldSkipRecaptchaForTest(): boolean {
+  return process.env.RECAPTCHA_SKIP_VERIFY === 'true';
+}
+
 export function shouldEnforceRecaptcha(): boolean {
+  if (shouldSkipRecaptchaForTest()) return false;
   return isRecaptchaConfigured() || process.env.NODE_ENV === 'production';
 }
 
@@ -22,6 +27,8 @@ export async function verifyRecaptchaToken(
   request: HandlerRequest,
 ): Promise<boolean> {
   const secret = process.env.RECAPTCHA_SECRET_KEY;
+
+  if (shouldSkipRecaptchaForTest()) return true;
 
   if (!secret) {
     if (process.env.NODE_ENV === 'production') {

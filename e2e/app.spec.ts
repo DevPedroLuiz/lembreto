@@ -560,7 +560,7 @@ test.describe('Lembreto critical flows', () => {
       await updatedTask.click();
       await expect(taskDetailsDialog).toBeVisible();
       await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Lembrete atualizado');
-      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Titulo atualizado.');
+      await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Título atualizado.');
       await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Categoria alterada.');
       await page.getByTestId('task-details-toggle').click();
       await expect(taskDetailsDialog).toHaveCount(0);

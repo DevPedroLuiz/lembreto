@@ -56,7 +56,8 @@ function getPasswordStrength(password: string): {
 
 export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
-  const recaptchaEnabled = Boolean(recaptchaSiteKey);
+  const recaptchaDisabledForTest = import.meta.env.VITE_DISABLE_RECAPTCHA === 'true';
+  const recaptchaEnabled = Boolean(recaptchaSiteKey) && !recaptchaDisabledForTest;
   const [isLogin, setIsLogin] = useState(true);
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoverSuccess, setRecoverSuccess] = useState(false);
@@ -296,7 +297,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     </div>
 
                     <RecaptchaCheckbox
-                      siteKey={recaptchaSiteKey}
+                      siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
                       resetKey={recaptchaResetKey}
                       onChange={setRecaptchaToken}
                     />
@@ -475,7 +476,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                   )}
 
                   <RecaptchaCheckbox
-                    siteKey={recaptchaSiteKey}
+                    siteKey={recaptchaEnabled ? recaptchaSiteKey : undefined}
                     resetKey={recaptchaResetKey}
                     onChange={setRecaptchaToken}
                   />
