@@ -27,6 +27,7 @@ export class AuthError extends Error {
 }
 
 let ensureUserProfileSchemaPromise: Promise<void> | null = null;
+let ensureGoogleAuthSchemaPromise: Promise<void> | null = null;
 
 export async function ensureUserProfileSchema(sql: SqlClient) {
   if (!ensureUserProfileSchemaPromise) {
@@ -38,6 +39,18 @@ export async function ensureUserProfileSchema(sql: SqlClient) {
   }
 
   await ensureUserProfileSchemaPromise;
+}
+
+export async function ensureGoogleAuthSchema(sql: SqlClient) {
+  if (!ensureGoogleAuthSchemaPromise) {
+    ensureGoogleAuthSchemaPromise = (async () => {
+      await ensureUserProfileSchema(sql);
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL`;
+    })();
+  }
+
+  await ensureGoogleAuthSchemaPromise;
 }
 
 export function buildTokenJti(payload: Pick<JwtPayload, 'sub' | 'iat'>): string {

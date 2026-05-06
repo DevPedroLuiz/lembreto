@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { buildSessionCookie, clearSessionCookie, getSessionTokenFromCookieHeader } from '../lib/session.js';
+import {
+  buildGoogleOAuthStateCookie,
+  buildSessionCookie,
+  clearGoogleOAuthStateCookie,
+  clearSessionCookie,
+  getGoogleOAuthStateFromCookieHeader,
+  getSessionTokenFromCookieHeader,
+} from '../lib/session.js';
 import { isTrustedRequestOrigin } from '../lib/csrf.js';
 import { MAX_AVATAR_BYTES, validateAvatarDataUrl } from '../lib/avatar.js';
 import {
@@ -92,6 +99,18 @@ async function main() {
 
     const token = getSessionTokenFromCookieHeader('foo=bar; lembreto_session=token-123; theme=dark');
     assert.equal(token, 'token-123');
+  });
+
+  await run('google oauth state cookie helpers set and clear state cookie', () => {
+    const cookie = buildGoogleOAuthStateCookie('state-123', 600);
+    assert.match(cookie, /lembreto_google_oauth_state=state-123/);
+    assert.match(cookie, /SameSite=Lax/);
+
+    const cleared = clearGoogleOAuthStateCookie();
+    assert.match(cleared, /Max-Age=0/);
+
+    const state = getGoogleOAuthStateFromCookieHeader('foo=bar; lembreto_google_oauth_state=state-123');
+    assert.equal(state, 'state-123');
   });
 
   await run('csrf helper rejects cross-site requests', () => {

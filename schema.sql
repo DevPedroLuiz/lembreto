@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   name        TEXT        NOT NULL,
   email       TEXT        UNIQUE NOT NULL,
   password    TEXT        NOT NULL,
+  google_id   TEXT        UNIQUE,
   avatar      TEXT,
   notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   state_code  TEXT,
@@ -36,6 +37,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 -- Índices para consultas frequentes
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id
+  ON users(google_id)
+  WHERE google_id IS NOT NULL;
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 

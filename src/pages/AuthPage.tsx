@@ -81,6 +81,21 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleError = params.get('auth_error');
+    if (!googleError) return;
+
+    setAuthError(googleError);
+    params.delete('auth_error');
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`,
+    );
+  }, []);
+
+  useEffect(() => {
     if (!isLogin) return;
 
     if (!rememberEmail) {
@@ -428,6 +443,35 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
                       {authError}
                     </p>
+                  )}
+
+                  {isLogin && (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+                        <span className="text-xs font-semibold uppercase text-slate-400 dark:text-slate-500">
+                          ou
+                        </span>
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+                      </div>
+
+                      <button
+                        type="button"
+                        data-testid="google-login-button"
+                        disabled={authLoading}
+                        onClick={() => {
+                          setAuthError('');
+                          setAuthLoading(true);
+                          auth.loginWithGoogle();
+                        }}
+                        className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
+                      >
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-base font-bold text-blue-600 shadow-sm">
+                          G
+                        </span>
+                        Entrar com Google
+                      </button>
+                    </>
                   )}
 
                   <button

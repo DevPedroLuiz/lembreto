@@ -112,6 +112,10 @@ export function useAuth() {
     return apiPost<{ message: string }>('/api/auth/recover', { email });
   };
 
+  const loginWithGoogle = () => {
+    window.location.assign('/api/auth/google/start');
+  };
+
   const updateProfile = async (payload: {
     name?: string;
     email?: string;
@@ -140,6 +144,7 @@ export function useAuth() {
     token,
     restoring,
     login,
+    loginWithGoogle,
     register,
     logout,
     recoverPassword,

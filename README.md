@@ -29,6 +29,8 @@ DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 JWT_SECRET=uma_chave_longa_e_aleatoria_com_pelo_menos_32_caracteres
 RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
+GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=seu_client_secret_do_google
 CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 ```
 
@@ -37,6 +39,8 @@ Notas:
 - `JWT_SECRET` e obrigatoria em desenvolvimento e producao.
 - `RESEND_API_KEY` e necessaria para envio real do email de recuperacao.
 - `APP_URL` deve apontar para a URL publica do app em producao.
+- `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botao "Entrar com Google".
+- No Google Cloud Console, configure o redirect URI autorizado como `{APP_URL}/api/auth/google/callback`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
 ## Setup local
@@ -52,6 +56,7 @@ npm install
 - `schema.sql`
 - `migrate_jwt.sql`
 - `migrate_recovery.sql`
+- `migrate_google_oauth.sql`
 - `migrate_passwords.sql` quando fizer a migracao de senhas legadas
 
 3. Inicie o servidor local:

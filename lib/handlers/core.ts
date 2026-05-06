@@ -24,11 +24,11 @@ export interface HandlerContext {
 export interface HandlerResult {
   status: number;
   body?: unknown;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | string[]>;
 }
 
 interface ResponseLike {
-  setHeader: (name: string, value: string) => void;
+  setHeader: (name: string, value: string | string[]) => void;
   status: (status: number) => {
     send: (body: string) => unknown;
     end: () => unknown;
@@ -50,14 +50,14 @@ interface RequestLike {
 export function json(
   status: number,
   body: unknown,
-  headers?: Record<string, string>,
+  headers?: Record<string, string | string[]>,
 ): HandlerResult {
   return { status, body, headers };
 }
 
 export function empty(
   status: number,
-  headers?: Record<string, string>,
+  headers?: Record<string, string | string[]>,
 ): HandlerResult {
   return { status, headers };
 }

@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import {
   buildTokenJti,
+  ensureGoogleAuthSchema,
   ensureUserProfileSchema,
   getAuthFailureResponse,
   requireAuthFromAuthorizationHeader,
@@ -17,7 +19,10 @@ import {
 } from '../password-reset.js';
 import {
   buildSessionCookie,
+  buildGoogleOAuthStateCookie,
+  clearGoogleOAuthStateCookie,
   clearSessionCookie,
+  getGoogleOAuthStateFromCookieHeader,
   getSessionTokenFromCookieHeader,
 } from '../session.js';
 import {
@@ -32,6 +37,7 @@ import { checkRateLimit, clearRateLimit } from '../../api/_rate_limit.js';
 import {
   type HandlerContext,
   type HandlerResult,
+  empty,
   getRequestIp,
   getRequestMeta,
   json,
@@ -41,6 +47,10 @@ import {
 const GENERIC_RECOVER_RESPONSE = {
   message: 'Se este e-mail estiver cadastrado, voce recebera um link em breve.',
 };
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
+const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 
 interface UserRow {
   id: string;
@@ -66,6 +76,20 @@ interface ResetTokenRow {
   user_id: string;
 }
 
+interface GoogleUserInfo {
+  sub?: string;
+  name?: string;
+  email?: string;
+  email_verified?: boolean;
+  picture?: string;
+}
+
+interface GoogleTokenResponse {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+}
+
 interface ProfileCurrentUserRow {
   name: string;
   email: string;
@@ -74,6 +98,259 @@ interface ProfileCurrentUserRow {
   state_code: string | null;
   city_name: string | null;
   holiday_region_code: string | null;
+}
+
+function getStringQueryParam(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return null;
+}
+
+function getAppBaseUrl(context: HandlerContext): string {
+  const configured = process.env.APP_URL ?? context.defaultAppUrl;
+  if (configured) return configured.replace(/\/+$/, '');
+
+  const host = context.request.headers.host;
+  const normalizedHost = Array.isArray(host) ? host[0] : host;
+  if (normalizedHost) {
+    const forwardedProto = context.request.headers['x-forwarded-proto'];
+    const protocolValue = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto;
+    const protocol = protocolValue?.split(',')[0]?.trim() || (
+      normalizedHost.startsWith('localhost') || normalizedHost.startsWith('127.0.0.1')
+        ? 'http'
+        : 'https'
+    );
+    return `${protocol}://${normalizedHost}`;
+  }
+
+  return 'https://lembreto.vercel.app';
+}
+
+function getGoogleRedirectUri(context: HandlerContext): string {
+  return `${getAppBaseUrl(context)}/api/auth/google/callback`;
+}
+
+function redirectToAuthError(context: HandlerContext, message: string, clearState = true): HandlerResult {
+  const headers: Record<string, string | string[]> = {
+    Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent(message)}`,
+  };
+
+  if (clearState) {
+    headers['Set-Cookie'] = clearGoogleOAuthStateCookie();
+  }
+
+  return empty(302, headers);
+}
+
+async function exchangeGoogleCodeForAccessToken(code: string, redirectUri: string): Promise<string> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('GOOGLE_OAUTH_NOT_CONFIGURED');
+  }
+
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({})) as GoogleTokenResponse;
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || 'GOOGLE_TOKEN_EXCHANGE_FAILED');
+  }
+
+  return data.access_token;
+}
+
+async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo> {
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const data = await response.json().catch(() => ({})) as GoogleUserInfo;
+  if (!response.ok || !data.sub || !data.email) {
+    throw new Error('GOOGLE_USERINFO_FAILED');
+  }
+
+  return data;
+}
+
+async function findOrCreateGoogleUser(
+  sql: HandlerContext['sql'],
+  profile: Required<Pick<GoogleUserInfo, 'sub' | 'email'>> & GoogleUserInfo,
+): Promise<UserRow> {
+  await ensureGoogleAuthSchema(sql);
+
+  const existingByGoogleId = await sql`
+    SELECT
+      id,
+      name,
+      email,
+      avatar,
+      state_code AS "stateCode",
+      city_name AS "cityName",
+      holiday_region_code AS "holidayRegionCode"
+    FROM users
+    WHERE google_id = ${profile.sub}
+  `;
+
+  if (existingByGoogleId.length > 0) {
+    const user = existingByGoogleId[0] as unknown as UserRow;
+
+    const updated = await sql`
+      UPDATE users
+      SET
+        google_id = ${profile.sub}
+      WHERE id = ${user.id}
+      RETURNING
+        id,
+        name,
+        email,
+        avatar,
+        state_code AS "stateCode",
+        city_name AS "cityName",
+        holiday_region_code AS "holidayRegionCode"
+    `;
+
+    return updated[0] as unknown as UserRow;
+  }
+
+  const existingByEmail = await sql`
+    SELECT
+      id,
+      name,
+      email,
+      avatar,
+      state_code AS "stateCode",
+      city_name AS "cityName",
+      holiday_region_code AS "holidayRegionCode"
+    FROM users
+    WHERE email = ${profile.email}
+  `;
+
+  if (existingByEmail.length > 0) {
+    const user = existingByEmail[0] as unknown as UserRow;
+    const linked = await sql`
+      UPDATE users
+      SET
+        google_id = ${profile.sub}
+      WHERE id = ${user.id}
+      RETURNING
+        id,
+        name,
+        email,
+        avatar,
+        state_code AS "stateCode",
+        city_name AS "cityName",
+        holiday_region_code AS "holidayRegionCode"
+    `;
+
+    return linked[0] as unknown as UserRow;
+  }
+
+  const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  const name = profile.name?.trim() || profile.email.split('@')[0] || 'Usuario Google';
+  const rows = await sql`
+    INSERT INTO users (name, email, password, avatar, google_id)
+    VALUES (${name}, ${profile.email}, ${generatedPasswordHash}, ${null}, ${profile.sub})
+    RETURNING
+      id,
+      name,
+      email,
+      avatar,
+      state_code AS "stateCode",
+      city_name AS "cityName",
+      holiday_region_code AS "holidayRegionCode"
+  `;
+
+  return rows[0] as unknown as UserRow;
+}
+
+export async function handleAuthGoogleStart(context: HandlerContext): Promise<HandlerResult> {
+  const { request } = context;
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    logError('auth_google_not_configured', new Error('GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET missing'), getRequestMeta(request));
+    return redirectToAuthError(context, 'Login com Google ainda nao configurado.');
+  }
+
+  const state = crypto.randomBytes(32).toString('hex');
+  const authorizationUrl = new URL(GOOGLE_AUTH_URL);
+  authorizationUrl.searchParams.set('client_id', clientId);
+  authorizationUrl.searchParams.set('redirect_uri', getGoogleRedirectUri(context));
+  authorizationUrl.searchParams.set('response_type', 'code');
+  authorizationUrl.searchParams.set('scope', 'openid email profile');
+  authorizationUrl.searchParams.set('include_granted_scopes', 'true');
+  authorizationUrl.searchParams.set('prompt', 'select_account');
+  authorizationUrl.searchParams.set('state', state);
+
+  return empty(302, {
+    Location: authorizationUrl.toString(),
+    'Set-Cookie': buildGoogleOAuthStateCookie(state, GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS),
+  });
+}
+
+export async function handleAuthGoogleCallback(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  const googleError = getStringQueryParam(request.query?.error);
+  if (googleError) {
+    logWarn('auth_google_denied', getRequestMeta(request, { googleError }));
+    return redirectToAuthError(context, 'Login com Google cancelado.');
+  }
+
+  const code = getStringQueryParam(request.query?.code);
+  const state = getStringQueryParam(request.query?.state);
+  const expectedState = getGoogleOAuthStateFromCookieHeader(request.headers.cookie as string | undefined);
+
+  if (!code || !state || !expectedState || state !== expectedState) {
+    logWarn('auth_google_state_mismatch', getRequestMeta(request));
+    return redirectToAuthError(context, 'Nao foi possivel validar o login com Google.');
+  }
+
+  try {
+    const accessToken = await exchangeGoogleCodeForAccessToken(code, getGoogleRedirectUri(context));
+    const profile = await fetchGoogleUserInfo(accessToken);
+
+    if (!profile.sub || !profile.email) {
+      return redirectToAuthError(context, 'A conta Google nao retornou os dados necessarios.');
+    }
+
+    if (profile.email_verified === false) {
+      return redirectToAuthError(context, 'Use uma conta Google com e-mail verificado.');
+    }
+
+    const user = await findOrCreateGoogleUser(sql, {
+      ...profile,
+      sub: profile.sub,
+      email: profile.email,
+    });
+    const token = signToken({ sub: user.id, email: user.email });
+
+    logInfo('auth_google_success', getRequestMeta(request, { userId: user.id }));
+    return empty(302, {
+      Location: `${getAppBaseUrl(context)}/`,
+      'Set-Cookie': [
+        buildSessionCookie(token, 7 * 24 * 60 * 60),
+        clearGoogleOAuthStateCookie(),
+      ],
+    });
+  } catch (error) {
+    logError('auth_google_failed', error, getRequestMeta(request));
+    return redirectToAuthError(context, 'Falha ao concluir login com Google.');
+  }
 }
 
 export async function handleAuthRegister(context: HandlerContext): Promise<HandlerResult> {
