@@ -16,6 +16,22 @@ export interface JwtPayload {
   exp?: number;
 }
 
+export interface CalendarFeedJwtPayload {
+  sub: string;
+  email: string;
+  scope: 'calendar-feed';
+  iat?: number;
+}
+
+export interface CalendarOAuthStateJwtPayload {
+  sub: string;
+  provider: 'google' | 'outlook';
+  nonce: string;
+  scope: 'calendar-oauth';
+  iat?: number;
+  exp?: number;
+}
+
 /** Gera um JWT assinado válido por 7 dias. */
 export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
   return jwt.sign(payload, SECRET as string, { expiresIn: '7d' });
@@ -24,6 +40,32 @@ export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
 /** Verifica e decodifica o token. Lança erro se inválido ou expirado. */
 export function verifyToken(token: string): JwtPayload {
   return jwt.verify(token, SECRET as string) as JwtPayload;
+}
+
+export function signCalendarFeedToken(payload: Omit<CalendarFeedJwtPayload, 'iat' | 'scope'>): string {
+  return jwt.sign({ ...payload, scope: 'calendar-feed' }, SECRET as string);
+}
+
+export function verifyCalendarFeedToken(token: string): CalendarFeedJwtPayload {
+  const payload = jwt.verify(token, SECRET as string) as CalendarFeedJwtPayload;
+  if (payload.scope !== 'calendar-feed') {
+    throw new Error('Invalid calendar feed token scope');
+  }
+
+  return payload;
+}
+
+export function signCalendarOAuthState(payload: Omit<CalendarOAuthStateJwtPayload, 'iat' | 'exp' | 'scope'>): string {
+  return jwt.sign({ ...payload, scope: 'calendar-oauth' }, SECRET as string, { expiresIn: '10m' });
+}
+
+export function verifyCalendarOAuthState(token: string): CalendarOAuthStateJwtPayload {
+  const payload = jwt.verify(token, SECRET as string) as CalendarOAuthStateJwtPayload;
+  if (payload.scope !== 'calendar-oauth') {
+    throw new Error('Invalid calendar OAuth state scope');
+  }
+
+  return payload;
 }
 
 /** Extrai o token do header Authorization: Bearer <token> */

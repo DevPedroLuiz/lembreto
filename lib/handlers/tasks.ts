@@ -1,5 +1,12 @@
-import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
+import { getAuthFailureResponse, getSafeUserById, requireAuthFromAuthorizationHeader } from '../auth.js';
 import { randomUUID } from 'node:crypto';
+import { buildTasksIcs, type CalendarTask } from '../calendar/ics.js';
+import {
+  ensureCalendarIntegrationSchema,
+  getTaskForCalendarSync,
+  removeTaskFromExternalCalendar,
+  syncTaskToExternalCalendar,
+} from '../calendar/calendarSync.js';
 import {
   buildHolidayCalendar,
   detectBrazilLocationFromCoordinates,
@@ -23,6 +30,7 @@ import {
   upsertUserCategory,
   upsertUserTags,
 } from '../task-taxonomy.js';
+import { signCalendarFeedToken, verifyCalendarFeedToken } from '../jwt.js';
 import {
   type HandlerContext,
   type HandlerResult,
@@ -75,6 +83,31 @@ async function requireTaskAuth(context: HandlerContext) {
   }
 }
 
+function getQueryStringValue(context: HandlerContext, key: string): string | null {
+  const value = context.request.query?.[key];
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return null;
+}
+
+async function requireTaskCalendarAuth(context: HandlerContext) {
+  const feedToken = getQueryStringValue(context, 'token');
+
+  if (feedToken) {
+    try {
+      const payload = verifyCalendarFeedToken(feedToken);
+      const user = await getSafeUserById(context.sql, payload.sub);
+      if (!user) return json(401, { error: 'UsuÃ¡rio nÃ£o encontrado' });
+      return { payload, user, token: feedToken };
+    } catch (error) {
+      logError('task_calendar_feed_auth_failed', error, getRequestMeta(context.request));
+      return json(401, { error: 'Link de calendÃ¡rio invÃ¡lido' });
+    }
+  }
+
+  return requireTaskAuth(context);
+}
+
 async function syncTaskTaxonomy(sql: HandlerContext['sql'], userId: string, category: string, tags: string[]) {
   await upsertUserCategory(sql, userId, category);
   await upsertUserTags(sql, userId, tags);
@@ -106,6 +139,22 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter(Boolean)
     : [];
+}
+
+async function syncTaskCalendarBestEffort(
+  context: HandlerContext,
+  userId: string,
+  taskId: string,
+): Promise<void> {
+  try {
+    await syncTaskToExternalCalendar({
+      sql: context.sql,
+      userId,
+      taskId,
+    });
+  } catch (error) {
+    logError('task_calendar_sync_unhandled_failed', error, getRequestMeta(context.request, { userId, taskId }));
+  }
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
@@ -213,6 +262,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
   const { request, sql } = context;
 
   await ensureTaskTaxonomySchema(sql);
+  await ensureCalendarIntegrationSchema(sql);
 
   if (request.method === 'GET') {
     try {
@@ -229,7 +279,12 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           history,
-          created_at  AS "createdAt"
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
         FROM tasks
         WHERE user_id = ${user.id}
         ORDER BY created_at DESC
@@ -301,12 +356,40 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           history,
-          created_at  AS "createdAt"
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
 
       await syncTaskTaxonomy(sql, user.id, category, tags);
+      await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
-      return json(201, rows[0]);
+      const syncedRows = await sql`
+        SELECT
+          id,
+          user_id     AS "userId",
+          title,
+          description,
+          due_date    AS "dueDate",
+          priority,
+          category,
+          tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
+          status,
+          history,
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
+        FROM tasks
+        WHERE id = ${rows[0].id} AND user_id = ${user.id}
+      `;
+      return json(201, syncedRows[0] ?? rows[0]);
     } catch (error) {
       logError('task_create_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao criar tarefa' });
@@ -325,6 +408,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
   const id = resolveTaskId(context);
 
   await ensureTaskTaxonomySchema(sql);
+  await ensureCalendarIntegrationSchema(sql);
 
   if (!id) {
     return json(400, { error: 'Tarefa não encontrada' });
@@ -407,12 +491,40 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           status,
           history,
-          created_at  AS "createdAt"
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
 
       await syncTaskTaxonomy(sql, user.id, categoryValue, tagsValue);
+      await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
-      return json(200, rows[0]);
+      const syncedRows = await sql`
+        SELECT
+          id,
+          user_id     AS "userId",
+          title,
+          description,
+          due_date    AS "dueDate",
+          priority,
+          category,
+          tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
+          status,
+          history,
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
+        FROM tasks
+        WHERE id = ${rows[0].id} AND user_id = ${user.id}
+      `;
+      return json(200, syncedRows[0] ?? rows[0]);
     } catch (error) {
       logError('task_update_failed', error, getRequestMeta(request, { userId: user.id, taskId: id }));
       return json(500, { error: 'Erro ao atualizar tarefa' });
@@ -421,6 +533,14 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
 
   if (request.method === 'DELETE') {
     try {
+      const taskForCalendar = await getTaskForCalendarSync(sql, user.id, id);
+      if (taskForCalendar) {
+        await removeTaskFromExternalCalendar({
+          sql,
+          userId: user.id,
+          task: taskForCalendar,
+        });
+      }
       await sql`DELETE FROM tasks WHERE id = ${id} AND user_id = ${user.id}`;
       logInfo('task_deleted', getRequestMeta(request, { userId: user.id, taskId: id }));
       return { status: 204 };
@@ -472,6 +592,65 @@ export async function handleTaskHolidays(context: HandlerContext): Promise<Handl
     logError('task_holidays_failed', error, getRequestMeta(request, { userId: user.id }));
     return json(500, { error: 'Erro ao carregar feriados e datas comemorativas' });
   }
+}
+
+export async function handleTaskCalendarExport(context: HandlerContext): Promise<HandlerResult> {
+  if (context.request.method !== 'GET') return methodNotAllowed();
+
+  const auth = await requireTaskCalendarAuth(context);
+  if ('status' in auth) return auth;
+
+  const user = auth.user;
+  const { request, sql } = context;
+
+  try {
+    const rows = await sql`
+      SELECT
+        id,
+        title,
+        description,
+        due_date    AS "dueDate",
+        priority,
+        category,
+        tags,
+        status,
+        created_at  AS "createdAt"
+      FROM tasks
+      WHERE user_id = ${user.id}
+        AND due_date IS NOT NULL
+        AND status = 'pending'
+      ORDER BY due_date ASC
+    `;
+    const calendar = buildTasksIcs(rows as unknown as CalendarTask[]);
+
+    return {
+      status: 200,
+      body: calendar,
+      headers: {
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Disposition': 'inline; filename="lembreto.ics"',
+        'Cache-Control': 'private, max-age=300',
+      },
+    };
+  } catch (error) {
+    logError('task_calendar_export_failed', error, getRequestMeta(request, { userId: user.id }));
+    return json(500, { error: 'Erro ao exportar calendÃ¡rio' });
+  }
+}
+
+export async function handleTaskCalendarFeed(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireTaskAuth(context);
+  if ('status' in auth) return auth;
+  if (context.request.method !== 'GET') return methodNotAllowed();
+
+  const token = signCalendarFeedToken({
+    sub: auth.user.id,
+    email: auth.user.email,
+  });
+
+  return json(200, {
+    feedPath: `/api/tasks/calendar.ics?token=${encodeURIComponent(token)}`,
+  });
 }
 
 export async function handleTaskHolidayLocationDetect(context: HandlerContext): Promise<HandlerResult> {

@@ -24,6 +24,8 @@ import {
 } from './lib/handlers/auth.js';
 import {
   handleTaskById,
+  handleTaskCalendarExport,
+  handleTaskCalendarFeed,
   handleTaskCategoriesCollection,
   handleTaskHolidayLocationDetect,
   handleTaskHolidays,
@@ -36,6 +38,14 @@ import {
   handleNotesCollection,
 } from './lib/handlers/notes.js';
 import { handleCleanupCron } from './lib/handlers/cron.js';
+import {
+  handleCalendarConnectCallback,
+  handleCalendarConnectStart,
+  handleCalendarDisconnect,
+  handleCalendarIntegrations,
+  handleCalendarIntegrationSettings,
+  handleCalendarTaskSync,
+} from './lib/handlers/calendar.js';
 import {
   handleNotificationById,
   handleNotificationsCollection,
@@ -115,6 +125,8 @@ async function startServer() {
   app.get('/api/tasks', run(handleTasksCollection));
   app.post('/api/tasks', run(handleTasksCollection));
   app.get('/api/tasks/metadata', run(handleTaskTaxonomy));
+  app.get('/api/tasks/calendar.ics', run(handleTaskCalendarExport));
+  app.get('/api/tasks/calendar/feed', run(handleTaskCalendarFeed));
   app.get('/api/tasks/holidays', run(handleTaskHolidays));
   app.post('/api/tasks/holidays/location', run(handleTaskHolidayLocationDetect));
   app.post('/api/tasks/categories', run(handleTaskCategoriesCollection));
@@ -151,6 +163,13 @@ async function startServer() {
   app.post('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.delete('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.put('/api/notifications/:id', run(handleNotificationById));
+
+  app.get('/api/calendar/integrations', run(handleCalendarIntegrations));
+  app.get('/api/calendar/:provider/connect', run(handleCalendarConnectStart));
+  app.get('/api/calendar/:provider/callback', run(handleCalendarConnectCallback));
+  app.delete('/api/calendar/:provider', run(handleCalendarDisconnect));
+  app.put('/api/calendar/:provider', run(handleCalendarIntegrationSettings));
+  app.post('/api/calendar/tasks/:taskId/sync', run(handleCalendarTaskSync));
 
   app.get('/api/cron/cleanup', run(handleCleanupCron));
   app.get('/api/cron/notifications', run(handleNotificationsCron));

@@ -60,6 +60,25 @@ async function main() {
     requireAuthFromToken,
   } = await import('../lib/auth.js');
   const { getRecaptchaSiteKey } = await import('../lib/recaptcha.js');
+  const {
+    buildTasksIcs,
+  } = await import('../lib/calendar/ics.js');
+  const {
+    encryptCalendarToken,
+    decryptCalendarToken,
+  } = await import('../lib/calendar/crypto.js');
+  const {
+    buildGoogleCalendarAuthorizationUrl,
+  } = await import('../lib/calendar/googleCalendar.js');
+  const {
+    buildOutlookCalendarAuthorizationUrl,
+  } = await import('../lib/calendar/outlookCalendar.js');
+  const {
+    toPublicIntegrations,
+  } = await import('../lib/calendar/calendarSync.js');
+  const {
+    handleCalendarIntegrations,
+  } = await import('../lib/handlers/calendar.js');
 
   await run('buildTokenJti composes subject and iat', () => {
     assert.equal(buildTokenJti({ sub: 'user-1', iat: 42 }), 'user-1_42');
@@ -229,6 +248,131 @@ async function main() {
     if (!result.success) {
       assert.equal(formatZodError(result.error), 'Envie ao menos um campo para atualizar');
     }
+  });
+
+  await run('calendar export builds Google/Outlook compatible ICS', () => {
+    const ics = buildTasksIcs([
+      {
+        id: 'task-1',
+        title: 'Reunião, revisão',
+        description: 'Levar pauta\nConfirmar sala',
+        dueDate: '2026-05-06T12:00:00.000Z',
+        priority: 'high',
+        category: 'Trabalho',
+        tags: ['Cliente'],
+        status: 'pending',
+        createdAt: '2026-05-01T10:00:00.000Z',
+      },
+    ], new Date('2026-05-01T12:00:00.000Z'));
+
+    assert.match(ics, /BEGIN:VCALENDAR/);
+    assert.match(ics, /VERSION:2.0/);
+    assert.match(ics, /BEGIN:VEVENT/);
+    assert.match(ics, /SUMMARY:Reunião\\, revisão/);
+    assert.match(ics, /DESCRIPTION:Levar pauta\\nConfirmar sala/);
+    assert.match(ics, /DTSTART;TZID=America\/Sao_Paulo:20260506T090000/);
+    assert.match(ics, /BEGIN:VALARM/);
+  });
+
+  await run('calendar export keeps date-only reminders as all-day events', () => {
+    const ics = buildTasksIcs([
+      {
+        id: 'task-2',
+        title: 'Dia todo',
+        dueDate: '2026-05-07T02:59:00.000Z',
+        priority: 'medium',
+      },
+    ], new Date('2026-05-01T12:00:00.000Z'));
+
+    assert.match(ics, /DTSTART;VALUE=DATE:20260506/);
+    assert.match(ics, /DTEND;VALUE=DATE:20260507/);
+  });
+
+  await run('calendar token encryption round-trips without storing plaintext', () => {
+    const encrypted = encryptCalendarToken('secret-calendar-token');
+    assert.notEqual(encrypted, 'secret-calendar-token');
+    assert.equal(decryptCalendarToken(encrypted), 'secret-calendar-token');
+  });
+
+  await run('calendar OAuth URLs request narrow calendar scopes', () => {
+    const previousGoogleClientId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+    const previousGoogleClientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    const previousOutlookClientId = process.env.OUTLOOK_CLIENT_ID;
+    const previousOutlookClientSecret = process.env.OUTLOOK_CLIENT_SECRET;
+
+    try {
+      process.env.GOOGLE_CALENDAR_CLIENT_ID = 'google-client';
+      process.env.GOOGLE_CALENDAR_CLIENT_SECRET = 'google-secret';
+      process.env.OUTLOOK_CLIENT_ID = 'outlook-client';
+      process.env.OUTLOOK_CLIENT_SECRET = 'outlook-secret';
+
+      const googleUrl = new URL(buildGoogleCalendarAuthorizationUrl({
+        state: 'state-123',
+        redirectUri: 'http://localhost/google',
+      }));
+      assert.equal(googleUrl.searchParams.get('scope'), 'https://www.googleapis.com/auth/calendar.events');
+      assert.equal(googleUrl.searchParams.get('access_type'), 'offline');
+
+      const outlookUrl = new URL(buildOutlookCalendarAuthorizationUrl({
+        state: 'state-123',
+        redirectUri: 'http://localhost/outlook',
+      }));
+      assert.equal(outlookUrl.searchParams.get('scope'), 'offline_access Calendars.ReadWrite');
+    } finally {
+      if (previousGoogleClientId === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_ID;
+      else process.env.GOOGLE_CALENDAR_CLIENT_ID = previousGoogleClientId;
+      if (previousGoogleClientSecret === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+      else process.env.GOOGLE_CALENDAR_CLIENT_SECRET = previousGoogleClientSecret;
+      if (previousOutlookClientId === undefined) delete process.env.OUTLOOK_CLIENT_ID;
+      else process.env.OUTLOOK_CLIENT_ID = previousOutlookClientId;
+      if (previousOutlookClientSecret === undefined) delete process.env.OUTLOOK_CLIENT_SECRET;
+      else process.env.OUTLOOK_CLIENT_SECRET = previousOutlookClientSecret;
+    }
+  });
+
+  await run('calendar integrations public payload hides encrypted tokens', () => {
+    const publicItems = toPublicIntegrations([
+      {
+        id: 'integration-1',
+        userId: 'user-1',
+        provider: 'google',
+        accessTokenEncrypted: 'encrypted-access',
+        refreshTokenEncrypted: 'encrypted-refresh',
+        expiresAt: null,
+        calendarId: 'primary',
+        syncEnabled: true,
+        lastError: null,
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+      },
+    ]);
+
+    assert.equal(publicItems.length, 2);
+    assert.deepEqual(publicItems[0], {
+      provider: 'google',
+      connected: true,
+      syncEnabled: true,
+      calendarId: 'primary',
+      lastError: null,
+      updatedAt: '2026-05-01T10:00:00.000Z',
+    });
+    assert.equal('accessTokenEncrypted' in publicItems[0], false);
+  });
+
+  await run('calendar integrations route requires auth and returns public providers', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const result = await handleCalendarIntegrations({
+      sql: createSqlMock(),
+      request: {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    });
+
+    assert.equal(result.status, 200);
+    const body = result.body as { integrations: Array<{ provider: string; connected: boolean }> };
+    assert.equal(body.integrations.length, 2);
+    assert.equal(body.integrations[0].connected, false);
   });
 
   console.log('PASS all tests');

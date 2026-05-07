@@ -1,4 +1,10 @@
-import type { NoteMode as NoteModeContract, TaskPriority, TaskStatus } from '../../lib/contracts';
+import type {
+  CalendarProvider,
+  ExternalCalendarSyncStatus,
+  NoteMode as NoteModeContract,
+  TaskPriority,
+  TaskStatus,
+} from '../../lib/contracts';
 
 export type Priority = TaskPriority;
 export type Status = TaskStatus;
@@ -27,7 +33,23 @@ export interface Task {
   status: Status;
   createdAt: string;
   syncStatus?: 'pending';
+  externalCalendarProvider?: CalendarProvider | null;
+  externalCalendarEventId?: string | null;
+  externalCalendarSyncStatus?: ExternalCalendarSyncStatus;
+  externalCalendarLastError?: string | null;
+  externalCalendarSyncedAt?: string | null;
   history?: TaskHistoryEvent[];
+}
+
+export type CalendarIntegrationProvider = CalendarProvider;
+
+export interface CalendarIntegrationStatus {
+  provider: CalendarIntegrationProvider;
+  connected: boolean;
+  syncEnabled: boolean;
+  calendarId: string | null;
+  lastError: string | null;
+  updatedAt: string | null;
 }
 
 export type TaskHistoryAction =

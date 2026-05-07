@@ -19,8 +19,9 @@ import { addDays, addHours, format, isPast, isToday, isTomorrow, parseISO } from
 import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
-import { apiPost } from './api/client';
+import { apiGet, apiPost, buildHeaders } from './api/client';
 import { useAuth } from './hooks/useAuth';
+import { useCalendarIntegrations } from './hooks/useCalendarIntegrations';
 import { useHolidays } from './hooks/useHolidays';
 import { useNotes } from './hooks/useNotes';
 import { useNotifications } from './hooks/useNotifications';
@@ -92,6 +93,10 @@ type EmitNotificationOptions = {
   target?: NotificationTarget;
   dedupeKey?: string;
   token?: string | null;
+};
+
+type CalendarFeedResponse = {
+  feedPath: string;
 };
 
 const UPCOMING_REMINDER_MINUTES = 15;
@@ -197,12 +202,22 @@ export default function App() {
     createTag,
     deleteCategory,
     deleteTag,
+    refreshTasks,
     pendingOfflineTaskCount,
     isSyncingOfflineTasks,
   } = useTasks(
     isResetPasswordRoute ? null : auth.token,
     isResetPasswordRoute ? null : auth.currentUser,
   );
+  const {
+    integrations: calendarIntegrations,
+    isLoading: isLoadingCalendarIntegrations,
+    refreshCalendarIntegrations,
+    connectCalendar,
+    updateCalendarSync,
+    disconnectCalendar,
+    syncTaskNow,
+  } = useCalendarIntegrations(isResetPasswordRoute ? null : auth.token);
   const {
     notes,
     notesByTask,
@@ -279,6 +294,7 @@ export default function App() {
   const [deletingTaskIds, setDeletingTaskIds] = useState<Set<string>>(new Set());
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
   const [reschedulingTaskIds, setReschedulingTaskIds] = useState<Set<string>>(new Set());
+  const [syncingCalendarTaskIds, setSyncingCalendarTaskIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTask, setPendingDeleteTask] = useState<{
     id: string;
     title: string;
@@ -891,6 +907,114 @@ export default function App() {
     }
   }, [emitNotification]);
 
+  const downloadCalendarExport = useCallback(async () => {
+    if (!auth.token) {
+      emitNotification('Faça login primeiro', 'Entre na sua conta para exportar a agenda.', 'warning');
+      throw new Error('Nao autenticado');
+    }
+
+    const response = await fetch('/api/tasks/calendar.ics', {
+      headers: buildHeaders(auth.token),
+    });
+
+    if (!response.ok) {
+      emitNotification('Exportação indisponível', 'Não foi possível gerar o arquivo .ics agora.', 'error');
+      throw new Error('Falha ao exportar calendario');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'lembreto.ics';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+
+    emitNotification('Agenda exportada', 'O arquivo .ics foi gerado com seus lembretes pendentes.', 'success');
+  }, [auth.token, emitNotification]);
+
+  const copyCalendarFeed = useCallback(async () => {
+    if (!auth.token) {
+      emitNotification('Faça login primeiro', 'Entre na sua conta para copiar o feed da agenda.', 'warning');
+      throw new Error('Nao autenticado');
+    }
+
+    const feed = await apiGet<CalendarFeedResponse>('/api/tasks/calendar/feed', auth.token);
+    const feedUrl = new URL(feed.feedPath, window.location.origin).toString();
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(feedUrl);
+    } else {
+      fallbackCopyText(feedUrl);
+    }
+
+    emitNotification('Feed copiado', 'Use o link para assinar os lembretes no Google Calendar ou Outlook.', 'success');
+  }, [auth.token, emitNotification]);
+
+  const handleConnectCalendar = useCallback((provider: 'google' | 'outlook') => {
+    try {
+      connectCalendar(provider);
+    } catch {
+      emitNotification('Faça login primeiro', 'Entre na sua conta para conectar um calendário externo.', 'warning');
+    }
+  }, [connectCalendar, emitNotification]);
+
+  const handleDisconnectCalendar = useCallback(async (provider: 'google' | 'outlook') => {
+    await disconnectCalendar(provider);
+    emitNotification(
+      'Calendário desconectado',
+      provider === 'google' ? 'Google Calendar foi desconectado.' : 'Outlook Calendar foi desconectado.',
+      'info',
+    );
+  }, [disconnectCalendar, emitNotification]);
+
+  const handleToggleCalendarSync = useCallback(async (provider: 'google' | 'outlook', syncEnabled: boolean) => {
+    await updateCalendarSync(provider, syncEnabled);
+    emitNotification(
+      syncEnabled ? 'Envio automático ativado' : 'Envio automático pausado',
+      syncEnabled
+        ? 'Novos lembretes com prazo serão enviados ao calendário externo.'
+        : 'Os lembretes continuarão salvos localmente sem envio automático.',
+      'success',
+    );
+  }, [emitNotification, updateCalendarSync]);
+
+  const handleSyncTaskCalendar = useCallback(async (task: Task) => {
+    if (syncingCalendarTaskIds.has(task.id)) return;
+
+    try {
+      setSyncingCalendarTaskIds((prev) => new Set(prev).add(task.id));
+      await syncTaskNow(task.id);
+      await refreshTasks();
+      emitNotification(
+        'Calendário atualizado',
+        `"${task.title}" foi sincronizado com o calendário conectado.`,
+        'success',
+        { target: { type: 'task', taskId: task.id } },
+      );
+    } catch (error) {
+      emitNotification(
+        'Falha ao sincronizar',
+        error instanceof Error ? error.message : 'Não foi possível enviar este lembrete ao calendário.',
+        'warning',
+        { target: { type: 'task', taskId: task.id } },
+      );
+    } finally {
+      setSyncingCalendarTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  }, [emitNotification, refreshTasks, syncTaskNow, syncingCalendarTaskIds]);
+
   const handleQuickReschedule = useCallback(async (task: Task, preset: QuickReschedulePreset) => {
     if (reschedulingTaskIds.has(task.id)) return;
 
@@ -1120,27 +1244,42 @@ export default function App() {
         setIsTaskSubmitting(true);
 
         if (editingTask) {
-          await updateTask(editingTask.id, payload);
-          emitNotification('Lembrete atualizado!', 'As informações do lembrete foram salvas.', 'success', {
+          const updated = await updateTask(editingTask.id, payload);
+          emitNotification(
+            updated.externalCalendarSyncStatus === 'failed' ? 'Lembrete salvo com aviso' : 'Lembrete atualizado!',
+            updated.externalCalendarSyncStatus === 'failed'
+              ? (updated.externalCalendarLastError ?? 'O lembrete foi salvo, mas a sincronização do calendário falhou.')
+              : 'As informações do lembrete foram salvas.',
+            updated.externalCalendarSyncStatus === 'failed' ? 'warning' : 'success',
+            {
             target: { type: 'task', taskId: editingTask.id },
-          });
+            },
+          );
         } else {
           if (formRecurrenceEnabled && recurringDates.length > 1) {
             let offlineCount = 0;
+            let calendarFailedCount = 0;
             for (const dateValue of recurringDates) {
               const created = await createTask({
                 ...payload,
                 dueDate: buildDueDateFromForm(dateValue, formTime),
               });
               if (created.syncStatus === 'pending') offlineCount += 1;
+              if (created.externalCalendarSyncStatus === 'failed') calendarFailedCount += 1;
             }
 
             emitNotification(
-              offlineCount > 0 ? 'Lembretes salvos offline' : 'Lembretes criados!',
+              offlineCount > 0
+                ? 'Lembretes salvos offline'
+                : calendarFailedCount > 0
+                  ? 'Lembretes criados com aviso'
+                  : 'Lembretes criados!',
               offlineCount > 0
                 ? `${offlineCount} lembrete${offlineCount === 1 ? '' : 's'} ficara${offlineCount === 1 ? '' : 'o'} na fila e sincronizara${offlineCount === 1 ? '' : 'o'} quando a conexao voltar.`
+                : calendarFailedCount > 0
+                  ? `${calendarFailedCount} lembrete${calendarFailedCount === 1 ? '' : 's'} foi salvo, mas não sincronizou com o calendário externo.`
                 : `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
-              offlineCount > 0 ? 'info' : 'success',
+              offlineCount > 0 ? 'info' : calendarFailedCount > 0 ? 'warning' : 'success',
             );
           } else {
             const created = await createTask(payload);
@@ -1150,6 +1289,13 @@ export default function App() {
                 `"${created.title}" sera sincronizado quando a conexao voltar.`,
                 'info',
                 { toastOnly: true },
+              );
+            } else if (created.externalCalendarSyncStatus === 'failed') {
+              emitNotification(
+                'Lembrete salvo com aviso',
+                created.externalCalendarLastError ?? 'O lembrete foi salvo, mas a sincronização do calendário falhou.',
+                'warning',
+                { target: { type: 'task', taskId: created.id } },
               );
             } else {
               emitNotification('Lembrete criado!', `"${created.title}" foi adicionado.`, 'success', {
@@ -1881,10 +2027,28 @@ export default function App() {
     const params = new URLSearchParams(locationSearch);
     const action = params.get('action');
     const notificationTarget = params.get('notificationTarget');
+    const connectedCalendar = params.get('calendar_connected');
+    const calendarError = params.get('calendar_error');
 
     if (action === 'new-task' && auth.currentUser) {
       openNewTask();
       params.delete('action');
+    } else if (connectedCalendar) {
+      openSettings('organization');
+      triggerToastOnly(
+        'Calendário conectado',
+        connectedCalendar === 'google'
+          ? 'Google Calendar está pronto para receber novos lembretes.'
+          : 'Outlook Calendar está pronto para receber novos lembretes.',
+      );
+      void refreshCalendarIntegrations().catch(() => {
+        // best effort after OAuth redirect
+      });
+      params.delete('calendar_connected');
+    } else if (calendarError) {
+      openSettings('organization');
+      triggerToastOnly('Conexão não concluída', calendarError);
+      params.delete('calendar_error');
     } else if (notificationTarget) {
       if (!auth.token) return;
 
@@ -1924,6 +2088,8 @@ export default function App() {
     openNewTask,
     openProfile,
     openSettings,
+    refreshCalendarIntegrations,
+    triggerToastOnly,
   ]);
 
   const handlePreviewNotification = useCallback((notification: AppNotification) => {
@@ -2555,12 +2721,14 @@ export default function App() {
         isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
         isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
         isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
+        isSyncingCalendar={selectedTask ? syncingCalendarTaskIds.has(selectedTask.id) : false}
         backLabel={taskDetailsBackLabel || undefined}
         onClose={closeTaskDetails}
         onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
         onEdit={openEditTask}
         onDuplicate={openDuplicateTask}
         onShare={handleShareTask}
+        onSyncCalendar={handleSyncTaskCalendar}
         onQuickReschedule={handleQuickReschedule}
         onToggle={handleToggleFromDetails}
         onDelete={handleDeleteFromDetails}
@@ -2707,6 +2875,13 @@ export default function App() {
         onCreateTag={createTag}
         onDeleteCategory={handleDeleteCategory}
         onDeleteTag={handleDeleteTag}
+        onDownloadCalendar={downloadCalendarExport}
+        onCopyCalendarFeed={copyCalendarFeed}
+        calendarIntegrations={calendarIntegrations}
+        isLoadingCalendarIntegrations={isLoadingCalendarIntegrations}
+        onConnectCalendar={handleConnectCalendar}
+        onDisconnectCalendar={handleDisconnectCalendar}
+        onToggleCalendarSync={handleToggleCalendarSync}
         holidayStateCode={auth.currentUser?.stateCode ?? null}
         holidayCityName={auth.currentUser?.cityName ?? null}
         holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}

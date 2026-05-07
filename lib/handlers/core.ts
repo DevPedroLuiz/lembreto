@@ -100,6 +100,10 @@ export function sendHandlerResult(res: ResponseLike, result: HandlerResult) {
     return res.status(result.status).end();
   }
 
+  if (typeof result.body === 'string') {
+    return res.status(result.status).send(result.body);
+  }
+
   return res.status(result.status).json(result.body);
 }
 

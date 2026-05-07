@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { validateAvatarDataUrl } from './avatar.js';
 import {
+  CALENDAR_PROVIDERS,
   NOTE_MODES,
   NOTIFICATION_TONES,
   TASK_PRIORITIES,
@@ -171,6 +172,16 @@ export const pushSubscriptionSchema = z.object({
 
 export const deletePushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url('Endpoint de push inválido').max(4096, 'Endpoint de push muito longo'),
+}).strict();
+
+export const calendarProviderSchema = z.enum(CALENDAR_PROVIDERS);
+
+export const updateCalendarIntegrationSchema = z.object({
+  syncEnabled: z.boolean(),
+}).strict();
+
+export const syncTaskCalendarSchema = z.object({
+  provider: calendarProviderSchema.optional(),
 }).strict();
 
 export function formatZodError(error: z.ZodError): string {

@@ -31,6 +31,13 @@ RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
 GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=seu_client_secret_do_google
+GOOGLE_CALENDAR_CLIENT_ID=seu_client_id_do_google_calendar.apps.googleusercontent.com
+GOOGLE_CALENDAR_CLIENT_SECRET=seu_client_secret_do_google_calendar
+GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:3001/api/calendar/google/callback
+OUTLOOK_CLIENT_ID=seu_client_id_do_microsoft_entra
+OUTLOOK_CLIENT_SECRET=seu_client_secret_do_microsoft_entra
+OUTLOOK_REDIRECT_URI=http://localhost:3001/api/calendar/outlook/callback
+CALENDAR_TOKEN_ENCRYPTION_KEY=chave_opcional_para_criptografar_tokens_de_calendario
 VITE_RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
 RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
 RECAPTCHA_SECRET_KEY=sua_chave_secreta_recaptcha_v2
@@ -44,6 +51,10 @@ Notas:
 - `APP_URL` deve apontar para a URL pública do app em produção.
 - `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botão "Entrar com Google".
 - No Google Cloud Console, configure o redirect URI autorizado como `{APP_URL}/api/auth/google/callback`.
+- `GOOGLE_CALENDAR_CLIENT_ID` e `GOOGLE_CALENDAR_CLIENT_SECRET` habilitam a integração com Google Calendar usando o escopo `https://www.googleapis.com/auth/calendar.events`.
+- `OUTLOOK_CLIENT_ID` e `OUTLOOK_CLIENT_SECRET` habilitam a integração com Outlook Calendar usando o escopo Microsoft Graph `Calendars.ReadWrite`.
+- Configure os redirect URIs de calendário como `{APP_URL}/api/calendar/google/callback` e `{APP_URL}/api/calendar/outlook/callback`.
+- `CALENDAR_TOKEN_ENCRYPTION_KEY` é opcional, mas recomendada em produção; se ausente, o app deriva a chave de criptografia a partir de `JWT_SECRET`.
 - `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha. Em produção, `RECAPTCHA_SITE_KEY` pode ser usada como fallback runtime pela rota `/api/auth/config`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 
@@ -62,6 +73,7 @@ npm install
 - `migrate_recovery.sql`
 - `migrate_google_oauth.sql`
 - `migrate_auth_rate_limit_recover.sql`
+- `migrate_calendar_integrations.sql`
 - `migrate_passwords.sql` quando fizer a migração de senhas legadas
 
 3. Inicie o servidor local:

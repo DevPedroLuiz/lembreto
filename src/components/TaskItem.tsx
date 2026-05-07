@@ -357,6 +357,12 @@ function TaskItemComponent({
               Offline
             </span>
           )}
+
+          {task.externalCalendarSyncStatus === 'failed' && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+              Calendário pendente
+            </span>
+          )}
         </div>
       </div>
     </motion.div>
@@ -375,6 +381,8 @@ export const TaskItem = React.memo(
     JSON.stringify(prev.task.tags ?? []) === JSON.stringify(next.task.tags ?? []) &&
     prev.task.status === next.task.status &&
     prev.task.syncStatus === next.task.syncStatus &&
+    prev.task.externalCalendarSyncStatus === next.task.externalCalendarSyncStatus &&
+    prev.task.externalCalendarLastError === next.task.externalCalendarLastError &&
     prev.showSelectionControl === next.showSelectionControl &&
     prev.showToggleControl === next.showToggleControl &&
     prev.compact === next.compact &&

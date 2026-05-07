@@ -8,7 +8,9 @@ import {
   Circle,
   Clock3,
   CopyPlus,
+  Loader2,
   PencilLine,
+  RefreshCw,
   Share2,
   Sparkles,
   Tag,
@@ -40,12 +42,14 @@ interface TaskDetailsDialogProps {
   isDeleting?: boolean;
   isToggling?: boolean;
   isRescheduling?: boolean;
+  isSyncingCalendar?: boolean;
   backLabel?: string;
   onClose: () => void;
   onBack?: () => void;
   onEdit: (task: Task) => void;
   onDuplicate: (task: Task) => void;
   onShare: (task: Task) => void;
+  onSyncCalendar: (task: Task) => void;
   onQuickReschedule: (task: Task, preset: 'laterToday' | 'tomorrowMorning' | 'nextWeek') => void;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
@@ -131,12 +135,14 @@ export function TaskDetailsDialog({
   isDeleting = false,
   isToggling = false,
   isRescheduling = false,
+  isSyncingCalendar = false,
   backLabel,
   onClose,
   onBack,
   onEdit,
   onDuplicate,
   onShare,
+  onSyncCalendar,
   onQuickReschedule,
   onToggle,
   onDelete,
@@ -149,7 +155,7 @@ export function TaskDetailsDialog({
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const isCompleted = task.status === 'completed';
-  const isBusy = isDeleting || isToggling || isRescheduling;
+  const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar;
   const historyItems = buildTaskHistory(task);
 
   return (
@@ -288,6 +294,17 @@ export function TaskDetailsDialog({
 
                     <button
                       type="button"
+                      data-testid="task-details-calendar-sync"
+                      onClick={() => onSyncCalendar(task)}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      {isSyncingCalendar ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                      Sincronizar agora
+                    </button>
+
+                    <button
+                      type="button"
                       data-testid="task-details-duplicate"
                       onClick={() => onDuplicate(task)}
                       disabled={isBusy}
@@ -357,6 +374,17 @@ export function TaskDetailsDialog({
                         </div>
                       </div>
                     )}
+
+                    {task.externalCalendarSyncStatus === 'failed' && task.externalCalendarLastError ? (
+                      <div className="rounded-[28px] border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-100">
+                        <p className="font-semibold">Falha na sincronização do calendário</p>
+                        <p className="mt-2 leading-6">{task.externalCalendarLastError}</p>
+                      </div>
+                    ) : task.externalCalendarSyncStatus === 'synced' ? (
+                      <div className="rounded-[28px] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-800 dark:text-emerald-100">
+                        Sincronizado com {task.externalCalendarProvider === 'google' ? 'Google Calendar' : 'Outlook Calendar'}.
+                      </div>
+                    ) : null}
 
                     <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-4 dark:border-white/10 dark:bg-white/[0.04]">
                       <div className="flex items-center gap-2">

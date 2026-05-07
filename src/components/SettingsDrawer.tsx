@@ -3,18 +3,23 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
   BellRing,
+  CalendarDays,
   CheckCircle2,
   Compass,
   Download,
   FolderPlus,
+  Link,
   Loader2,
   MapPin,
   MonitorSmartphone,
   Moon,
+  Plug,
   Plus,
+  RefreshCw,
   Settings,
   ShieldAlert,
   Tag,
+  Unplug,
   UserCircle2,
   Volume2,
   X,
@@ -23,7 +28,7 @@ import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { BRAZIL_STATES } from '../../lib/brazil-location';
 import { isDefaultCategory, normalizeTaxonomyValue } from '../lib/taxonomy';
-import type { HolidayRegionOption } from '../types';
+import type { CalendarIntegrationProvider, CalendarIntegrationStatus, HolidayRegionOption } from '../types';
 
 function Toggle({
   active,
@@ -92,6 +97,13 @@ interface SettingsDrawerProps {
   onCreateTag: (name: string) => Promise<string>;
   onDeleteCategory: (name: string) => Promise<void>;
   onDeleteTag: (name: string) => Promise<void>;
+  onDownloadCalendar: () => Promise<void>;
+  onCopyCalendarFeed: () => Promise<void>;
+  calendarIntegrations: CalendarIntegrationStatus[];
+  isLoadingCalendarIntegrations: boolean;
+  onConnectCalendar: (provider: CalendarIntegrationProvider) => void;
+  onDisconnectCalendar: (provider: CalendarIntegrationProvider) => Promise<void>;
+  onToggleCalendarSync: (provider: CalendarIntegrationProvider, syncEnabled: boolean) => Promise<void>;
   holidayStateCode: string | null;
   holidayCityName: string | null;
   holidayMatchedRegionName: string | null;
@@ -291,6 +303,13 @@ export function SettingsDrawer({
   onCreateTag,
   onDeleteCategory,
   onDeleteTag,
+  onDownloadCalendar,
+  onCopyCalendarFeed,
+  calendarIntegrations,
+  isLoadingCalendarIntegrations,
+  onConnectCalendar,
+  onDisconnectCalendar,
+  onToggleCalendarSync,
   holidayStateCode,
   holidayCityName,
   holidayMatchedRegionName,
@@ -310,7 +329,11 @@ export function SettingsDrawer({
   const [isCreatingTag, setIsCreatingTag] = React.useState(false);
   const [deletingCategoryName, setDeletingCategoryName] = React.useState<string | null>(null);
   const [deletingTagName, setDeletingTagName] = React.useState<string | null>(null);
+  const [isDownloadingCalendar, setIsDownloadingCalendar] = React.useState(false);
+  const [isCopyingCalendarFeed, setIsCopyingCalendarFeed] = React.useState(false);
+  const [busyCalendarProvider, setBusyCalendarProvider] = React.useState<CalendarIntegrationProvider | null>(null);
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
+  const [calendarFeedback, setCalendarFeedback] = React.useState('');
   const [holidayFeedback, setHolidayFeedback] = React.useState('');
   const {
     canInstall,
@@ -331,8 +354,10 @@ export function SettingsDrawer({
     setTagDraft('');
     setTaxonomyFeedback('');
     setHolidayFeedback('');
+    setCalendarFeedback('');
     setDeletingCategoryName(null);
     setDeletingTagName(null);
+    setBusyCalendarProvider(null);
     setHolidayStateDraft(holidayStateCode ?? '');
     setHolidayCityDraft(holidayCityName ?? '');
     setActiveView(initialView);
@@ -442,6 +467,67 @@ export function SettingsDrawer({
       );
     }
   }, [onDetectHolidayLocation]);
+
+  const handleDownloadCalendar = React.useCallback(async () => {
+    if (isDownloadingCalendar) return;
+
+    try {
+      setIsDownloadingCalendar(true);
+      await onDownloadCalendar();
+      setCalendarFeedback('Arquivo .ics gerado com seus lembretes pendentes.');
+    } catch {
+      setCalendarFeedback('NÃ£o foi possÃ­vel exportar a agenda agora.');
+    } finally {
+      setIsDownloadingCalendar(false);
+    }
+  }, [isDownloadingCalendar, onDownloadCalendar]);
+
+  const handleCopyCalendarFeed = React.useCallback(async () => {
+    if (isCopyingCalendarFeed) return;
+
+    try {
+      setIsCopyingCalendarFeed(true);
+      await onCopyCalendarFeed();
+      setCalendarFeedback('Link do feed copiado para assinatura no Google ou Outlook.');
+    } catch {
+      setCalendarFeedback('NÃ£o foi possÃ­vel copiar o feed agora.');
+    } finally {
+      setIsCopyingCalendarFeed(false);
+    }
+  }, [isCopyingCalendarFeed, onCopyCalendarFeed]);
+
+  const handleDisconnectCalendar = React.useCallback(async (provider: CalendarIntegrationProvider) => {
+    if (busyCalendarProvider) return;
+
+    try {
+      setBusyCalendarProvider(provider);
+      await onDisconnectCalendar(provider);
+      setCalendarFeedback(`${provider === 'google' ? 'Google Calendar' : 'Outlook Calendar'} desconectado.`);
+    } catch {
+      setCalendarFeedback('Não foi possível desconectar o calendário agora.');
+    } finally {
+      setBusyCalendarProvider(null);
+    }
+  }, [busyCalendarProvider, onDisconnectCalendar]);
+
+  const handleToggleCalendarSync = React.useCallback(async (
+    provider: CalendarIntegrationProvider,
+    syncEnabled: boolean,
+  ) => {
+    if (busyCalendarProvider) return;
+
+    try {
+      setBusyCalendarProvider(provider);
+      await onToggleCalendarSync(provider, syncEnabled);
+      setCalendarFeedback(syncEnabled
+        ? 'Novos lembretes serão enviados ao calendário conectado.'
+        : 'Novos lembretes deixarão de ser enviados automaticamente.');
+    } catch {
+      setCalendarFeedback('Não foi possível salvar a preferência do calendário.');
+    } finally {
+      setBusyCalendarProvider(null);
+    }
+  }, [busyCalendarProvider, onToggleCalendarSync]);
 
   const toggleMap = {
     darkMode: {
@@ -652,6 +738,178 @@ export function SettingsDrawer({
     </section>
   );
 
+  const renderCalendarSyncPanel = () => (
+    <section className="surface-soft p-5">
+      <SectionHeader
+        eyebrow="Agenda externa"
+        title="Google Calendar e Outlook"
+        description="Exporte um arquivo .ics ou copie um feed assinÃ¡vel com os lembretes pendentes."
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => {
+            void handleDownloadCalendar();
+          }}
+          disabled={isDownloadingCalendar}
+          className="action-secondary min-h-[52px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isDownloadingCalendar ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          Baixar .ics
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void handleCopyCalendarFeed();
+          }}
+          disabled={isCopyingCalendarFeed}
+          className="action-primary min-h-[52px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isCopyingCalendarFeed ? <Loader2 size={16} className="animate-spin" /> : <Link size={16} />}
+          Copiar feed
+        </button>
+      </div>
+
+      <div className="mt-4 flex items-start gap-3 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+        <CalendarDays size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
+        <p>
+          O feed inclui lembretes pendentes com prazo definido e atualiza conforme o aplicativo publicar novas alteraÃ§Ãµes.
+        </p>
+      </div>
+
+      {calendarFeedback && (
+        <p className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+          {calendarFeedback}
+        </p>
+      )}
+    </section>
+  );
+
+  const renderConnectedCalendarsPanel = () => {
+    const providers: Array<{
+      provider: CalendarIntegrationProvider;
+      title: string;
+      description: string;
+    }> = [
+      {
+        provider: 'google',
+        title: 'Google Calendar',
+        description: 'Cria e atualiza eventos no calendário principal com permissão de eventos.',
+      },
+      {
+        provider: 'outlook',
+        title: 'Outlook Calendar',
+        description: 'Cria e atualiza eventos pelo Microsoft Graph com acesso de calendário.',
+      },
+    ];
+
+    return (
+      <section className="surface-soft p-5">
+        <SectionHeader
+          eyebrow="Calendários conectados"
+          title="Sincronização real"
+          description="Conecte Google Calendar ou Outlook Calendar. Apenas lembretes autorizados e com prazo definido são enviados."
+        />
+
+        <div className="space-y-3">
+          {providers.map(({ provider, title, description }) => {
+            const integration = calendarIntegrations.find((item) => item.provider === provider);
+            const connected = integration?.connected ?? false;
+            const busy = busyCalendarProvider === provider;
+
+            return (
+              <div
+                key={provider}
+                className="rounded-[26px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className={[
+                      'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border',
+                      connected
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
+                    ].join(' ')}>
+                      {busy || isLoadingCalendarIntegrations ? <Loader2 size={17} className="animate-spin" /> : <Plug size={17} />}
+                    </span>
+
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {title}
+                        </h4>
+                        <span className={[
+                          'rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]',
+                          connected
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
+                        ].join(' ')}>
+                          {connected ? 'Conectado' : 'Desconectado'}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                        {description}
+                      </p>
+                      {integration?.lastError ? (
+                        <p className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
+                          Último erro: {integration.lastError}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row lg:shrink-0">
+                    {connected ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleToggleCalendarSync(provider, !(integration?.syncEnabled ?? false));
+                          }}
+                          disabled={busy}
+                          className="action-secondary min-h-[44px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                          {integration?.syncEnabled ? 'Pausar envio' : 'Enviar novos'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDisconnectCalendar(provider);
+                          }}
+                          disabled={busy}
+                          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
+                        >
+                          {busy ? <Loader2 size={16} className="animate-spin" /> : <Unplug size={16} />}
+                          Desconectar
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onConnectCalendar(provider)}
+                        disabled={busy}
+                        className="action-primary min-h-[44px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {busy ? <Loader2 size={16} className="animate-spin" /> : <Plug size={16} />}
+                        Conectar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+          A permissão solicitada é a mínima necessária para criar, atualizar e remover os eventos gerados pelo Lembreto.
+        </div>
+      </section>
+    );
+  };
+
   const renderInstallPanel = () => (
     <section className="surface-soft p-5">
       <SectionHeader
@@ -858,6 +1116,10 @@ export function SettingsDrawer({
               />
               {renderToggleCards(organizationCards)}
             </section>
+
+            {renderConnectedCalendarsPanel()}
+
+            {renderCalendarSyncPanel()}
 
             <section className="surface-soft p-5">
               <SectionHeader

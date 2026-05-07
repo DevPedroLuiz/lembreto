@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import {
   handleTaskById,
+  handleTaskCalendarExport,
+  handleTaskCalendarFeed,
   handleTaskCategoriesCollection,
   handleTaskHolidayLocationDetect,
   handleTaskHolidays,
@@ -33,6 +35,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'metadata') {
     result = await handleTaskTaxonomy({ sql, request });
+  } else if (action === 'calendar-ics') {
+    result = await handleTaskCalendarExport({ sql, request });
+  } else if (action === 'calendar-feed') {
+    result = await handleTaskCalendarFeed({ sql, request });
   } else if (action === 'holidays') {
     result = await handleTaskHolidays({ sql, request });
   } else if (action === 'holidays-location') {
