@@ -279,6 +279,104 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
+  test('saves drafts and promotes them from the drafts tab', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const title = 'Rascunho de proposta';
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await page.getByTestId('task-title-input').fill(title);
+      await page.getByTestId('task-description-input').fill('Ainda vou revisar antes de publicar.');
+      await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      await page.getByTestId('task-save-draft-button').click();
+
+      await page.getByTestId('sidebar-tasks').click();
+      const pendingDraft = taskCard(page, title);
+      await expect(pendingDraft).toBeVisible();
+      await expect(pendingDraft).toHaveAttribute('data-task-status', 'draft');
+      await expect(pendingDraft).toContainText('Rascunho');
+
+      await page.getByTestId('sidebar-drafts').click();
+      await expect(taskCard(page, title)).toBeVisible();
+
+      await page.getByTestId('draft-edit-button').click();
+      await page.getByTestId('task-description-input').fill('Rascunho revisado antes de virar lembrete.');
+      await page.getByTestId('task-save-draft-button').click();
+
+      await page.getByTestId('draft-promote-button').click();
+      await expect(taskCard(page, title)).toHaveCount(0);
+
+      await page.getByTestId('sidebar-tasks').click();
+      const promotedTask = taskCard(page, title);
+      await expect(promotedTask).toBeVisible();
+      await expect(promotedTask).toHaveAttribute('data-task-status', 'pending');
+      await expect(promotedTask).toContainText('Pendente');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('toggles reminder activation from card and details', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const title = 'Alternar ativação';
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await createTask(page, title);
+
+      const task = taskCard(page, title);
+      await expect(task).toHaveAttribute('data-task-status', 'pending');
+
+      await task.getByTestId('task-actions-button').click();
+      await page.getByTestId('task-activation-toggle').click();
+      await expect(task).toHaveAttribute('data-task-status', 'inactive');
+      await expect(task).toContainText('Desativado');
+
+      await task.click();
+      await expect(page.getByTestId('task-details-dialog')).toBeVisible();
+      await page.getByTestId('task-details-activation-toggle').click();
+      await expect(page.getByTestId('task-details-dialog')).toContainText('Pendente');
+      await page.getByRole('button', { name: /fechar visualiza/i }).click();
+      await expect(task).toHaveAttribute('data-task-status', 'pending');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('configures alarm only after date and initial time are set', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await page.getByTestId('task-title-input').fill('Lembrete com alarme');
+      await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      await page.getByTestId('task-tab-alarm').click();
+      await expect(page.getByTestId('task-alarm-toggle')).toBeDisabled();
+
+      await page.getByTestId('task-tab-details').click();
+      await page.getByTestId('task-time-input').fill('09:30');
+      await page.getByTestId('task-tab-alarm').click();
+      await page.getByTestId('task-alarm-toggle').check();
+      await expect(page.getByTestId('task-alarm-toggle')).toBeChecked();
+      await page.getByTestId('task-submit-button').click();
+
+      await page.getByTestId('sidebar-tasks').click();
+      await expect(taskCard(page, 'Lembrete com alarme')).toBeVisible();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('creates recurring reminders across a chosen date range', async ({ page }) => {
     const user = buildE2ETestUser();
     const nextMonday = nextWeekday(new Date(), 1);
@@ -1050,10 +1148,12 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
-  test('warns before the scheduled time and repeats alerts for overdue reminders', async ({ page }) => {
+  test('warns before alarm time and repeats alerts for overdue reminders', async ({ page }) => {
     const user = buildE2ETestUser();
     const upcoming = new Date(Date.now() + 10 * 60 * 1000);
     upcoming.setSeconds(0, 0);
+    const upcomingWithoutAlarm = new Date(Date.now() + 12 * 60 * 1000);
+    upcomingWithoutAlarm.setSeconds(0, 0);
 
     const overdue = new Date(Date.now() - 40 * 60 * 1000);
     overdue.setSeconds(0, 0);
@@ -1068,6 +1168,13 @@ test.describe('Lembreto critical flows', () => {
           dueDate: upcoming.toISOString(),
           priority: 'high',
           category: 'Trabalho',
+          alarmEnabled: true,
+        },
+        {
+          title: 'Lembrete comum prestes a vencer',
+          dueDate: upcomingWithoutAlarm.toISOString(),
+          priority: 'medium',
+          category: 'Geral',
         },
         {
           title: 'Lembrete atrasado recorrente',
@@ -1085,7 +1192,8 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('header-notifications-button').click();
       const notificationItems = page.getByTestId('recent-notification-item');
 
-      await expect(notificationItems.filter({ hasText: 'Lembrete prestes a vencer' }).first()).toBeVisible();
+      await expect(notificationItems.filter({ hasText: 'O alarme do seu lembrete vai tocar em 15 minutos!' }).first()).toBeVisible();
+      await expect(notificationItems.filter({ hasText: 'Lembrete comum prestes a vencer' }).first()).toBeVisible();
       await expect(notificationItems.filter({ hasText: 'Lembrete atrasado recorrente' }).first()).toBeVisible();
     } finally {
       await cleanupUsersByEmail([user.email]);

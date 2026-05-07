@@ -9,6 +9,8 @@ export type TaskCreatePayload = {
   category: string;
   tags: string[];
   suppressHolidayNotifications: boolean;
+  alarmEnabled?: boolean;
+  status?: Status;
 };
 
 export interface OfflineTaskCreate {
@@ -105,7 +107,8 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
     category: item.payload.category,
     tags: item.payload.tags,
     suppressHolidayNotifications: item.payload.suppressHolidayNotifications,
-    status: 'pending',
+    alarmEnabled: item.payload.alarmEnabled ?? false,
+    status: item.payload.status ?? 'pending',
     createdAt: item.createdAt,
     syncStatus: 'pending',
     history: [

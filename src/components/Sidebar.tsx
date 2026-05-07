@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   CalendarDays,
   ChevronRight,
+  FileText,
   FolderPlus,
   LayoutDashboard,
   ListTodo,
@@ -22,12 +23,13 @@ import type { Task, User } from '../types';
 
 interface SidebarProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
-  setActiveTab: (tab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications') => void;
+  activeTab: 'dashboard' | 'calendar' | 'tasks' | 'drafts' | 'notes' | 'notifications';
+  setActiveTab: (tab: 'dashboard' | 'calendar' | 'tasks' | 'drafts' | 'notes' | 'notifications') => void;
   categories: string[];
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
   pendingTasks: Task[];
+  draftCount: number;
   overdueCount: number;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
@@ -44,6 +46,7 @@ export function Sidebar({
   filterCategory,
   setFilterCategory,
   pendingTasks,
+  draftCount,
   overdueCount,
   onOpenProfile,
   onOpenSettings,
@@ -190,6 +193,14 @@ export function Sidebar({
             badge={overdueCount}
             badgeTone="alert"
             testId="sidebar-tasks"
+          />
+          <SidebarItem
+            active={activeTab === 'drafts'}
+            onClick={() => setActiveTab('drafts')}
+            icon={<FileText size={20} />}
+            label="Rascunhos"
+            badge={draftCount}
+            testId="sidebar-drafts"
           />
           <SidebarItem
             active={activeTab === 'notes'}

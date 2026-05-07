@@ -107,11 +107,13 @@ interface TasksPageProps {
   showCompleted: boolean;
   onNewTask: () => void;
   onToggle: (task: Task) => void;
+  onToggleActive: (task: Task) => void;
   onDelete: (id: string, event: React.MouseEvent) => void;
   onDeleteSelected: (ids: string[]) => void;
   onEdit: (task: Task) => void;
   deletingTaskIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
+  togglingActiveTaskIds?: ReadonlySet<string>;
   holidayCalendar: HolidayCalendarPayload | null;
   isHolidayLoading: boolean;
   isDetectingHolidayLocation: boolean;
@@ -461,11 +463,13 @@ export function TasksPage({
   showCompleted,
   onNewTask,
   onToggle,
+  onToggleActive,
   onDelete,
   onDeleteSelected,
   onEdit,
   deletingTaskIds,
   togglingTaskIds,
+  togglingActiveTaskIds,
   holidayCalendar,
   isHolidayLoading,
   isDetectingHolidayLocation,
@@ -1472,6 +1476,7 @@ export function TasksPage({
                     key={task.id}
                     task={task}
                     onToggle={onToggle}
+                    onToggleActive={onToggleActive}
                     onDelete={onDelete}
                     onSelectionChange={handleSelectionChange}
                     showSelectionControl
@@ -1479,6 +1484,7 @@ export function TasksPage({
                     isSelected={selectedTaskIds.has(task.id)}
                     isDeleting={deletingTaskIds?.has(task.id)}
                     isToggling={togglingTaskIds?.has(task.id)}
+                    isTogglingActive={togglingActiveTaskIds?.has(task.id)}
                   />
                 ))}
 
@@ -1526,6 +1532,7 @@ export function TasksPage({
                 key={task.id}
                 task={task}
                 onToggle={onToggle}
+                onToggleActive={onToggleActive}
                 onDelete={onDelete}
                 onSelectionChange={handleSelectionChange}
                 showSelectionControl
@@ -1534,6 +1541,7 @@ export function TasksPage({
                 isCompletedSection
                 isDeleting={deletingTaskIds?.has(task.id)}
                 isToggling={togglingTaskIds?.has(task.id)}
+                isTogglingActive={togglingActiveTaskIds?.has(task.id)}
               />
             ))}
           </div>

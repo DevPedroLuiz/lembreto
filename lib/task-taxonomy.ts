@@ -23,6 +23,37 @@ function normalizeUnique(values: string[]) {
 
 export async function ensureTaskTaxonomySchema(sql: SqlClient) {
   await sql`
+    DO $$
+    BEGIN
+      LOCK TABLE tasks IN ACCESS EXCLUSIVE MODE;
+
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'tasks'::regclass
+          AND conname = 'tasks_status_check'
+          AND (
+            pg_get_constraintdef(oid) NOT LIKE '%draft%' OR
+            pg_get_constraintdef(oid) NOT LIKE '%inactive%'
+          )
+      ) THEN
+        ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'tasks'::regclass
+          AND conname = 'tasks_status_check'
+      ) THEN
+        ALTER TABLE tasks
+        ADD CONSTRAINT tasks_status_check
+        CHECK (status IN ('pending', 'completed', 'draft', 'inactive'));
+      END IF;
+    END $$;
+  `;
+
+  await sql`
     ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
   `;
@@ -35,6 +66,11 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
   await sql`
     ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
+  `;
+
+  await sql`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE
   `;
 
   await sql`

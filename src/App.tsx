@@ -8,6 +8,7 @@
 import {
   BellRing,
   CalendarDays,
+  FileText,
   ListTodo,
   NotebookPen,
   Plus,
@@ -75,6 +76,7 @@ import { ResetPage } from './pages/ResetPage';
 import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
 import { TasksPage } from './pages/TasksPage';
 import { CalendarPage } from './pages/CalendarPage';
+import { DraftsPage } from './pages/DraftsPage';
 
 type AppConfigPatch = Partial<{
   darkMode: boolean;
@@ -86,7 +88,7 @@ type AppConfigPatch = Partial<{
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
-type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
+type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'drafts' | 'notes' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -107,6 +109,15 @@ type CalendarFeedResponse = {
 
 const UPCOMING_REMINDER_MINUTES = 15;
 const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
+const ALARM_SNOOZE_MINUTES = 10;
+const ALARM_RING_DURATION_MS = 2 * 60 * 1000;
+
+type ActiveAlarm = {
+  taskId: string;
+  taskTitle: string;
+  dueDate: string;
+  startedAt: number;
+};
 
 function fallbackCopyText(text: string) {
   const textarea = document.createElement('textarea');
@@ -135,7 +146,13 @@ function buildTaskShareMessage(task: Task): string {
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
   const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
-  const statusLabel = task.status === 'completed' ? 'Concluído' : 'Pendente';
+  const statusLabel = task.status === 'completed'
+    ? 'Concluído'
+    : task.status === 'draft'
+      ? 'Rascunho'
+      : task.status === 'inactive'
+        ? 'Desativado'
+        : 'Pendente';
 
   return [
     `Lembrete: ${task.title}`,
@@ -310,6 +327,7 @@ export default function App() {
   const [formCategory, setFormCategory] = useState('Geral');
   const [formTags, setFormTags] = useState<string[]>([]);
   const [formSuppressHolidayNotifications, setFormSuppressHolidayNotifications] = useState(false);
+  const [formAlarmEnabled, setFormAlarmEnabled] = useState(false);
   const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
   const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
   const [formRecurrenceUntil, setFormRecurrenceUntil] = useState('');
@@ -327,6 +345,8 @@ export default function App() {
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
   const [reschedulingTaskIds, setReschedulingTaskIds] = useState<Set<string>>(new Set());
   const [syncingCalendarTaskIds, setSyncingCalendarTaskIds] = useState<Set<string>>(new Set());
+  const [promotingDraftIds, setPromotingDraftIds] = useState<Set<string>>(new Set());
+  const [togglingActiveTaskIds, setTogglingActiveTaskIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTask, setPendingDeleteTask] = useState<{
     id: string;
     title: string;
@@ -339,6 +359,7 @@ export default function App() {
     id: string;
     title: string;
   } | null>(null);
+  const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null);
   const [notificationClock, setNotificationClock] = useState(() => Date.now());
 
   const [noteTitle, setNoteTitle] = useState('');
@@ -372,6 +393,10 @@ export default function App() {
   const notificationsOverrideRef = useRef<boolean | null>(null);
   const previousPendingOfflineTaskCountRef = useRef(0);
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
+  const alarmDismissedKeysRef = useRef<Set<string>>(new Set());
+  const alarmSnoozeUntilRef = useRef<Map<string, number>>(new Map());
+  const alarmSoundStopRef = useRef<(() => void) | null>(null);
+  const alarmAutoCloseTimerRef = useRef<number | null>(null);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
@@ -485,7 +510,7 @@ export default function App() {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setNotificationClock(Date.now());
-    }, 60000);
+    }, 15000);
 
     return () => window.clearInterval(intervalId);
   }, []);
@@ -530,6 +555,7 @@ export default function App() {
     if (profileCloseTimerRef.current) {
       window.clearTimeout(profileCloseTimerRef.current);
     }
+    stopAlarmSound();
   }, []);
 
   useEffect(() => {
@@ -632,8 +658,9 @@ export default function App() {
       dashboard: 0,
       calendar: 1,
       tasks: 2,
-      notes: 3,
-      notifications: 4,
+      drafts: 3,
+      notes: 4,
+      notifications: 5,
     };
 
     const previousTab = previousTabRef.current;
@@ -732,6 +759,76 @@ export default function App() {
       // best effort sound
     }
   }, [configSound]);
+
+  const stopAlarmSound = useCallback(() => {
+    alarmSoundStopRef.current?.();
+    alarmSoundStopRef.current = null;
+
+    if (alarmAutoCloseTimerRef.current) {
+      window.clearTimeout(alarmAutoCloseTimerRef.current);
+      alarmAutoCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const startAlarmSound = useCallback(() => {
+    stopAlarmSound();
+
+    try {
+      const audioContext = window.AudioContext || (window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }).webkitAudioContext;
+
+      if (!audioContext) return;
+
+      const ctx = new audioContext();
+      let stopped = false;
+      let activeOscillator: OscillatorNode | null = null;
+      let activeGain: GainNode | null = null;
+
+      const playPulse = () => {
+        if (stopped) return;
+
+        if (ctx.state === 'suspended') {
+          void ctx.resume().catch(() => undefined);
+        }
+
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.32, ctx.currentTime + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.5);
+        activeOscillator = oscillator;
+        activeGain = gain;
+      };
+
+      playPulse();
+      const pulseInterval = window.setInterval(playPulse, 1000);
+
+      alarmSoundStopRef.current = () => {
+        stopped = true;
+        window.clearInterval(pulseInterval);
+        try {
+          activeOscillator?.stop();
+        } catch {
+          // oscillator may already be stopped
+        }
+        activeOscillator?.disconnect();
+        activeGain?.disconnect();
+        void ctx.close().catch(() => undefined);
+      };
+    } catch {
+      // alarm sound is best effort; the visible alarm stays available.
+    }
+  }, [stopAlarmSound]);
 
   const emitNotification = useCallback((
     title: string,
@@ -845,6 +942,7 @@ export default function App() {
     setFormCategory('Geral');
     setFormTags([]);
     setFormSuppressHolidayNotifications(false);
+    setFormAlarmEnabled(false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -926,6 +1024,7 @@ export default function App() {
     setFormCategory(template.category);
     setFormTags([]);
     setFormSuppressHolidayNotifications(false);
+    setFormAlarmEnabled(false);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
@@ -942,6 +1041,7 @@ export default function App() {
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
+    setFormAlarmEnabled(task.alarmEnabled ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -965,6 +1065,7 @@ export default function App() {
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
+    setFormAlarmEnabled(task.alarmEnabled ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -1420,6 +1521,11 @@ export default function App() {
       return;
     }
 
+    if (formAlarmEnabled && !formTime) {
+      emitNotification('Horário obrigatório', 'Informe o horário inicial para ativar o alarme sonoro.', 'warning');
+      return;
+    }
+
     const dueDate = buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime);
     const endDate = formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
 
@@ -1432,6 +1538,8 @@ export default function App() {
       category: formCategory,
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
+      alarmEnabled: formAlarmEnabled,
+      ...(editingTask?.status === 'draft' ? { status: 'pending' as const } : {}),
     };
 
       try {
@@ -1514,6 +1622,7 @@ export default function App() {
     formDate,
     formDesc,
     formEndTime,
+    formAlarmEnabled,
     formPriority,
     formTime,
     formTitle,
@@ -1528,6 +1637,81 @@ export default function App() {
     formRecurrenceUntil,
     taskDueDateError,
     taskEndTimeError,
+    updateTask,
+  ]);
+
+  const handleSaveTaskDraft = useCallback(async () => {
+    if (!formTitle.trim() || !formDate || isTaskSubmitting) {
+      emitNotification('Rascunho incompleto', 'Informe pelo menos título e data para salvar o rascunho.', 'warning');
+      return;
+    }
+
+    if (taskDueDateError) {
+      emitNotification('Prazo inválido', taskDueDateError, 'warning');
+      return;
+    }
+
+    if (formAlarmEnabled && !formTime) {
+      emitNotification('Horário obrigatório', 'Informe o horário inicial para salvar o rascunho com alarme.', 'warning');
+      return;
+    }
+
+    const dueDate = buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime);
+    const endDate = formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
+
+    if (endDate && Date.parse(endDate) <= Date.parse(dueDate)) {
+      emitNotification('Horário final inválido', 'O horário final precisa ser depois do horário inicial.', 'warning');
+      return;
+    }
+
+    const payload = {
+      title: formTitle,
+      description: formDesc,
+      dueDate,
+      endDate,
+      priority: formPriority,
+      category: formCategory,
+      tags: formTags,
+      suppressHolidayNotifications: formSuppressHolidayNotifications,
+      alarmEnabled: formAlarmEnabled,
+      status: 'draft' as const,
+    };
+
+    try {
+      setIsTaskSubmitting(true);
+
+      const saved = editingTask
+        ? await updateTask(editingTask.id, payload)
+        : await createTask(payload);
+
+      emitNotification('Rascunho salvo', `"${saved.title}" ficou disponível na aba Rascunhos.`, 'success', {
+        target: { type: 'task', taskId: saved.id },
+      });
+      resetTaskForm();
+      setActiveTab('drafts');
+    } catch (error) {
+      emitNotification('Erro', error instanceof Error ? error.message : 'Falha ao salvar o rascunho.', 'error');
+    } finally {
+      setIsTaskSubmitting(false);
+    }
+  }, [
+    createTask,
+    editingTask,
+    emitNotification,
+    formCategory,
+    formDate,
+    formDesc,
+    formEndTime,
+    formAlarmEnabled,
+    formPriority,
+    formSuppressHolidayNotifications,
+    formTags,
+    formTime,
+    formTitle,
+    isTaskSubmitting,
+    noTimeReminderFallbackTime,
+    resetTaskForm,
+    taskDueDateError,
     updateTask,
   ]);
 
@@ -1621,6 +1805,104 @@ export default function App() {
       setSelectedTask(result.task);
     }
   }, [handleToggle]);
+
+  const handlePromoteDraft = useCallback(async (task: Task) => {
+    if (task.status !== 'draft' || promotingDraftIds.has(task.id)) return;
+
+    if (task.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' && !task.endDate) {
+      emitNotification(
+        'Horário final obrigatório',
+        'Edite o rascunho e informe o horário final antes de adicionar como lembrete.',
+        'warning',
+      );
+      openEditTask(task);
+      return;
+    }
+
+    try {
+      setPromotingDraftIds((prev) => new Set(prev).add(task.id));
+      const updated = await updateTask(task.id, { status: 'pending' });
+      emitNotification('Lembrete adicionado', `"${updated.title}" saiu dos rascunhos e entrou nos pendentes.`, 'success', {
+        target: { type: 'task', taskId: updated.id },
+      });
+    } catch (error) {
+      emitNotification('Erro', error instanceof Error ? error.message : 'Não foi possível adicionar o rascunho como lembrete.', 'error');
+    } finally {
+      setPromotingDraftIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  }, [emitNotification, openEditTask, promotingDraftIds, updateTask]);
+
+  const handleToggleActiveTask = useCallback(async (task: Task) => {
+    if (task.status === 'draft' || task.status === 'completed' || togglingActiveTaskIds.has(task.id)) return;
+
+    const nextStatus = task.status === 'inactive' ? 'pending' : 'inactive';
+
+    if (
+      nextStatus === 'pending' &&
+      task.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
+      !task.endDate
+    ) {
+      emitNotification(
+        'Horário final obrigatório',
+        'Informe o horário final antes de ativar este lembrete de Trabalho.',
+        'warning',
+      );
+      openEditTask(task);
+      return;
+    }
+
+    try {
+      setTogglingActiveTaskIds((prev) => new Set(prev).add(task.id));
+      const updated = await updateTask(task.id, { status: nextStatus });
+      const isNowActive = updated.status === 'pending';
+      emitNotification(
+        isNowActive ? 'Lembrete ativado' : 'Lembrete desativado',
+        isNowActive
+          ? `"${updated.title}" voltou a disparar alertas.`
+          : `"${updated.title}" foi pausado e não disparará alertas.`,
+        'success',
+        { target: { type: 'task', taskId: updated.id } },
+      );
+    } catch (error) {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível alterar a ativação do lembrete.',
+        'error',
+      );
+    } finally {
+      setTogglingActiveTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  }, [emitNotification, openEditTask, togglingActiveTaskIds, updateTask]);
+
+  const closeActiveAlarm = useCallback(() => {
+    if (activeAlarm) {
+      const dueDate = parseISO(activeAlarm.dueDate);
+      const alarmKey = `${activeAlarm.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
+      alarmDismissedKeysRef.current.add(alarmKey);
+    }
+
+    stopAlarmSound();
+    setActiveAlarm(null);
+  }, [activeAlarm, stopAlarmSound]);
+
+  const snoozeActiveAlarm = useCallback(() => {
+    if (!activeAlarm) return;
+
+    const dueDate = parseISO(activeAlarm.dueDate);
+    const alarmKey = `${activeAlarm.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
+    alarmSnoozeUntilRef.current.set(alarmKey, Date.now() + ALARM_SNOOZE_MINUTES * 60 * 1000);
+    stopAlarmSound();
+    setActiveAlarm(null);
+    triggerToastOnly('Alarme adiado', `Vamos tocar novamente em ${ALARM_SNOOZE_MINUTES} minutos.`);
+  }, [activeAlarm, stopAlarmSound, triggerToastOnly]);
 
   const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1899,6 +2181,28 @@ export default function App() {
     [tasks]
   );
 
+  const draftTasks = useMemo(
+    () => tasks.filter((task) => task.status === 'draft'),
+    [tasks]
+  );
+
+  const inactiveTasks = useMemo(
+    () => tasks.filter((task) => task.status === 'inactive'),
+    [tasks]
+  );
+
+  const pendingAndDraftTasks = useMemo(
+    () => [...pendingTasks, ...inactiveTasks, ...draftTasks],
+    [draftTasks, inactiveTasks, pendingTasks]
+  );
+
+  const calendarTasks = useMemo(
+    () => tasks.filter((task) => task.status !== 'draft' && task.status !== 'inactive'),
+    [tasks]
+  );
+
+  const dashboardTasks = calendarTasks;
+
   const completedTasks = useMemo(
     () => tasks.filter((task) => task.status === 'completed'),
     [tasks]
@@ -2009,19 +2313,88 @@ export default function App() {
 
       if (minutesUntil < 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
 
+      if (!task.alarmEnabled && minutesUntil === 0) {
+        emitLocalOfflineNotification(
+          'Lembrete para agora',
+          `"${task.title}" chegou ao horário definido.`,
+          'info',
+          {
+            target: { type: 'task', taskId: task.id },
+            dedupeKey: `due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,
+          },
+        );
+        return;
+      }
+
       emitLocalOfflineNotification(
-        minutesUntil === 0
-          ? 'Lembrete para agora'
+        task.alarmEnabled
+          ? 'Alarme em 15 minutos'
           : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
-        `"${task.title}" está chegando. Falta pouco para o horário definido.`,
-        minutesUntil <= 5 ? 'warning' : 'info',
+        task.alarmEnabled
+          ? `O alarme do seu lembrete vai tocar em 15 minutos! "${task.title}" está chegando.`
+          : `"${task.title}" está chegando. Falta pouco para o horário definido.`,
+        task.alarmEnabled || minutesUntil <= 5 ? 'warning' : 'info',
         {
           target: { type: 'task', taskId: task.id },
-          dedupeKey: `upcoming:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+          dedupeKey: `${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
         },
       );
     });
   }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
+
+  useEffect(() => {
+    if (!notificationsEnabled || timedPendingTasks.length === 0 || activeAlarm) return;
+
+    const now = new Date(notificationClock).getTime();
+
+    for (const task of timedPendingTasks) {
+      if (!task.alarmEnabled || shouldSuppressHolidayNotification(task)) continue;
+
+      const dueTime = parseISO(task.dueDate).getTime();
+      if (Number.isNaN(dueTime)) continue;
+
+      const alarmKey = `${task.id}:${format(new Date(dueTime), 'yyyy-MM-dd-HH-mm')}`;
+      if (alarmDismissedKeysRef.current.has(alarmKey)) continue;
+
+      const snoozeUntil = alarmSnoozeUntilRef.current.get(alarmKey);
+      const targetTime = snoozeUntil ?? dueTime;
+      const hasReachedAlarm = now >= targetTime && now < targetTime + ALARM_RING_DURATION_MS;
+      if (!hasReachedAlarm) continue;
+
+      alarmSnoozeUntilRef.current.delete(alarmKey);
+      setActiveAlarm({
+        taskId: task.id,
+        taskTitle: task.title,
+        dueDate: task.dueDate,
+        startedAt: now,
+      });
+      startAlarmSound();
+      emitNotification(
+        'Alarme tocando',
+        `"${task.title}" chegou ao horário definido.`,
+        'warning',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `alarm-ringing:${task.id}:${format(new Date(targetTime), 'yyyy-MM-dd-HH-mm')}`,
+        },
+      );
+      alarmAutoCloseTimerRef.current = window.setTimeout(() => {
+        alarmDismissedKeysRef.current.add(alarmKey);
+        stopAlarmSound();
+        setActiveAlarm(null);
+      }, ALARM_RING_DURATION_MS);
+      break;
+    }
+  }, [
+    activeAlarm,
+    emitNotification,
+    notificationClock,
+    notificationsEnabled,
+    shouldSuppressHolidayNotification,
+    startAlarmSound,
+    stopAlarmSound,
+    timedPendingTasks,
+  ]);
 
   useEffect(() => {
     if (isOnline || !notificationsEnabled || todayTasks.length === 0) return;
@@ -2562,6 +2935,8 @@ export default function App() {
       ? 'Seu calendário'
     : activeTab === 'tasks'
       ? 'Sua agenda'
+    : activeTab === 'drafts'
+      ? 'Rascunhos'
       : activeTab === 'notes'
         ? 'Suas notas'
       : 'Notificações';
@@ -2571,6 +2946,8 @@ export default function App() {
       ? 'Visualize seus lembretes por dia, semana e mês em uma grade de calendário.'
     : activeTab === 'tasks'
       ? 'Organize lembretes, refine prioridades e avance com tranquilidade.'
+    : activeTab === 'drafts'
+      ? 'Revise lembretes salvos antes de adicioná-los à sua lista principal.'
       : activeTab === 'notes'
         ? 'Guarde contexto, ideias e apontamentos vinculados aos seus lembretes.'
       : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
@@ -2613,7 +2990,8 @@ export default function App() {
         filterCategory={filterCategory}
         setFilterCategory={setFilterCategory}
         categories={categoryOptions}
-        pendingTasks={pendingTasks}
+        pendingTasks={pendingAndDraftTasks}
+        draftCount={draftTasks.length}
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
@@ -2691,8 +3069,10 @@ export default function App() {
                         ? 'Calendário'
                       : activeTab === 'notes'
                         ? 'Caderno pessoal'
-                        : activeTab === 'notifications'
-                          ? 'Central de notificações'
+                      : activeTab === 'drafts'
+                        ? 'Rascunhos'
+                      : activeTab === 'notifications'
+                        ? 'Central de notificações'
                           : 'Gestão de lembretes'}
                   </span>
                   <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
@@ -2748,6 +3128,15 @@ export default function App() {
                 <Plus size={20} /> Novo lembrete
               </button>
             )}
+            {activeTab === 'drafts' && (
+              <button
+                onClick={openNewTask}
+                data-testid="new-draft-button"
+                className="action-primary hidden lg:inline-flex"
+              >
+                <Plus size={20} /> Novo rascunho
+              </button>
+            )}
             {activeTab === 'notes' && (
               <button
                 onClick={() => openNewNote()}
@@ -2769,7 +3158,7 @@ export default function App() {
             >
               {activeTab === 'dashboard' && (
                 <DashboardPage
-                  tasks={tasks}
+                  tasks={dashboardTasks}
                   pendingTasks={pendingTasks}
                   completedTasks={completedTasks}
                   todayCount={pendingSummary.todayCount}
@@ -2789,7 +3178,7 @@ export default function App() {
               )}
               {activeTab === 'calendar' && (
                 <CalendarPage
-                  tasks={tasks}
+                  tasks={calendarTasks}
                   categories={categoryOptions}
                   tags={tagOptions}
                   onNewTask={openNewTask}
@@ -2802,7 +3191,7 @@ export default function App() {
               )}
               {activeTab === 'tasks' && (
                 <TasksPage
-                  pendingTasks={pendingTasks}
+                  pendingTasks={pendingAndDraftTasks}
                   completedTasks={completedTasks}
                   categories={categoryOptions}
                   tags={tagOptions}
@@ -2813,11 +3202,13 @@ export default function App() {
                   showCompleted={configShowCompleted}
                   onNewTask={openNewTask}
                   onToggle={handleToggle}
+                  onToggleActive={handleToggleActiveTask}
                   onDelete={handleDelete}
                   onDeleteSelected={handleDeleteSelectedTasks}
                   onEdit={openTaskDetails}
                   deletingTaskIds={deletingTaskIds}
                   togglingTaskIds={togglingTaskIds}
+                  togglingActiveTaskIds={togglingActiveTaskIds}
                   holidayCalendar={holidayCalendar}
                   isHolidayLoading={isHolidayLoading}
                   isDetectingHolidayLocation={isDetectingHolidayLocation}
@@ -2828,6 +3219,17 @@ export default function App() {
                     void detectHolidayLocation();
                   }}
                   onOpenHolidaySettings={openHolidaySettings}
+                />
+              )}
+              {activeTab === 'drafts' && (
+                <DraftsPage
+                  drafts={draftTasks}
+                  onNewTask={openNewTask}
+                  onEdit={openEditTask}
+                  onPromote={handlePromoteDraft}
+                  onDelete={handleDelete}
+                  deletingTaskIds={deletingTaskIds}
+                  promotingDraftIds={promotingDraftIds}
                 />
               )}
               {activeTab === 'notes' && (
@@ -2854,7 +3256,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 lg:hidden">
-        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
+        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -2900,6 +3302,24 @@ export default function App() {
             )}
           </button>
           <button
+            onClick={() => {
+              closeFloatingSurfacesForNavigation();
+              setActiveTab('drafts');
+            }}
+            aria-label="Abrir rascunhos"
+            className={cn(
+              'relative flex flex-col items-center rounded-2xl p-3 transition-colors',
+              activeTab === 'drafts' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
+            )}
+          >
+            <FileText size={24} />
+            {draftTasks.length > 0 && (
+              <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(124,58,237,0.8)]">
+                {Math.min(draftTasks.length, 99)}
+              </span>
+            )}
+          </button>
+          <button
             onClick={openNotesTab}
             aria-label="Abrir notas"
             className={cn(
@@ -2912,6 +3332,56 @@ export default function App() {
         </div>
       </nav>
 
+      <AnimatePresence>
+        {activeAlarm && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            className="fixed inset-x-3 bottom-24 z-[130] mx-auto max-w-xl rounded-[28px] border border-amber-200 bg-white p-4 shadow-[0_32px_90px_-38px_rgba(15,23,42,0.62)] dark:border-amber-500/20 dark:bg-slate-950 sm:bottom-6 sm:p-5"
+            data-testid="active-alarm-panel"
+            role="alertdialog"
+            aria-labelledby="active-alarm-title"
+          >
+            <div className="flex items-start gap-3">
+              <span className="icon-slot h-12 w-12 rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                <BellRing size={22} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p id="active-alarm-title" className="text-sm font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+                  Alarme tocando
+                </p>
+                <h3 className="mt-1 truncate text-lg font-semibold text-slate-950 dark:text-white">
+                  {activeAlarm.taskTitle}
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  O alarme do seu lembrete está tocando agora.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                data-testid="active-alarm-snooze"
+                onClick={snoozeActiveAlarm}
+                className="action-secondary justify-center"
+              >
+                Adiar 10 minutos
+              </button>
+              <button
+                type="button"
+                data-testid="active-alarm-close"
+                onClick={closeActiveAlarm}
+                className="action-primary justify-center"
+              >
+                Fechar alarme
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <TaskDetailsDialog
         open={showTaskDetails && Boolean(selectedTask)}
         task={selectedTask}
@@ -2920,6 +3390,7 @@ export default function App() {
         isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
         isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
         isSyncingCalendar={selectedTask ? syncingCalendarTaskIds.has(selectedTask.id) : false}
+        isTogglingActive={selectedTask ? togglingActiveTaskIds.has(selectedTask.id) : false}
         backLabel={taskDetailsBackLabel || undefined}
         onClose={closeTaskDetails}
         onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
@@ -2929,6 +3400,7 @@ export default function App() {
         onSyncCalendar={handleSyncTaskCalendar}
         onQuickReschedule={handleQuickReschedule}
         onToggle={handleToggleFromDetails}
+        onToggleActive={handleToggleActiveTask}
         onDelete={handleDeleteFromDetails}
         onCreateLinkedNote={openNewNote}
         onEditLinkedNote={(note, task) => openEditNote(note, { taskContextId: task.id })}
@@ -2961,6 +3433,7 @@ export default function App() {
         open={showTaskDrawer}
         onClose={resetTaskForm}
         onSubmit={handleSubmitTask}
+        onSaveDraft={handleSaveTaskDraft}
         editingTask={editingTask}
         darkMode={darkMode}
         isSubmitting={isTaskSubmitting}
@@ -2994,6 +3467,8 @@ export default function App() {
         setRecurrenceUntil={setFormRecurrenceUntil}
         suppressHolidayNotifications={formSuppressHolidayNotifications}
         setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
+        alarmEnabled={formAlarmEnabled}
+        setAlarmEnabled={setFormAlarmEnabled}
         recurrenceError={recurrenceError}
         recurrencePreviewCount={recurringDates.length}
         holidaySuppressedCount={recurringHolidaySuppressedCount}

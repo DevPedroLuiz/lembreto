@@ -115,14 +115,15 @@ export async function seedCustomTasksForUser(
     priority: 'low' | 'medium' | 'high';
     category: string;
     tags?: string[];
-    status?: 'pending' | 'completed';
+    status?: 'pending' | 'completed' | 'draft' | 'inactive';
+    alarmEnabled?: boolean;
   }>,
 ): Promise<void> {
   const userId = await getUserIdByEmail(email);
 
   for (const task of tasks) {
     await sql`
-      INSERT INTO tasks (user_id, title, description, due_date, priority, category, tags, status)
+      INSERT INTO tasks (user_id, title, description, due_date, priority, category, tags, alarm_enabled, status)
       VALUES (
         ${userId},
         ${task.title},
@@ -131,6 +132,7 @@ export async function seedCustomTasksForUser(
         ${task.priority},
         ${task.category},
         ${task.tags ?? []},
+        ${task.alarmEnabled ?? false},
         ${task.status ?? 'pending'}
       )
     `;

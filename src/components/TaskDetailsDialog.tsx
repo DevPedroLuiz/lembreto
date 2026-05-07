@@ -2,12 +2,15 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  Bell,
+  BellOff,
   CalendarClock,
   CalendarDays,
   CheckCircle2,
   Circle,
   Clock3,
   CopyPlus,
+  FileText,
   Loader2,
   PencilLine,
   RefreshCw,
@@ -43,6 +46,7 @@ interface TaskDetailsDialogProps {
   isToggling?: boolean;
   isRescheduling?: boolean;
   isSyncingCalendar?: boolean;
+  isTogglingActive?: boolean;
   backLabel?: string;
   onClose: () => void;
   onBack?: () => void;
@@ -52,6 +56,7 @@ interface TaskDetailsDialogProps {
   onSyncCalendar: (task: Task) => void;
   onQuickReschedule: (task: Task, preset: 'laterToday' | 'tomorrowMorning' | 'nextWeek') => void;
   onToggle: (task: Task) => void;
+  onToggleActive: (task: Task) => void;
   onDelete: (task: Task) => void;
   onCreateLinkedNote: (task: Task) => void;
   onEditLinkedNote: (note: Note, task: Task) => void;
@@ -90,7 +95,13 @@ function buildTaskHistory(task: Task): TaskHistoryEvent[] {
       createdAt: task.createdAt,
       details: [
         `Prazo atual: ${formatDueDate(task)}.`,
-        task.status === 'completed' ? 'Situação atual: concluído.' : 'Situação atual: pendente.',
+        task.status === 'completed'
+          ? 'Situação atual: concluído.'
+          : task.status === 'draft'
+            ? 'Situação atual: rascunho.'
+            : task.status === 'inactive'
+              ? 'Situação atual: desativado.'
+            : 'Situação atual: pendente.',
       ],
     },
   ];
@@ -136,6 +147,7 @@ export function TaskDetailsDialog({
   isToggling = false,
   isRescheduling = false,
   isSyncingCalendar = false,
+  isTogglingActive = false,
   backLabel,
   onClose,
   onBack,
@@ -145,6 +157,7 @@ export function TaskDetailsDialog({
   onSyncCalendar,
   onQuickReschedule,
   onToggle,
+  onToggleActive,
   onDelete,
   onCreateLinkedNote,
   onEditLinkedNote,
@@ -157,7 +170,9 @@ export function TaskDetailsDialog({
   const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const isCompleted = task.status === 'completed';
-  const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar;
+  const isDraft = task.status === 'draft';
+  const isInactive = task.status === 'inactive';
+  const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar || isTogglingActive;
   const historyItems = buildTaskHistory(task);
 
   return (
@@ -246,11 +261,15 @@ export function TaskDetailsDialog({
                         'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
                         isCompleted
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
-                          : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
+                          : isDraft
+                            ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+                          : isInactive
+                            ? 'border-slate-300 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-300'
+                            : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
                       ].join(' ')}
                     >
-                      {isCompleted ? <CheckCircle2 size={12} /> : <Circle size={12} />}
-                      {isCompleted ? 'Concluído' : 'Pendente'}
+                      {isCompleted ? <CheckCircle2 size={12} /> : isDraft ? <FileText size={12} /> : isInactive ? <BellOff size={12} /> : <Circle size={12} />}
+                      {isCompleted ? 'Concluído' : isDraft ? 'Rascunho' : isInactive ? 'Desativado' : 'Pendente'}
                     </span>
                   </div>
                 </div>
@@ -267,21 +286,47 @@ export function TaskDetailsDialog({
                       Editar
                     </button>
 
-                    <button
-                      type="button"
-                      data-testid="task-details-toggle"
-                      onClick={() => onToggle(task)}
-                      disabled={isBusy}
-                      className={[
-                        'inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
-                        isCompleted
-                          ? 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_16px_30px_-22px_rgba(16,185,129,0.75)] hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 hover:shadow-[0_20px_36px_-24px_rgba(16,185,129,0.9)] dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-200',
-                      ].join(' ')}
-                    >
-                      {isCompleted ? <Circle size={16} /> : <CheckCircle2 size={16} />}
-                      {isCompleted ? 'Reabrir' : 'Concluir'}
-                    </button>
+                    {!isDraft && !isInactive && (
+                      <button
+                        type="button"
+                        data-testid="task-details-toggle"
+                        onClick={() => onToggle(task)}
+                        disabled={isBusy}
+                        className={[
+                          'inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
+                          isCompleted
+                            ? 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_16px_30px_-22px_rgba(16,185,129,0.75)] hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 hover:shadow-[0_20px_36px_-24px_rgba(16,185,129,0.9)] dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-200',
+                        ].join(' ')}
+                      >
+                        {isCompleted ? <Circle size={16} /> : <CheckCircle2 size={16} />}
+                        {isCompleted ? 'Reabrir' : 'Concluir'}
+                      </button>
+                    )}
+
+                    {!isDraft && !isCompleted && (
+                      <button
+                        type="button"
+                        data-testid="task-details-activation-toggle"
+                        onClick={() => onToggleActive(task)}
+                        disabled={isBusy}
+                        className={[
+                          'inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
+                          isInactive
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-[0_16px_30px_-22px_rgba(37,99,235,0.7)] hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300'
+                            : 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]',
+                        ].join(' ')}
+                      >
+                        {isTogglingActive ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : isInactive ? (
+                          <Bell size={16} />
+                        ) : (
+                          <BellOff size={16} />
+                        )}
+                        {isInactive ? 'Ativar' : 'Desativar'}
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -294,16 +339,18 @@ export function TaskDetailsDialog({
                       Compartilhar
                     </button>
 
-                    <button
-                      type="button"
-                      data-testid="task-details-calendar-sync"
-                      onClick={() => onSyncCalendar(task)}
-                      disabled={isBusy}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-                    >
-                      {isSyncingCalendar ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                      Sincronizar agora
-                    </button>
+                    {!isDraft && !isInactive && (
+                      <button
+                        type="button"
+                        data-testid="task-details-calendar-sync"
+                        onClick={() => onSyncCalendar(task)}
+                        disabled={isBusy}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      >
+                        {isSyncingCalendar ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        Sincronizar agora
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -521,7 +568,7 @@ export function TaskDetailsDialog({
                     </div>
                   </section>
 
-                  {!isCompleted && (
+                  {!isCompleted && !isDraft && !isInactive && (
                     <section className="surface-soft p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div>

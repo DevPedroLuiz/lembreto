@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority    TEXT        NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
   category    TEXT        NOT NULL DEFAULT 'Geral',
   suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE,
-  status      TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
+  alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  status      TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'draft', 'inactive')),
   history     JSONB       NOT NULL DEFAULT '[]'::JSONB,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

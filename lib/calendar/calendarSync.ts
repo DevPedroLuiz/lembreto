@@ -410,7 +410,7 @@ export async function syncTaskToExternalCalendar(input: {
   if (!task) return { ok: false, provider: null, error: 'Lembrete não encontrado' };
 
   const eventInput = buildCalendarEventInput(task);
-  if (!eventInput || task.status === 'completed') {
+  if (!eventInput || task.status !== 'pending') {
     await removeTaskFromExternalCalendar({
       sql: input.sql,
       userId: input.userId,

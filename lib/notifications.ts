@@ -578,6 +578,7 @@ interface SchedulableTaskRow {
   title: string;
   dueDate: string | null;
   suppressHolidayNotifications: boolean;
+  alarmEnabled: boolean;
   stateCode: string | null;
   cityName: string | null;
   holidayRegionCode: string | null;
@@ -594,6 +595,11 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
     ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
   `;
 
+  await sql`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  `;
+
   const rows = await sql`
     SELECT
       tasks.id,
@@ -601,6 +607,7 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
       tasks.title,
       tasks.due_date AS "dueDate",
       tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
+      tasks.alarm_enabled AS "alarmEnabled",
       users.state_code AS "stateCode",
       users.city_name AS "cityName",
       users.holiday_region_code AS "holidayRegionCode"
@@ -637,16 +644,36 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
 
     const minutesUntil = minutesDifference(dueDate, now);
 
-    if (minutesUntil >= 0 && minutesUntil <= UPCOMING_REMINDER_MINUTES) {
+    if (
+      minutesUntil <= UPCOMING_REMINDER_MINUTES &&
+      (task.alarmEnabled ? minutesUntil >= 0 : minutesUntil > 0)
+    ) {
       const result = await createNotification(sql, {
         userId: task.userId,
-        title: minutesUntil === 0
-          ? 'Lembrete para agora'
+        title: task.alarmEnabled
+          ? 'Alarme em 15 minutos'
           : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
-        message: `"${task.title}" está chegando. Falta pouco para o horário definido.`,
-        tone: minutesUntil <= 5 ? 'warning' : 'info',
+        message: task.alarmEnabled
+          ? `O alarme do seu lembrete vai tocar em 15 minutos! "${task.title}" está chegando.`
+          : `"${task.title}" está chegando. Falta pouco para o horário definido.`,
+        tone: task.alarmEnabled || minutesUntil <= 5 ? 'warning' : 'info',
         target: { type: 'task', taskId: task.id },
-        dedupeKey: `user:${task.userId}:upcoming:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+        dedupeKey: `user:${task.userId}:${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+      });
+
+      if (result.created) {
+        createdNotifications += 1;
+      }
+    }
+
+    if (!task.alarmEnabled && minutesUntil === 0) {
+      const result = await createNotification(sql, {
+        userId: task.userId,
+        title: 'Lembrete para agora',
+        message: `"${task.title}" chegou ao horÃ¡rio definido.`,
+        tone: 'info',
+        target: { type: 'task', taskId: task.id },
+        dedupeKey: `user:${task.userId}:due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,
       });
 
       if (result.created) {

@@ -31,6 +31,7 @@ export interface Task {
   category: string;
   tags: string[];
   suppressHolidayNotifications: boolean;
+  alarmEnabled: boolean;
   status: Status;
   createdAt: string;
   syncStatus?: 'pending';

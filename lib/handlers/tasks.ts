@@ -168,6 +168,8 @@ function buildCreatedHistoryEntry(input: {
   priority: string;
   category: string;
   tags: string[];
+  alarmEnabled: boolean;
+  status: string;
 }): TaskHistoryEntry {
   const details = [
     input.dueDate ? 'Prazo inicial definido.' : 'Criado sem prazo definido.',
@@ -179,8 +181,22 @@ function buildCreatedHistoryEntry(input: {
     details.push(`Tags iniciais: ${input.tags.join(', ')}.`);
   }
 
+  if (input.alarmEnabled) {
+    details.push('Alarme ativado.');
+  }
+
   if (input.endDate) {
     details.push('Horário final definido.');
+  }
+
+  if (input.status === 'draft') {
+    details.push('Salvo como rascunho.');
+    return createHistoryEntry('created', 'Rascunho criado', 'O lembrete foi salvo como rascunho.', details);
+  }
+
+  if (input.status === 'inactive') {
+    details.push('Criado desativado.');
+    return createHistoryEntry('created', 'Lembrete desativado criado', 'O lembrete foi registrado desativado.', details);
   }
 
   return createHistoryEntry('created', 'Lembrete criado', 'O lembrete foi registrado.', details);
@@ -197,6 +213,7 @@ function buildUpdateHistoryEntry(
     category: unknown;
     tags: string[];
     suppressHolidayNotifications: unknown;
+    alarmEnabled: unknown;
     status: unknown;
   },
 ): TaskHistoryEntry | null {
@@ -212,6 +229,9 @@ function buildUpdateHistoryEntry(
   if (!areStringArraysEqual(currentTags, next.tags)) changedDetails.push('Tags atualizadas.');
   if (Boolean(current.suppress_holiday_notifications) !== Boolean(next.suppressHolidayNotifications)) {
     changedDetails.push('Preferência de notificações em feriados alterada.');
+  }
+  if (Boolean(current.alarm_enabled) !== Boolean(next.alarmEnabled)) {
+    changedDetails.push('ConfiguraÃ§Ã£o de alarme alterada.');
   }
   if (String(current.status ?? '') !== String(next.status ?? '')) changedDetails.push('Status alterado.');
 
@@ -287,6 +307,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          alarm_enabled AS "alarmEnabled",
           status,
           history,
           created_at  AS "createdAt",
@@ -319,7 +340,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       endDate,
       priority,
       category,
+      status,
       suppressHolidayNotifications,
+      alarmEnabled,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
     const history = JSON.stringify([
@@ -329,6 +352,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         priority,
         category,
         tags,
+        alarmEnabled,
+        status,
       }),
     ]);
 
@@ -344,6 +369,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications,
+          alarm_enabled,
+          status,
           history
         )
         VALUES (
@@ -356,6 +383,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${category},
           ${tags},
           ${suppressHolidayNotifications},
+          ${alarmEnabled},
+          ${status},
           ${history}::jsonb
         )
         RETURNING
@@ -369,6 +398,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          alarm_enabled AS "alarmEnabled",
           status,
           history,
           created_at  AS "createdAt",
@@ -380,7 +410,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       `;
 
       await syncTaskTaxonomy(sql, user.id, category, tags);
-      await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
+      if (status === 'pending') {
+        await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
+      }
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
       const syncedRows = await sql`
         SELECT
@@ -392,9 +424,10 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           end_date    AS "endDate",
           priority,
           category,
-          tags,
-          suppress_holiday_notifications AS "suppressHolidayNotifications",
-          status,
+         tags,
+         suppress_holiday_notifications AS "suppressHolidayNotifications",
+          alarm_enabled AS "alarmEnabled",
+         status,
           history,
           created_at  AS "createdAt",
           external_calendar_provider AS "externalCalendarProvider",
@@ -444,6 +477,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         priority,
         category,
         status,
+        alarmEnabled,
         suppressHolidayNotifications,
       } = parsed.data;
       const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
@@ -459,6 +493,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           status,
+          alarm_enabled,
           suppress_holiday_notifications,
           history
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
@@ -481,11 +516,14 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         suppressHolidayNotifications: suppressHolidayNotifications !== undefined
           ? suppressHolidayNotifications
           : cur.suppress_holiday_notifications,
+        alarmEnabled: alarmEnabled !== undefined ? alarmEnabled : cur.alarm_enabled,
         status: status !== undefined ? status : cur.status,
       };
-      const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined;
+      const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined || status !== undefined;
       if (
         shouldValidateEndDateRequirement &&
+        String(nextValues.status) !== 'draft' &&
+        String(nextValues.status) !== 'inactive' &&
         String(nextValues.category).trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
         !nextValues.endDate
       ) {
@@ -511,6 +549,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category    = ${nextValues.category},
           tags        = ${nextValues.tags},
           suppress_holiday_notifications = ${nextValues.suppressHolidayNotifications},
+          alarm_enabled = ${nextValues.alarmEnabled},
           status      = ${nextValues.status},
           history     = COALESCE(history, '[]'::jsonb) || COALESCE(${historyUpdate}::jsonb, '[]'::jsonb)
         WHERE id = ${id} AND user_id = ${user.id}
@@ -525,6 +564,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          alarm_enabled AS "alarmEnabled",
           status,
           history,
           created_at  AS "createdAt",
@@ -550,6 +590,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          alarm_enabled AS "alarmEnabled",
           status,
           history,
           created_at  AS "createdAt",

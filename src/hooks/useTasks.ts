@@ -271,6 +271,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       category: string;
       tags: string[];
       suppressHolidayNotifications: boolean;
+      alarmEnabled: boolean;
       status: Status;
     }>,
   ) => {
@@ -323,6 +324,14 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [token, userId]);
 
   const toggleStatus = useCallback(async (task: Task) => {
+    if (task.status === 'draft' || task.status === 'inactive') {
+      throw new Error(
+        task.status === 'draft'
+          ? 'Rascunhos precisam ser adicionados como lembrete antes de serem concluídos.'
+          : 'Ative o lembrete antes de marcá-lo como concluído.',
+      );
+    }
+
     if (task.syncStatus === 'pending') {
       throw new Error('Aguarde a sincronizacao deste lembrete.');
     }

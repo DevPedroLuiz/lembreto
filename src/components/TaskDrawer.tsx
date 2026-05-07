@@ -1,6 +1,7 @@
 ﻿import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  BellRing,
   BellOff,
   CalendarDays,
   Clock3,
@@ -63,12 +64,13 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   high: 'Alta',
 };
 
-type TaskDrawerTab = 'details' | 'recurrence';
+type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
 
 interface TaskDrawerProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
+  onSaveDraft: () => void;
   editingTask: Task | null;
   darkMode: boolean;
   isSubmitting?: boolean;
@@ -102,6 +104,8 @@ interface TaskDrawerProps {
   setRecurrenceUntil: (value: string) => void;
   suppressHolidayNotifications: boolean;
   setSuppressHolidayNotifications: (value: boolean) => void;
+  alarmEnabled: boolean;
+  setAlarmEnabled: (value: boolean) => void;
   recurrenceError?: string;
   recurrencePreviewCount?: number;
   holidaySuppressedCount?: number;
@@ -255,6 +259,7 @@ export function TaskDrawer({
   open,
   onClose,
   onSubmit,
+  onSaveDraft,
   editingTask,
   darkMode,
   isSubmitting = false,
@@ -288,12 +293,15 @@ export function TaskDrawer({
   setRecurrenceUntil,
   suppressHolidayNotifications,
   setSuppressHolidayNotifications,
+  alarmEnabled,
+  setAlarmEnabled,
   recurrenceError = '',
   recurrencePreviewCount = 0,
   holidaySuppressedCount = 0,
   onApplyRecurrenceSuggestion,
 }: TaskDrawerProps) {
   const isEditing = Boolean(editingTask);
+  const isEditingDraft = editingTask?.status === 'draft';
   const [activeTab, setActiveTab] = React.useState<TaskDrawerTab>('details');
   const [categorySearch, setCategorySearch] = React.useState('');
   const [tagDraft, setTagDraft] = React.useState('');
@@ -313,6 +321,12 @@ export function TaskDrawer({
       setTagFeedback('');
     }
   }, [editingTask, open]);
+
+  React.useEffect(() => {
+    if (alarmEnabled && (!date || !time)) {
+      setAlarmEnabled(false);
+    }
+  }, [alarmEnabled, date, setAlarmEnabled, time]);
 
   const titleCount = title.trim().length;
   const summaryDue = date || 'Defina a data';
@@ -477,6 +491,13 @@ export function TaskDrawer({
                       onClick={() => setActiveTab('recurrence')}
                     />
                   )}
+                  <DrawerTabButton
+                    active={activeTab === 'alarm'}
+                    icon={<BellRing size={16} />}
+                    label="Alarme"
+                    testId="task-tab-alarm"
+                    onClick={() => setActiveTab('alarm')}
+                  />
                 </div>
               </div>
 
@@ -951,40 +972,98 @@ export function TaskDrawer({
                       </div>
                     </section>
                   )}
+
+                  {activeTab === 'alarm' && (
+                    <section className="surface-soft p-3.5 sm:p-5">
+                      <SectionHeader
+                        title="Alarme"
+                        description="Toque um alarme sonoro no horário inicial do lembrete."
+                        icon={<BellRing size={18} />}
+                      />
+
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between gap-4 rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar alarme sonoro</p>
+                            <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                              Quando ativo, você recebe um aviso 15 minutos antes e o alarme toca por 2 minutos no horário inicial.
+                            </p>
+                          </div>
+
+                          <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                            <input
+                              type="checkbox"
+                              data-testid="task-alarm-toggle"
+                              checked={alarmEnabled}
+                              disabled={isSubmitting || !date || !time}
+                              onChange={(event) => setAlarmEnabled(event.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            Alarme
+                          </label>
+                        </div>
+
+                        <div className="rounded-[24px] border border-amber-200/80 bg-amber-50/70 p-4 text-sm leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                          {date && time
+                            ? alarmEnabled
+                              ? 'Alarme ativado para o horário inicial definido.'
+                              : 'Alarme desativado. O lembrete enviará apenas a notificação no horário inicial.'
+                            : 'Defina data e horário inicial para ativar o alarme sonoro.'}
+                        </div>
+                      </div>
+                    </section>
+                  )}
                 </form>
               </div>
 
               <div className="border-t border-slate-200/80 bg-white/88 px-4 py-3 dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
-                <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
+                <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="button"
                     onClick={onClose}
                     disabled={isSubmitting}
-                    className="action-ghost justify-center rounded-2xl border border-slate-200/80 px-4 py-3 text-sm dark:border-white/10"
+                    className="action-ghost justify-center rounded-2xl border border-slate-200/80 px-4 py-3 text-sm dark:border-white/10 sm:min-w-[140px]"
                   >
                     Cancelar
                   </button>
 
-                  <button
-                    form="task-form"
-                    type="submit"
-                    data-testid="task-submit-button"
-                    disabled={isSubmitting || Boolean(dueDateError) || Boolean(endTimeError) || Boolean(recurrenceError)}
-                    className="action-primary w-full justify-center rounded-2xl py-3.5 disabled:cursor-wait disabled:opacity-70 sm:min-w-[240px] sm:w-auto sm:py-4"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 size={18} className="animate-spin" />
-                        {isEditing ? 'Salvando alterações...' : 'Criando lembrete...'}
-                      </>
-                    ) : isEditing ? (
-                      'Salvar alterações'
-                    ) : recurrenceEnabled && recurrencePreviewCount > 1 ? (
-                      `Criar ${recurrencePreviewCount} lembretes`
-                    ) : (
-                      'Adicionar lembrete'
+                  <div className="grid gap-3 sm:flex sm:justify-end">
+                    {(!isEditing || isEditingDraft) && (
+                      <button
+                        type="button"
+                        data-testid="task-save-draft-button"
+                        onClick={onSaveDraft}
+                        disabled={isSubmitting || !title.trim() || !date}
+                        className="action-secondary w-full justify-center rounded-2xl py-3.5 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:py-4"
+                      >
+                        {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : null}
+                        Salvar rascunho
+                      </button>
                     )}
-                  </button>
+
+                    <button
+                      form="task-form"
+                      type="submit"
+                      data-testid="task-submit-button"
+                      disabled={isSubmitting || Boolean(dueDateError) || Boolean(endTimeError) || Boolean(recurrenceError)}
+                      className="action-primary w-full justify-center rounded-2xl py-3.5 disabled:cursor-wait disabled:opacity-70 sm:min-w-[220px] sm:w-auto sm:py-4"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" />
+                          {isEditing ? 'Salvando alterações...' : 'Criando lembrete...'}
+                        </>
+                      ) : isEditingDraft ? (
+                        'Adicionar lembrete'
+                      ) : isEditing ? (
+                        'Salvar alterações'
+                      ) : recurrenceEnabled && recurrencePreviewCount > 1 ? (
+                        `Criar ${recurrencePreviewCount} lembretes`
+                      ) : (
+                        'Adicionar lembrete'
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>

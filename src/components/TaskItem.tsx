@@ -1,6 +1,20 @@
 ﻿import React from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, Check, CheckCircle2, Circle, Clock3, Loader2, PencilLine, Tag, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bell,
+  BellOff,
+  Check,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  EllipsisVertical,
+  FileText,
+  Loader2,
+  PencilLine,
+  Tag,
+  Trash2,
+} from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
@@ -36,6 +50,7 @@ interface TaskItemProps {
   onToggle: (t: Task) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onEdit: (t: Task) => void;
+  onToggleActive?: (t: Task) => void;
   onSelectionChange?: (task: Task, selected: boolean) => void;
   showSelectionControl?: boolean;
   showToggleControl?: boolean;
@@ -43,6 +58,7 @@ interface TaskItemProps {
   isCompletedSection?: boolean;
   isDeleting?: boolean;
   isToggling?: boolean;
+  isTogglingActive?: boolean;
   isSelected?: boolean;
 }
 
@@ -51,14 +67,19 @@ function TaskItemComponent({
   onToggle,
   onDelete,
   onEdit,
+  onToggleActive,
   onSelectionChange,
   showSelectionControl = false,
   showToggleControl = false,
   compact,
   isDeleting = false,
   isToggling = false,
+  isTogglingActive = false,
   isSelected = false,
 }: TaskItemProps) {
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const [actionsOpen, setActionsOpen] = React.useState(false);
+
   const safeDate = () => {
     try {
       return parseISO(task.dueDate);
@@ -68,18 +89,25 @@ function TaskItemComponent({
   };
 
   const date = safeDate();
-  const isOverdue = isPast(date) && task.status !== 'completed';
+  const isDraft = task.status === 'draft';
+  const isInactive = task.status === 'inactive';
+  const isOverdue = isPast(date) && task.status === 'pending';
   const isCompleted = task.status === 'completed';
-  const isBusy = isDeleting || isToggling;
+  const isBusy = isDeleting || isToggling || isTogglingActive;
+  const canToggleActive = Boolean(onToggleActive) && !isDraft && !isCompleted;
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
   const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
   const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
-  const statusLabel = isCompleted ? 'Concluído' : isOverdue ? 'Atrasado' : 'Pendente';
+  const statusLabel = isDraft ? 'Rascunho' : isInactive ? 'Desativado' : isCompleted ? 'Concluído' : isOverdue ? 'Atrasado' : 'Pendente';
   const statusToneClass = isCompleted
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+    : isDraft
+      ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
+    : isInactive
+      ? 'border-slate-300 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-300'
     : overdueKind === 'timed'
       ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
       : overdueKind === 'all-day'
@@ -87,6 +115,10 @@ function TaskItemComponent({
         : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
   const cardToneClass = isCompleted
     ? 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.035]'
+    : isDraft
+      ? 'border-violet-200/80 bg-gradient-to-br from-white via-violet-50/72 to-white shadow-[0_24px_58px_-38px_rgba(124,58,237,0.32)] dark:border-violet-500/25 dark:from-violet-950/18 dark:via-slate-950/80 dark:to-slate-950/70'
+    : isInactive
+      ? 'border-slate-200/80 bg-gradient-to-br from-white via-slate-50/80 to-white opacity-90 dark:border-white/10 dark:from-slate-950/74 dark:via-slate-950/68 dark:to-white/[0.025]'
     : overdueKind === 'timed'
       ? 'border-rose-200/90 bg-gradient-to-br from-white via-rose-50/88 to-white shadow-[0_24px_58px_-38px_rgba(244,63,94,0.42)] dark:border-rose-500/25 dark:from-rose-950/22 dark:via-slate-950/80 dark:to-slate-950/70'
       : overdueKind === 'all-day'
@@ -102,6 +134,27 @@ function TaskItemComponent({
       return '--';
     }
   };
+
+  React.useEffect(() => {
+    if (!actionsOpen) return undefined;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setActionsOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActionsOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [actionsOpen]);
 
   return (
     <motion.div
@@ -204,7 +257,7 @@ function TaskItemComponent({
                   statusToneClass,
                 )}
               >
-                {isCompleted ? <CheckCircle2 size={12} /> : isOverdue ? <AlertTriangle size={12} /> : <Circle size={12} />}
+                {isDraft ? <FileText size={12} /> : isInactive ? <BellOff size={12} /> : isCompleted ? <CheckCircle2 size={12} /> : isOverdue ? <AlertTriangle size={12} /> : <Circle size={12} />}
                 {statusLabel}
               </span>
 
@@ -248,20 +301,63 @@ function TaskItemComponent({
             )}
           </div>
 
-          <button
-            data-testid="task-delete"
-            disabled={isBusy}
-            aria-label={`Excluir lembrete ${task.title}`}
-            onClick={(event) => onDelete(task.id, event)}
-            className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
-              isDeleting
-                ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
-                : 'border-slate-200 bg-white/85 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-rose-500/20 dark:hover:bg-rose-500/10 dark:hover:text-rose-300',
+          <div className="flex shrink-0 items-center gap-2">
+            {canToggleActive && (
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  data-testid="task-actions-button"
+                  disabled={isBusy}
+                  aria-label={`Abrir ações do lembrete ${task.title}`}
+                  aria-expanded={actionsOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setActionsOpen((current) => !current);
+                  }}
+                  className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/85 text-slate-400 transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-blue-500/20 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                >
+                  {isTogglingActive ? <Loader2 size={16} className="animate-spin" /> : <EllipsisVertical size={18} />}
+                </button>
+
+                {actionsOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-12 z-30 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.48)] dark:border-white/10 dark:bg-slate-950"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="task-activation-toggle"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActionsOpen(false);
+                        onToggleActive?.(task);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      {isInactive ? <Bell size={16} /> : <BellOff size={16} />}
+                      {isInactive ? 'Ativar lembrete' : 'Desativar lembrete'}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
-          >
-            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-          </button>
+
+            <button
+              data-testid="task-delete"
+              disabled={isBusy}
+              aria-label={`Excluir lembrete ${task.title}`}
+              onClick={(event) => onDelete(task.id, event)}
+              className={cn(
+                'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
+                isDeleting
+                  ? 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+                  : 'border-slate-200 bg-white/85 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-400 dark:hover:border-rose-500/20 dark:hover:bg-rose-500/10 dark:hover:text-rose-300',
+              )}
+            >
+              {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            </button>
+          </div>
         </div>
 
         <div className={cn('mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/60 pt-3 dark:border-white/10', compact && 'gap-1.5 pt-2')}>
@@ -347,6 +443,13 @@ function TaskItemComponent({
             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
               <Loader2 size={12} className="animate-spin" />
               {isCompleted ? 'Reabrindo' : 'Concluindo'}
+            </span>
+          )}
+
+          {isTogglingActive && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+              <Loader2 size={12} className="animate-spin" />
+              {isInactive ? 'Ativando' : 'Desativando'}
             </span>
           )}
 

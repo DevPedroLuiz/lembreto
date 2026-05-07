@@ -93,8 +93,15 @@ export const createTaskSchema = z.object({
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
   suppressHolidayNotifications: z.boolean().default(false),
+  alarmEnabled: z.boolean().default(false),
+  status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
-  if (value.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' && !value.endDate) {
+  if (
+    value.status !== 'draft' &&
+    value.status !== 'inactive' &&
+    value.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
+    !value.endDate
+  ) {
     ctx.addIssue({
       code: 'custom',
       path: ['endDate'],
@@ -120,6 +127,7 @@ export const updateTaskSchema = z.object({
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
   suppressHolidayNotifications: z.boolean().optional(),
+  alarmEnabled: z.boolean().optional(),
   status: z.enum(TASK_STATUSES).optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
