@@ -6,7 +6,18 @@ playwright-report/
 test-results/
 .DS_Store
 *.log
+
+# ENV
 .env*
 !.env.example
 
+# Database backups
+backups/
+*.dump
+*.backup
+*_restore_list*.txt
+*.sql.tmp
+*.restore.log
+
+# Vercel
 .vercel
