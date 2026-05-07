@@ -1,5 +1,10 @@
 import { addMinutes, formatDateOnly, isDateOnlyDueDate, LEMBRETO_TIME_ZONE } from './eventPayload.js';
-import type { CalendarEventInput, CalendarProviderClient, CalendarTokenSet } from './types.js';
+import type {
+  CalendarEventInput,
+  CalendarProviderClient,
+  CalendarTokenSet,
+  ExternalCalendarEvent,
+} from './types.js';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -16,6 +21,23 @@ interface GoogleTokenResponse {
 
 interface GoogleEventResponse {
   id?: string;
+  error?: {
+    message?: string;
+  };
+}
+
+interface GoogleListEventsResponse {
+  items?: Array<{
+    id?: string;
+    status?: string;
+    summary?: string;
+    description?: string;
+    start?: {
+      date?: string;
+      dateTime?: string;
+    };
+  }>;
+  nextPageToken?: string;
   error?: {
     message?: string;
   };
@@ -93,6 +115,32 @@ async function parseGoogleEventResponse(response: Response): Promise<string> {
   }
 
   return data.id;
+}
+
+function buildDateOnlyDueDate(value: string): string {
+  return new Date(`${value}T23:59:00-03:00`).toISOString();
+}
+
+function normalizeGoogleEvent(item: NonNullable<GoogleListEventsResponse['items']>[number]): ExternalCalendarEvent | null {
+  if (!item.id || item.status === 'cancelled') return null;
+
+  const allDayDate = item.start?.date;
+  const dateTime = item.start?.dateTime;
+  const dueDate = allDayDate
+    ? buildDateOnlyDueDate(allDayDate)
+    : dateTime
+      ? new Date(dateTime).toISOString()
+      : null;
+
+  if (!dueDate || Number.isNaN(new Date(dueDate).getTime())) return null;
+
+  return {
+    id: item.id,
+    title: item.summary?.trim() || 'Evento sem título',
+    description: item.description?.trim() || '',
+    dueDate,
+    isAllDay: Boolean(allDayDate),
+  };
 }
 
 export function buildGoogleCalendarAuthorizationUrl(options: {
@@ -202,5 +250,40 @@ export const googleCalendarClient: CalendarProviderClient = {
       const data = await response.json().catch(() => ({})) as GoogleEventResponse;
       throw new Error(data.error?.message || 'GOOGLE_CALENDAR_DELETE_FAILED');
     }
+  },
+
+  async listEvents(accessToken, calendarId) {
+    const events: ExternalCalendarEvent[] = [];
+    let pageToken: string | null = null;
+
+    do {
+      const url = new URL(
+        `${GOOGLE_CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId || 'primary')}/events`,
+      );
+      url.searchParams.set('singleEvents', 'true');
+      url.searchParams.set('showDeleted', 'false');
+      url.searchParams.set('maxResults', '250');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const data = await response.json().catch(() => ({})) as GoogleListEventsResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'GOOGLE_CALENDAR_LIST_FAILED');
+      }
+
+      for (const item of data.items ?? []) {
+        const event = normalizeGoogleEvent(item);
+        if (event) events.push(event);
+      }
+
+      pageToken = data.nextPageToken ?? null;
+    } while (pageToken && events.length < 500);
+
+    return events;
   },
 };

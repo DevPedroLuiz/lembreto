@@ -12,6 +12,7 @@ import type {
   CalendarProviderClient,
   CalendarTaskForSync,
   CalendarTokenSet,
+  ExternalCalendarEvent,
   PublicCalendarIntegration,
 } from './types.js';
 
@@ -442,6 +443,187 @@ export async function syncTaskToExternalCalendar(input: {
     await markIntegrationError(input.sql, integration, message);
     return { ok: false, provider: integration.provider, error: message };
   }
+}
+
+async function listSyncableTaskIds(sql: SqlClient, userId: string): Promise<string[]> {
+  await ensureCalendarIntegrationSchema(sql);
+  const rows = await sql`
+    SELECT id
+    FROM tasks
+    WHERE user_id = ${userId}
+      AND due_date IS NOT NULL
+    ORDER BY created_at ASC
+  `;
+
+  return rows.map((row) => String(row.id));
+}
+
+async function externalEventAlreadyImported(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+  eventId: string;
+}): Promise<boolean> {
+  const rows = await input.sql`
+    SELECT 1
+    FROM tasks
+    WHERE user_id = ${input.userId}
+      AND external_calendar_provider = ${input.provider}
+      AND external_calendar_event_id = ${input.eventId}
+    LIMIT 1
+  `;
+
+  return rows.length > 0;
+}
+
+function buildImportedHistory(provider: CalendarProvider, eventId: string) {
+  return JSON.stringify([{
+    id: crypto.randomUUID(),
+    action: 'created',
+    title: 'Evento importado',
+    description: `Criado a partir de um evento do ${PROVIDER_LABELS[provider]}.`,
+    createdAt: new Date().toISOString(),
+    details: [
+      `Evento externo: ${eventId}.`,
+      'Sincronização em lote.',
+    ],
+  }]);
+}
+
+async function importExternalCalendarEvent(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+  event: ExternalCalendarEvent;
+}): Promise<boolean> {
+  if (await externalEventAlreadyImported({
+    sql: input.sql,
+    userId: input.userId,
+    provider: input.provider,
+    eventId: input.event.id,
+  })) {
+    return false;
+  }
+
+  await input.sql`
+    INSERT INTO tasks (
+      user_id,
+      title,
+      description,
+      due_date,
+      priority,
+      category,
+      tags,
+      status,
+      history,
+      external_calendar_provider,
+      external_calendar_event_id,
+      external_calendar_sync_status,
+      external_calendar_last_error,
+      external_calendar_synced_at
+    )
+    VALUES (
+      ${input.userId},
+      ${input.event.title},
+      ${input.event.description},
+      ${input.event.dueDate},
+      ${'medium'},
+      ${'Agenda externa'},
+      ${[input.provider === 'google' ? 'Google Calendar' : 'Outlook Calendar']},
+      ${'pending'},
+      ${buildImportedHistory(input.provider, input.event.id)}::jsonb,
+      ${input.provider},
+      ${input.event.id},
+      ${'synced'},
+      ${null},
+      NOW()
+    )
+  `;
+
+  return true;
+}
+
+export async function syncAllCalendarReminders(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+}): Promise<{
+  provider: CalendarProvider;
+  pushed: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}> {
+  const integration = await getCalendarIntegration(input.sql, input.userId, input.provider);
+  if (!integration) {
+    return {
+      provider: input.provider,
+      pushed: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 1,
+      errors: [`Conecte o ${PROVIDER_LABELS[input.provider]} antes de sincronizar.`],
+    };
+  }
+
+  const errors: string[] = [];
+  let pushed = 0;
+  let skipped = 0;
+  let failed = 0;
+  let imported = 0;
+
+  const taskIds = await listSyncableTaskIds(input.sql, input.userId);
+  for (const taskId of taskIds) {
+    const result = await syncTaskToExternalCalendar({
+      sql: input.sql,
+      userId: input.userId,
+      taskId,
+      provider: input.provider,
+      force: true,
+    });
+
+    if (result.ok && result.provider) {
+      pushed += 1;
+    } else if (result.ok) {
+      skipped += 1;
+    } else {
+      failed += 1;
+      if (result.error) errors.push(result.error);
+    }
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(input.sql, integration);
+    const externalEvents = await PROVIDER_CLIENTS[input.provider].listEvents(accessToken, integration.calendarId);
+
+    for (const event of externalEvents) {
+      const created = await importExternalCalendarEvent({
+        sql: input.sql,
+        userId: input.userId,
+        provider: input.provider,
+        event,
+      });
+      if (created) imported += 1;
+      else skipped += 1;
+    }
+
+    await markIntegrationError(input.sql, integration, failed > 0 ? errors[0] ?? null : null);
+  } catch (error) {
+    const message = sanitizeSyncError(error, input.provider);
+    failed += 1;
+    errors.push(message);
+    await markIntegrationError(input.sql, integration, message);
+  }
+
+  return {
+    provider: input.provider,
+    pushed,
+    imported,
+    skipped,
+    failed,
+    errors: Array.from(new Set(errors)).slice(0, 5),
+  };
 }
 
 export async function removeTaskFromExternalCalendar(input: {

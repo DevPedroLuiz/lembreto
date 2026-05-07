@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
-import type { CalendarIntegrationProvider, CalendarIntegrationStatus } from '../types';
+import type {
+  CalendarIntegrationProvider,
+  CalendarIntegrationStatus,
+  CalendarSyncAllResult,
+} from '../types';
 
 interface CalendarIntegrationsResponse {
   integrations: CalendarIntegrationStatus[];
+}
+
+interface CalendarSyncAllResponse extends CalendarIntegrationsResponse {
+  result: CalendarSyncAllResult;
 }
 
 export function useCalendarIntegrations(token: string | null) {
@@ -75,6 +83,16 @@ export function useCalendarIntegrations(token: string | null) {
     await apiPost(`/api/calendar/tasks/${taskId}/sync`, provider ? { provider } : {}, requestToken);
   }, [token]);
 
+  const syncAllNow = useCallback(async (
+    provider: CalendarIntegrationProvider,
+    requestToken = token,
+  ) => {
+    if (!requestToken) throw new Error('NÃ£o autenticado');
+    const data = await apiPost<CalendarSyncAllResponse>(`/api/calendar/${provider}/sync-all`, {}, requestToken);
+    setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
+    return data.result;
+  }, [token]);
+
   return {
     integrations,
     isLoading,
@@ -83,5 +101,6 @@ export function useCalendarIntegrations(token: string | null) {
     updateCalendarSync,
     disconnectCalendar,
     syncTaskNow,
+    syncAllNow,
   };
 }

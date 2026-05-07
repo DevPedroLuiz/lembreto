@@ -44,6 +44,7 @@ import {
   handleCalendarDisconnect,
   handleCalendarIntegrations,
   handleCalendarIntegrationSettings,
+  handleCalendarSyncAll,
   handleCalendarTaskSync,
 } from './lib/handlers/calendar.js';
 import {
@@ -169,6 +170,7 @@ async function startServer() {
   app.get('/api/calendar/:provider/callback', run(handleCalendarConnectCallback));
   app.delete('/api/calendar/:provider', run(handleCalendarDisconnect));
   app.put('/api/calendar/:provider', run(handleCalendarIntegrationSettings));
+  app.post('/api/calendar/:provider/sync-all', run(handleCalendarSyncAll));
   app.post('/api/calendar/tasks/:taskId/sync', run(handleCalendarTaskSync));
 
   app.get('/api/cron/cleanup', run(handleCleanupCron));

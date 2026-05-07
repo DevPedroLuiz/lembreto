@@ -8,6 +8,7 @@ import {
   connectCalendarFromOAuthCallback,
   disconnectCalendarIntegration,
   listCalendarIntegrations,
+  syncAllCalendarReminders,
   syncTaskToExternalCalendar,
   toPublicIntegrations,
   updateCalendarIntegrationSyncEnabled,
@@ -225,6 +226,41 @@ export async function handleCalendarIntegrationSettings(context: HandlerContext)
   } catch (error) {
     logError('calendar_settings_update_failed', error, getRequestMeta(context.request, { userId: auth.user.id, provider }));
     return json(500, { error: 'Erro ao salvar preferência do calendário' });
+  }
+}
+
+export async function handleCalendarSyncAll(context: HandlerContext): Promise<HandlerResult> {
+  if (context.request.method !== 'POST') return methodNotAllowed();
+
+  const provider = resolveProvider(context);
+  if (!provider) return json(400, { error: 'Provedor de calendÃ¡rio invÃ¡lido' });
+
+  const auth = await requireCalendarAuth(context);
+  if ('status' in auth) return auth;
+
+  try {
+    const result = await syncAllCalendarReminders({
+      sql: context.sql,
+      userId: auth.user.id,
+      provider,
+    });
+    const integrations = await listCalendarIntegrations(context.sql, auth.user.id);
+
+    logInfo('calendar_sync_all_completed', getRequestMeta(context.request, {
+      userId: auth.user.id,
+      provider,
+      pushed: result.pushed,
+      imported: result.imported,
+      failed: result.failed,
+    }));
+
+    return json(200, {
+      result,
+      integrations: toPublicIntegrations(integrations),
+    });
+  } catch (error) {
+    logError('calendar_sync_all_failed', error, getRequestMeta(context.request, { userId: auth.user.id, provider }));
+    return json(500, { error: 'Falha ao sincronizar calendÃ¡rio externo' });
   }
 }
 

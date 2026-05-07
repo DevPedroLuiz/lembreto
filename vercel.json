@@ -18,6 +18,7 @@
     { "source": "/api/calendar/integrations", "destination": "/api/calendar" },
     { "source": "/api/calendar/:provider/connect", "destination": "/api/calendar?action=connect&provider=:provider" },
     { "source": "/api/calendar/:provider/callback", "destination": "/api/calendar?action=callback&provider=:provider" },
+    { "source": "/api/calendar/:provider/sync-all", "destination": "/api/calendar?action=sync-all&provider=:provider" },
     { "source": "/api/calendar/:provider", "destination": "/api/calendar?action=settings&provider=:provider" },
     { "source": "/api/calendar/tasks/:taskId/sync", "destination": "/api/calendar?action=sync-task&taskId=:taskId" },
     { "source": "/api/cron/:job", "destination": "/api/cron?job=:job" },

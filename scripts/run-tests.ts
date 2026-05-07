@@ -78,6 +78,7 @@ async function main() {
   } = await import('../lib/calendar/calendarSync.js');
   const {
     handleCalendarIntegrations,
+    handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
 
   await run('buildTokenJti composes subject and iat', () => {
@@ -373,6 +374,40 @@ async function main() {
     const body = result.body as { integrations: Array<{ provider: string; connected: boolean }> };
     assert.equal(body.integrations.length, 2);
     assert.equal(body.integrations[0].connected, false);
+  });
+
+  await run('calendar sync all route returns a clear summary when provider is not connected', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const result = await handleCalendarSyncAll({
+      sql: createSqlMock(),
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        params: { provider: 'google' },
+      },
+    });
+
+    assert.equal(result.status, 200);
+    const body = result.body as {
+      result: {
+        provider: string;
+        pushed: number;
+        imported: number;
+        skipped: number;
+        failed: number;
+        errors: string[];
+      };
+      integrations: Array<{ provider: string; connected: boolean }>;
+    };
+    assert.deepEqual(body.result, {
+      provider: 'google',
+      pushed: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 1,
+      errors: ['Conecte o Google Calendar antes de sincronizar.'],
+    });
+    assert.equal(body.integrations.length, 2);
   });
 
   console.log('PASS all tests');

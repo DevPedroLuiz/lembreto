@@ -217,6 +217,7 @@ export default function App() {
     updateCalendarSync,
     disconnectCalendar,
     syncTaskNow,
+    syncAllNow,
   } = useCalendarIntegrations(isResetPasswordRoute ? null : auth.token);
   const {
     notes,
@@ -991,6 +992,24 @@ export default function App() {
       'success',
     );
   }, [emitNotification, updateCalendarSync]);
+
+  const handleSyncAllCalendar = useCallback(async (provider: 'google' | 'outlook') => {
+    const result = await syncAllNow(provider);
+    await refreshTasks();
+    await refreshCalendarIntegrations();
+
+    const providerName = provider === 'google' ? 'Google Calendar' : 'Outlook Calendar';
+    const summary = [
+      `${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}`,
+      `${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}`,
+    ];
+
+    emitNotification(
+      result.failed > 0 ? 'Sincronização concluída com avisos' : 'Calendário sincronizado',
+      `${providerName}: ${summary.join(' e ')}.${result.failed > 0 ? ` ${result.failed} falha${result.failed === 1 ? '' : 's'}.` : ''}`,
+      result.failed > 0 ? 'warning' : 'success',
+    );
+  }, [emitNotification, refreshCalendarIntegrations, refreshTasks, syncAllNow]);
 
   const handleSyncTaskCalendar = useCallback(async (task: Task) => {
     if (syncingCalendarTaskIds.has(task.id)) return;
@@ -2888,6 +2907,7 @@ export default function App() {
         onConnectCalendar={handleConnectCalendar}
         onDisconnectCalendar={handleDisconnectCalendar}
         onToggleCalendarSync={handleToggleCalendarSync}
+        onSyncAllCalendar={handleSyncAllCalendar}
         holidayStateCode={auth.currentUser?.stateCode ?? null}
         holidayCityName={auth.currentUser?.cityName ?? null}
         holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}

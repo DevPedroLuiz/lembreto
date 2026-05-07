@@ -1,5 +1,10 @@
 import { addMinutes, formatDateOnly, isDateOnlyDueDate, LEMBRETO_TIME_ZONE } from './eventPayload.js';
-import type { CalendarEventInput, CalendarProviderClient, CalendarTokenSet } from './types.js';
+import type {
+  CalendarEventInput,
+  CalendarProviderClient,
+  CalendarTokenSet,
+  ExternalCalendarEvent,
+} from './types.js';
 
 const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -16,6 +21,24 @@ interface OutlookTokenResponse {
 
 interface OutlookEventResponse {
   id?: string;
+  error?: {
+    message?: string;
+  };
+}
+
+interface OutlookListEventsResponse {
+  value?: Array<{
+    id?: string;
+    subject?: string;
+    bodyPreview?: string;
+    isCancelled?: boolean;
+    isAllDay?: boolean;
+    start?: {
+      dateTime?: string;
+      timeZone?: string;
+    };
+  }>;
+  '@odata.nextLink'?: string;
   error?: {
     message?: string;
   };
@@ -104,6 +127,35 @@ function getEventsUrl(calendarId: string, eventId?: string) {
     : `${MICROSOFT_GRAPH_URL}/me/events`;
 
   return eventId ? `${base}/${encodeURIComponent(eventId)}` : base;
+}
+
+function buildDateOnlyDueDate(value: string): string {
+  return new Date(`${value.slice(0, 10)}T23:59:00-03:00`).toISOString();
+}
+
+function normalizeOutlookDateTime(value: string): string {
+  return /(?:z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value}Z`;
+}
+
+function normalizeOutlookEvent(item: NonNullable<OutlookListEventsResponse['value']>[number]): ExternalCalendarEvent | null {
+  if (!item.id || item.isCancelled) return null;
+
+  const rawDateTime = item.start?.dateTime;
+  if (!rawDateTime) return null;
+
+  const dueDate = item.isAllDay
+    ? buildDateOnlyDueDate(rawDateTime)
+    : new Date(normalizeOutlookDateTime(rawDateTime)).toISOString();
+
+  if (Number.isNaN(new Date(dueDate).getTime())) return null;
+
+  return {
+    id: item.id,
+    title: item.subject?.trim() || 'Evento sem título',
+    description: item.bodyPreview?.trim() || '',
+    dueDate,
+    isAllDay: Boolean(item.isAllDay),
+  };
 }
 
 export function buildOutlookCalendarAuthorizationUrl(options: {
@@ -204,5 +256,34 @@ export const outlookCalendarClient: CalendarProviderClient = {
       const data = await response.json().catch(() => ({})) as OutlookEventResponse;
       throw new Error(data.error?.message || 'OUTLOOK_CALENDAR_DELETE_FAILED');
     }
+  },
+
+  async listEvents(accessToken, calendarId) {
+    const events: ExternalCalendarEvent[] = [];
+    let url: string | null = getEventsUrl(calendarId);
+    url += `${url.includes('?') ? '&' : '?'}$top=50`;
+
+    while (url && events.length < 500) {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Prefer: `outlook.timezone="${LEMBRETO_TIME_ZONE}"`,
+        },
+      });
+      const data = await response.json().catch(() => ({})) as OutlookListEventsResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'OUTLOOK_CALENDAR_LIST_FAILED');
+      }
+
+      for (const item of data.value ?? []) {
+        const event = normalizeOutlookEvent(item);
+        if (event) events.push(event);
+      }
+
+      url = data['@odata.nextLink'] ?? null;
+    }
+
+    return events;
   },
 };

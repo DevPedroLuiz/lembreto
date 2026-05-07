@@ -52,6 +52,15 @@ export interface CalendarIntegrationStatus {
   updatedAt: string | null;
 }
 
+export interface CalendarSyncAllResult {
+  provider: CalendarIntegrationProvider;
+  pushed: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
 export type TaskHistoryAction =
   | 'created'
   | 'updated'

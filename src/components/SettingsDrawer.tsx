@@ -104,6 +104,7 @@ interface SettingsDrawerProps {
   onConnectCalendar: (provider: CalendarIntegrationProvider) => void;
   onDisconnectCalendar: (provider: CalendarIntegrationProvider) => Promise<void>;
   onToggleCalendarSync: (provider: CalendarIntegrationProvider, syncEnabled: boolean) => Promise<void>;
+  onSyncAllCalendar: (provider: CalendarIntegrationProvider) => Promise<void>;
   holidayStateCode: string | null;
   holidayCityName: string | null;
   holidayMatchedRegionName: string | null;
@@ -310,6 +311,7 @@ export function SettingsDrawer({
   onConnectCalendar,
   onDisconnectCalendar,
   onToggleCalendarSync,
+  onSyncAllCalendar,
   holidayStateCode,
   holidayCityName,
   holidayMatchedRegionName,
@@ -528,6 +530,20 @@ export function SettingsDrawer({
       setBusyCalendarProvider(null);
     }
   }, [busyCalendarProvider, onToggleCalendarSync]);
+
+  const handleSyncAllCalendar = React.useCallback(async (provider: CalendarIntegrationProvider) => {
+    if (busyCalendarProvider) return;
+
+    try {
+      setBusyCalendarProvider(provider);
+      await onSyncAllCalendar(provider);
+      setCalendarFeedback(`${provider === 'google' ? 'Google Calendar' : 'Outlook Calendar'} sincronizado com seus lembretes.`);
+    } catch {
+      setCalendarFeedback('NÃ£o foi possÃ­vel sincronizar todos os lembretes agora.');
+    } finally {
+      setBusyCalendarProvider(null);
+    }
+  }, [busyCalendarProvider, onSyncAllCalendar]);
 
   const toggleMap = {
     darkMode: {
@@ -872,6 +888,17 @@ export function SettingsDrawer({
                         >
                           {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                           {integration?.syncEnabled ? 'Pausar envio' : 'Enviar novos'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleSyncAllCalendar(provider);
+                          }}
+                          disabled={busy}
+                          className="action-primary min-h-[44px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {busy ? <Loader2 size={16} className="animate-spin" /> : <CalendarDays size={16} />}
+                          Sincronizar tudo
                         </button>
                         <button
                           type="button"

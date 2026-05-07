@@ -6,6 +6,7 @@ import {
   handleCalendarDisconnect,
   handleCalendarIntegrations,
   handleCalendarIntegrationSettings,
+  handleCalendarSyncAll,
   handleCalendarTaskSync,
 } from '../lib/handlers/calendar.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
@@ -31,6 +32,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     result = await handleCalendarDisconnect({ sql, request });
   } else if (action === 'settings') {
     result = await handleCalendarIntegrationSettings({ sql, request });
+  } else if (action === 'sync-all') {
+    result = await handleCalendarSyncAll({ sql, request });
   } else if (action === 'sync-task') {
     result = await handleCalendarTaskSync({ sql, request });
   } else {
