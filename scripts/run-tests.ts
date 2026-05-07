@@ -69,6 +69,7 @@ async function main() {
   } = await import('../lib/calendar/crypto.js');
   const {
     buildGoogleCalendarAuthorizationUrl,
+    googleCalendarClient,
   } = await import('../lib/calendar/googleCalendar.js');
   const {
     buildOutlookCalendarAuthorizationUrl,
@@ -374,6 +375,36 @@ async function main() {
     const body = result.body as { integrations: Array<{ provider: string; connected: boolean }> };
     assert.equal(body.integrations.length, 2);
     assert.equal(body.integrations[0].connected, false);
+  });
+
+  await run('google calendar event import requests only events from sync day onward', async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedTimeMin = '2026-05-07T03:00:00.000Z';
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get('timeMin'), requestedTimeMin);
+      return new Response(JSON.stringify({
+        items: [{
+          id: 'google-event-1',
+          summary: 'Evento futuro',
+          description: 'Importado do Google',
+          start: { dateTime: '2026-05-07T12:00:00-03:00' },
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const events = await googleCalendarClient.listEvents('access-token', 'primary', requestedTimeMin);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].id, 'google-event-1');
+      assert.equal(events[0].title, 'Evento futuro');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   await run('calendar sync all route returns a clear summary when provider is not connected', async () => {

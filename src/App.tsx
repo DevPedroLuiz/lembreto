@@ -95,6 +95,8 @@ type EmitNotificationOptions = {
   token?: string | null;
 };
 
+type LocalNotificationOptions = Pick<EmitNotificationOptions, 'skipToast' | 'target' | 'dedupeKey'>;
+
 type CalendarFeedResponse = {
   feedPath: string;
 };
@@ -184,6 +186,24 @@ function getMinutesDifference(targetDate: Date, referenceDate: Date) {
   return Math.floor((targetDate.getTime() - referenceDate.getTime()) / 60000);
 }
 
+function buildNotificationNavigationPath(target?: NotificationTarget) {
+  const params = new URLSearchParams();
+
+  if (target?.type === 'task') {
+    params.set('notificationTarget', 'task');
+    params.set('taskId', target.taskId);
+  } else if (target?.type === 'profile') {
+    params.set('notificationTarget', 'profile');
+  } else if (target?.type === 'settings') {
+    params.set('notificationTarget', 'settings');
+  } else {
+    params.set('notificationTarget', 'notifications');
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `/?${query}` : '/';
+}
+
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const [locationSearch, setLocationSearch] = useState(() => window.location.search);
@@ -267,6 +287,9 @@ export default function App() {
   const [settingsInitialView, setSettingsInitialView] = useState<SettingsView>('appearance');
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [isOnline, setIsOnline] = useState(() => (
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  ));
   const [configSound, setConfigSound] = useState(true);
   const [configConfirmDelete, setConfigConfirmDelete] = useState(true);
   const [configShowCompleted, setConfigShowCompleted] = useState(true);
@@ -340,6 +363,7 @@ export default function App() {
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
   const previousPendingOfflineTaskCountRef = useRef(0);
+  const localNotificationDedupeRef = useRef<Set<string>>(new Set());
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
@@ -409,6 +433,27 @@ export default function App() {
     setIsMobileViewport(mediaQuery.matches);
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    const syncOnlineState = () => {
+      const nextOnlineState = navigator.onLine;
+      setIsOnline(nextOnlineState);
+      setNotificationClock(Date.now());
+
+      if (nextOnlineState) {
+        localNotificationDedupeRef.current.clear();
+      }
+    };
+
+    syncOnlineState();
+    window.addEventListener('online', syncOnlineState);
+    window.addEventListener('offline', syncOnlineState);
+
+    return () => {
+      window.removeEventListener('online', syncOnlineState);
+      window.removeEventListener('offline', syncOnlineState);
+    };
   }, []);
 
   useEffect(() => {
@@ -701,6 +746,58 @@ export default function App() {
       }
     });
   }, [auth.token, createNotification, notificationsEnabled, triggerToastNotification, triggerToastOnly]);
+
+  const emitLocalOfflineNotification = useCallback((
+    title: string,
+    message: string,
+    _tone: NotificationTone = 'info',
+    options?: LocalNotificationOptions,
+  ) => {
+    const notificationsAllowed = notificationsOverrideRef.current ?? notificationsEnabled;
+    if (!notificationsAllowed) return;
+
+    if (options?.dedupeKey) {
+      const localDedupeKey = `offline:${options.dedupeKey}`;
+      if (localNotificationDedupeRef.current.has(localDedupeKey)) return;
+      localNotificationDedupeRef.current.add(localDedupeKey);
+    }
+
+    if (!options?.skipToast) {
+      triggerToastNotification(title, message);
+    }
+
+    if (
+      typeof window === 'undefined' ||
+      !('Notification' in window) ||
+      Notification.permission !== 'granted'
+    ) {
+      return;
+    }
+
+    const notificationOptions: NotificationOptions = {
+      body: message,
+      icon: '/icon.png',
+      badge: '/icon.png',
+      tag: options?.dedupeKey ? `offline:${options.dedupeKey}` : `offline:${title}:${message}`,
+      data: {
+        path: buildNotificationNavigationPath(options?.target),
+        target: options?.target ?? { type: 'notifications' },
+        offline: true,
+      },
+    };
+
+    void (async () => {
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(title, notificationOptions);
+        return;
+      }
+
+      new Notification(title, notificationOptions);
+    })().catch(() => {
+      // Local offline notification is best effort; the in-app toast already ran.
+    });
+  }, [notificationsEnabled, triggerToastNotification]);
 
   const resetTaskForm = useCallback(() => {
     setFormTitle('');
@@ -1009,6 +1106,8 @@ export default function App() {
       `${providerName}: ${summary.join(' e ')}.${result.failed > 0 ? ` ${result.failed} falha${result.failed === 1 ? '' : 's'}.` : ''}`,
       result.failed > 0 ? 'warning' : 'success',
     );
+
+    return result;
   }, [emitNotification, refreshCalendarIntegrations, refreshTasks, syncAllNow]);
 
   const handleSyncTaskCalendar = useCallback(async (task: Task) => {
@@ -1798,7 +1897,7 @@ export default function App() {
   }, [holidayDateKeys]);
 
   useEffect(() => {
-    if (!notificationsEnabled || overdueTasks.length === 0) return;
+    if (isOnline || !notificationsEnabled || overdueTasks.length === 0) return;
 
     const now = new Date(notificationClock);
 
@@ -1809,7 +1908,7 @@ export default function App() {
       const minutesOverdue = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / 60000));
       const overdueBucket = Math.floor(minutesOverdue / OVERDUE_REMINDER_INTERVAL_MINUTES);
 
-      emitNotification(
+      emitLocalOfflineNotification(
         'Lembrete atrasado',
         overdueBucket === 0
           ? `"${task.title}" passou do prazo e precisa da sua atenção.`
@@ -1821,10 +1920,10 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, overdueTasks, shouldSuppressHolidayNotification]);
+  }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, overdueTasks, shouldSuppressHolidayNotification]);
 
   useEffect(() => {
-    if (!notificationsEnabled || timedPendingTasks.length === 0) return;
+    if (isOnline || !notificationsEnabled || timedPendingTasks.length === 0) return;
 
     const now = new Date(notificationClock);
 
@@ -1836,7 +1935,7 @@ export default function App() {
 
       if (minutesUntil < 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
 
-      emitNotification(
+      emitLocalOfflineNotification(
         minutesUntil === 0
           ? 'Lembrete para agora'
           : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
@@ -1848,16 +1947,16 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
+  }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
 
   useEffect(() => {
-    if (!notificationsEnabled || todayTasks.length === 0) return;
+    if (isOnline || !notificationsEnabled || todayTasks.length === 0) return;
 
     todayTasks.forEach((task) => {
       if (shouldSuppressHolidayNotification(task)) return;
 
       const dueDate = parseISO(task.dueDate);
-      emitNotification(
+      emitLocalOfflineNotification(
         'Lembrete para hoje',
         `"${task.title}" está no radar de hoje.`,
         'info',
@@ -1868,16 +1967,16 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, todayTasks]);
+  }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, todayTasks]);
 
   useEffect(() => {
-    if (!notificationsEnabled || tomorrowTasks.length === 0) return;
+    if (isOnline || !notificationsEnabled || tomorrowTasks.length === 0) return;
 
     tomorrowTasks.forEach((task) => {
       if (shouldSuppressHolidayNotification(task)) return;
 
       const dueDate = parseISO(task.dueDate);
-      emitNotification(
+      emitLocalOfflineNotification(
         'Lembrete vindo amanhã',
         `"${task.title}" vence amanhã, então já vale se planejar.`,
         'info',
@@ -1888,7 +1987,7 @@ export default function App() {
         },
       );
     });
-  }, [emitNotification, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, tomorrowTasks]);
+  }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, tomorrowTasks]);
 
   const openSettings = useCallback((view: SettingsView = 'appearance') => {
     setShowNotificationsInbox(false);

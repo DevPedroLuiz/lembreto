@@ -28,7 +28,12 @@ import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { BRAZIL_STATES } from '../../lib/brazil-location';
 import { isDefaultCategory, normalizeTaxonomyValue } from '../lib/taxonomy';
-import type { CalendarIntegrationProvider, CalendarIntegrationStatus, HolidayRegionOption } from '../types';
+import type {
+  CalendarIntegrationProvider,
+  CalendarIntegrationStatus,
+  CalendarSyncAllResult,
+  HolidayRegionOption,
+} from '../types';
 
 function Toggle({
   active,
@@ -104,7 +109,7 @@ interface SettingsDrawerProps {
   onConnectCalendar: (provider: CalendarIntegrationProvider) => void;
   onDisconnectCalendar: (provider: CalendarIntegrationProvider) => Promise<void>;
   onToggleCalendarSync: (provider: CalendarIntegrationProvider, syncEnabled: boolean) => Promise<void>;
-  onSyncAllCalendar: (provider: CalendarIntegrationProvider) => Promise<void>;
+  onSyncAllCalendar: (provider: CalendarIntegrationProvider) => Promise<CalendarSyncAllResult>;
   holidayStateCode: string | null;
   holidayCityName: string | null;
   holidayMatchedRegionName: string | null;
@@ -536,8 +541,13 @@ export function SettingsDrawer({
 
     try {
       setBusyCalendarProvider(provider);
-      await onSyncAllCalendar(provider);
-      setCalendarFeedback(`${provider === 'google' ? 'Google Calendar' : 'Outlook Calendar'} sincronizado com seus lembretes.`);
+      const result = await onSyncAllCalendar(provider);
+      const providerName = provider === 'google' ? 'Google Calendar' : 'Outlook Calendar';
+      setCalendarFeedback(
+        result.failed > 0
+          ? `${providerName}: sincronização não concluída para todos os itens. ${result.failed} falha${result.failed === 1 ? '' : 's'} encontrada${result.failed === 1 ? '' : 's'}.`
+          : `${providerName}: sincronização concluída. ${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'} e ${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}.`,
+      );
     } catch {
       setCalendarFeedback('NÃ£o foi possÃ­vel sincronizar todos os lembretes agora.');
     } finally {

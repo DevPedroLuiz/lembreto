@@ -252,7 +252,7 @@ export const googleCalendarClient: CalendarProviderClient = {
     }
   },
 
-  async listEvents(accessToken, calendarId) {
+  async listEvents(accessToken, calendarId, timeMin) {
     const events: ExternalCalendarEvent[] = [];
     let pageToken: string | null = null;
 
@@ -263,6 +263,7 @@ export const googleCalendarClient: CalendarProviderClient = {
       url.searchParams.set('singleEvents', 'true');
       url.searchParams.set('showDeleted', 'false');
       url.searchParams.set('maxResults', '250');
+      if (timeMin) url.searchParams.set('timeMin', timeMin);
       if (pageToken) url.searchParams.set('pageToken', pageToken);
 
       const response = await fetch(url.toString(), {

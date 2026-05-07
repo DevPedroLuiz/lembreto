@@ -75,5 +75,5 @@ export interface CalendarProviderClient {
   createEvent(accessToken: string, calendarId: string, event: CalendarEventInput): Promise<string>;
   updateEvent(accessToken: string, calendarId: string, eventId: string, event: CalendarEventInput): Promise<string>;
   deleteEvent(accessToken: string, calendarId: string, eventId: string): Promise<void>;
-  listEvents(accessToken: string, calendarId: string): Promise<ExternalCalendarEvent[]>;
+  listEvents(accessToken: string, calendarId: string, timeMin?: string): Promise<ExternalCalendarEvent[]>;
 }

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { SafeUser } from '../auth.js';
 import type { SqlClient } from '../handlers/core.js';
 import { signCalendarOAuthState, verifyCalendarOAuthState } from '../jwt.js';
-import { buildCalendarEventInput } from './eventPayload.js';
+import { buildCalendarEventInput, LEMBRETO_TIME_ZONE } from './eventPayload.js';
 import { decryptCalendarToken, encryptCalendarToken } from './crypto.js';
 import { googleCalendarClient, buildGoogleCalendarAuthorizationUrl } from './googleCalendar.js';
 import { outlookCalendarClient, buildOutlookCalendarAuthorizationUrl } from './outlookCalendar.js';
@@ -29,6 +29,26 @@ const PROVIDER_CLIENTS: Record<CalendarProvider, CalendarProviderClient> = {
 const ALL_PROVIDERS: CalendarProvider[] = ['google', 'outlook'];
 
 let ensureCalendarSchemaPromise: Promise<void> | null = null;
+
+function getCalendarSyncWindowStart(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: LEMBRETO_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  if (!year || !month || !day) {
+    const fallback = new Date(now);
+    fallback.setHours(0, 0, 0, 0);
+    return fallback;
+  }
+
+  return new Date(`${year}-${month}-${day}T00:00:00-03:00`);
+}
 
 export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
   if (!ensureCalendarSchemaPromise) {
@@ -572,6 +592,7 @@ export async function syncAllCalendarReminders(input: {
   let skipped = 0;
   let failed = 0;
   let imported = 0;
+  const syncWindowStart = getCalendarSyncWindowStart();
 
   const taskIds = await listSyncableTaskIds(input.sql, input.userId);
   for (const taskId of taskIds) {
@@ -595,9 +616,18 @@ export async function syncAllCalendarReminders(input: {
 
   try {
     const accessToken = await getValidAccessToken(input.sql, integration);
-    const externalEvents = await PROVIDER_CLIENTS[input.provider].listEvents(accessToken, integration.calendarId);
+    const externalEvents = await PROVIDER_CLIENTS[input.provider].listEvents(
+      accessToken,
+      integration.calendarId,
+      syncWindowStart.toISOString(),
+    );
 
     for (const event of externalEvents) {
+      if (new Date(event.dueDate).getTime() < syncWindowStart.getTime()) {
+        skipped += 1;
+        continue;
+      }
+
       const created = await importExternalCalendarEvent({
         sql: input.sql,
         userId: input.userId,

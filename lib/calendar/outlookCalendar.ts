@@ -258,10 +258,15 @@ export const outlookCalendarClient: CalendarProviderClient = {
     }
   },
 
-  async listEvents(accessToken, calendarId) {
+  async listEvents(accessToken, calendarId, timeMin) {
     const events: ExternalCalendarEvent[] = [];
     let url: string | null = getEventsUrl(calendarId);
-    url += `${url.includes('?') ? '&' : '?'}$top=50`;
+    const params = new URLSearchParams({ $top: '50' });
+    if (timeMin) {
+      params.set('$filter', `start/dateTime ge '${timeMin}'`);
+      params.set('$orderby', 'start/dateTime');
+    }
+    url += `${url.includes('?') ? '&' : '?'}${params.toString()}`;
 
     while (url && events.length < 500) {
       const response = await fetch(url, {
