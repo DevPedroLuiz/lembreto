@@ -128,24 +128,37 @@ interface PaginationControlsProps {
 }
 
 function buildAvailableTags(tags: string[], tasks: Task[]): string[] {
-  const seen = new Set<string>();
-  const ordered: string[] = [];
+  const tagUsage = new Map<string, { label: string; count: number }>();
 
-  const append = (value: string) => {
+  const normalizeTagKey = (value: string) => value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR');
+
+  const append = (value: string, count = 0) => {
     const normalized = value.trim();
     if (!normalized) return;
-    const key = normalized.toLocaleLowerCase('pt-BR');
-    if (seen.has(key)) return;
-    seen.add(key);
-    ordered.push(normalized);
+    const key = normalizeTagKey(normalized);
+    const current = tagUsage.get(key);
+
+    if (current) {
+      current.count += count;
+      return;
+    }
+
+    tagUsage.set(key, { label: normalized, count });
   };
 
-  tags.forEach(append);
-  tasks.forEach((task) => (task.tags ?? []).forEach(append));
+  tags.forEach((tag) => append(tag));
+  tasks.forEach((task) => (task.tags ?? []).forEach((tag) => append(tag, 1)));
 
-  return ordered.sort((left, right) =>
-    left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }),
-  );
+  return Array.from(tagUsage.values())
+    .sort((left, right) => (
+      right.count - left.count ||
+      left.label.localeCompare(right.label, 'pt-BR', { sensitivity: 'base' })
+    ))
+    .map((item) => item.label);
 }
 
 function buildSelectableTaskIds(tasks: Task[]): Set<string> {

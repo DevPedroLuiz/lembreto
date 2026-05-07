@@ -153,6 +153,8 @@ export function TaskDetailsDialog({
   if (!task) return null;
 
   const timeLabel = getTaskTimeLabel(task.dueDate);
+  const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
+  const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const isCompleted = task.status === 'completed';
   const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar;
@@ -509,10 +511,10 @@ export function TaskDetailsDialog({
                             Horário
                           </p>
                           <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                            {timeLabel || 'Dia todo'}
+                            {timeRangeLabel || 'Dia todo'}
                           </p>
                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            {timeDescription}
+                            {endTimeLabel ? 'Horário inicial e final definidos.' : timeDescription}
                           </p>
                         </div>
                       </div>

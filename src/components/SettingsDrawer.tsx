@@ -5,6 +5,7 @@ import {
   BellRing,
   CalendarDays,
   CheckCircle2,
+  Clock3,
   Compass,
   Download,
   FolderPlus,
@@ -28,6 +29,7 @@ import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { BRAZIL_STATES } from '../../lib/brazil-location';
 import { isDefaultCategory, normalizeTaxonomyValue } from '../lib/taxonomy';
+import { buildNoTimeReminderMinutes, splitMinutesIntoTimeParts } from '../lib/taskDueDate';
 import type {
   CalendarIntegrationProvider,
   CalendarIntegrationStatus,
@@ -96,6 +98,8 @@ interface SettingsDrawerProps {
   onToggleConfirmDelete: () => void;
   showCompleted: boolean;
   onToggleShowCompleted: () => void;
+  noTimeReminderMinutes: number;
+  onChangeNoTimeReminderMinutes: (minutes: number) => void;
   categories: string[];
   tags: string[];
   onCreateCategory: (name: string) => Promise<string>;
@@ -303,6 +307,8 @@ export function SettingsDrawer({
   onToggleConfirmDelete,
   showCompleted,
   onToggleShowCompleted,
+  noTimeReminderMinutes,
+  onChangeNoTimeReminderMinutes,
   categories,
   tags,
   onCreateCategory,
@@ -546,7 +552,7 @@ export function SettingsDrawer({
       setCalendarFeedback(
         result.failed > 0
           ? `${providerName}: sincronização não concluída para todos os itens. ${result.failed} falha${result.failed === 1 ? '' : 's'} encontrada${result.failed === 1 ? '' : 's'}.`
-          : `${providerName}: sincronização concluída. ${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'} e ${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}.`,
+          : `${providerName}: sincronização concluída. ${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}, ${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'} e ${result.deduplicated} duplicata${result.deduplicated === 1 ? '' : 's'} resolvida${result.deduplicated === 1 ? '' : 's'}.`,
       );
     } catch {
       setCalendarFeedback('NÃ£o foi possÃ­vel sincronizar todos os lembretes agora.');
@@ -601,6 +607,19 @@ export function SettingsDrawer({
   );
 
   const activeViewMeta = settingsViews.find((view) => view.key === activeView) ?? settingsViews[0];
+  const noTimeReminderParts = splitMinutesIntoTimeParts(noTimeReminderMinutes);
+
+  const updateNoTimeReminderPart = (part: 'hours' | 'minutes', value: string) => {
+    const parsedValue = Number.parseInt(value, 10);
+    const nextValue = Number.isNaN(parsedValue) ? 0 : parsedValue;
+
+    onChangeNoTimeReminderMinutes(
+      buildNoTimeReminderMinutes(
+        part === 'hours' ? nextValue : noTimeReminderParts.hours,
+        part === 'minutes' ? nextValue : noTimeReminderParts.minutes,
+      ),
+    );
+  };
 
   const renderToggleCards = (cards: ReadonlyArray<(typeof settingCards)[number]>) => (
     <div className="grid gap-4 md:grid-cols-2">
@@ -1152,6 +1171,62 @@ export function SettingsDrawer({
                 description="Defina como seus lembretes aparecem na agenda."
               />
               {renderToggleCards(organizationCards)}
+            </section>
+
+            <section className="surface-soft p-5">
+              <SectionHeader
+                eyebrow="Prazos"
+                title="HorÃ¡rio padrÃ£o sem registro"
+                description="Defina hora e minutos para lembretes salvos sem horÃ¡rio."
+              />
+
+              <div className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                      <Clock3 size={16} />
+                      PadrÃ£o atual
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      {`${`${noTimeReminderParts.hours}`.padStart(2, '0')}:${`${noTimeReminderParts.minutes}`.padStart(2, '0')}`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                      Horas
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      step={1}
+                      value={noTimeReminderParts.hours}
+                      onChange={(event) => updateNoTimeReminderPart('hours', event.target.value)}
+                      data-testid="settings-no-time-hours-input"
+                      className="field-control"
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                      Minutos
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      step={1}
+                      value={noTimeReminderParts.minutes}
+                      onChange={(event) => updateNoTimeReminderPart('minutes', event.target.value)}
+                      data-testid="settings-no-time-minutes-input"
+                      className="field-control"
+                    />
+                  </label>
+                </div>
+              </div>
             </section>
 
             {renderConnectedCalendarsPanel()}

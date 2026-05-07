@@ -36,6 +36,7 @@ export function buildCalendarEventInput(task: CalendarTaskForSync): CalendarEven
       `Lembreto ID: ${task.id}`,
     ].filter(Boolean).join('\n'),
     dueDate: task.dueDate,
+    endDate: task.endDate,
     category: task.category || 'Geral',
     tags: task.tags,
   };

@@ -33,8 +33,11 @@ import { cn } from './lib/cn';
 import { AUTH_UNAUTHORIZED_EVENT } from './lib/authEvents';
 import {
   buildDueDateFromForm,
+  DEFAULT_NO_TIME_REMINDER_MINUTES,
   formatDateInputValue,
+  formatMinutesAsTimeInput,
   getTaskTimeLabel,
+  normalizeNoTimeReminderMinutes,
   parseDueDateToForm,
 } from './lib/taskDueDate';
 import {
@@ -79,6 +82,7 @@ type AppConfigPatch = Partial<{
   sound: boolean;
   confirmDelete: boolean;
   showCompleted: boolean;
+  noTimeReminderMinutes: number;
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
@@ -129,13 +133,15 @@ function buildTaskShareMessage(task: Task): string {
   }
 
   const timeLabel = getTaskTimeLabel(task.dueDate);
+  const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
+  const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const statusLabel = task.status === 'completed' ? 'Concluído' : 'Pendente';
 
   return [
     `Lembrete: ${task.title}`,
     task.description?.trim() ? `Detalhes: ${task.description.trim()}` : null,
     `Prazo: ${dueLabel}`,
-    `Horário: ${timeLabel || 'Dia todo'}`,
+    `Horário: ${timeRangeLabel || 'Dia todo'}`,
     `Prioridade: ${task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}`,
     `Categoria: ${task.category || 'Geral'}`,
     task.tags?.length ? `Tags: ${task.tags.join(', ')}` : null,
@@ -293,11 +299,13 @@ export default function App() {
   const [configSound, setConfigSound] = useState(true);
   const [configConfirmDelete, setConfigConfirmDelete] = useState(true);
   const [configShowCompleted, setConfigShowCompleted] = useState(true);
+  const [configNoTimeReminderMinutes, setConfigNoTimeReminderMinutes] = useState(DEFAULT_NO_TIME_REMINDER_MINUTES);
 
   const [formTitle, setFormTitle] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formDate, setFormDate] = useState('');
   const [formTime, setFormTime] = useState('');
+  const [formEndTime, setFormEndTime] = useState('');
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formCategory, setFormCategory] = useState('Geral');
   const [formTags, setFormTags] = useState<string[]>([]);
@@ -371,26 +379,43 @@ export default function App() {
     [categories],
   );
   const tagOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const ordered: string[] = [];
+    const tagUsage = new Map<string, { label: string; count: number }>();
 
-    const append = (value: string) => {
+    const normalizeTagKey = (value: string) => value
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('pt-BR');
+
+    const append = (value: string, count = 0) => {
       const normalized = value.trim();
       if (!normalized) return;
-      const key = normalized.toLocaleLowerCase('pt-BR');
-      if (seen.has(key)) return;
-      seen.add(key);
-      ordered.push(normalized);
+      const key = normalizeTagKey(normalized);
+      const current = tagUsage.get(key);
+
+      if (current) {
+        current.count += count;
+        return;
+      }
+
+      tagUsage.set(key, { label: normalized, count });
     };
 
-    tags.forEach(append);
-    tasks.forEach((task) => task.tags.forEach(append));
-    notes.forEach((note) => note.tags.forEach(append));
+    tags.forEach((tag) => append(tag));
+    tasks.forEach((task) => task.tags.forEach((tag) => append(tag, 1)));
+    notes.forEach((note) => note.tags.forEach((tag) => append(tag, 1)));
 
-    return ordered.sort((left, right) =>
-      left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }),
-    );
+    return Array.from(tagUsage.values())
+      .sort((left, right) => (
+        right.count - left.count ||
+        left.label.localeCompare(right.label, 'pt-BR', { sensitivity: 'base' })
+      ))
+      .map((item) => item.label);
   }, [notes, tags, tasks]);
+  const noTimeReminderFallbackTime = useMemo(
+    () => formatMinutesAsTimeInput(configNoTimeReminderMinutes),
+    [configNoTimeReminderMinutes],
+  );
   const noteContextTask = useMemo(
     () => (noteContextTaskId ? tasks.find((task) => task.id === noteContextTaskId) ?? null : null),
     [noteContextTaskId, tasks],
@@ -424,6 +449,7 @@ export default function App() {
     if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
     if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
     if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
+    setConfigNoTimeReminderMinutes(normalizeNoTimeReminderMinutes(cfg.noTimeReminderMinutes));
   }, []);
 
   useEffect(() => {
@@ -644,15 +670,25 @@ export default function App() {
       sound: configSound,
       confirmDelete: configConfirmDelete,
       showCompleted: configShowCompleted,
+      noTimeReminderMinutes: configNoTimeReminderMinutes,
       ...patch,
     };
+    next.noTimeReminderMinutes = normalizeNoTimeReminderMinutes(next.noTimeReminderMinutes);
     if (typeof next.darkMode === 'boolean') setDarkMode(next.darkMode);
     setNotificationsEnabled(Boolean(next.notifications));
     setConfigSound(Boolean(next.sound));
     setConfigConfirmDelete(Boolean(next.confirmDelete));
     setConfigShowCompleted(Boolean(next.showCompleted));
+    setConfigNoTimeReminderMinutes(next.noTimeReminderMinutes);
     LS.saveConfig(next);
-  }, [configConfirmDelete, configShowCompleted, configSound, darkMode, notificationsEnabled]);
+  }, [
+    configConfirmDelete,
+    configNoTimeReminderMinutes,
+    configShowCompleted,
+    configSound,
+    darkMode,
+    notificationsEnabled,
+  ]);
 
   const toggleDarkMode = useCallback(() => {
     saveConfig({ darkMode: !darkMode });
@@ -804,6 +840,7 @@ export default function App() {
     setFormDesc('');
     setFormDate('');
     setFormTime('');
+    setFormEndTime('');
     setFormPriority('medium');
     setFormCategory('Geral');
     setFormTags([]);
@@ -884,6 +921,7 @@ export default function App() {
     setFormDesc(template.description);
     setFormDate(template.date);
     setFormTime(template.time ?? '');
+    setFormEndTime('');
     setFormPriority(template.priority);
     setFormCategory(template.category);
     setFormTags([]);
@@ -894,10 +932,12 @@ export default function App() {
   const openEditTask = useCallback((task: Task) => {
     setShowNotificationsInbox(false);
     const dueDateForm = parseDueDateToForm(task.dueDate);
+    const endDateForm = task.endDate ? parseDueDateToForm(task.endDate) : { date: '', time: '' };
     setFormTitle(task.title);
     setFormDesc(task.description);
     setFormDate(dueDateForm.date);
     setFormTime(dueDateForm.time);
+    setFormEndTime(endDateForm.time);
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
@@ -915,10 +955,12 @@ export default function App() {
   const openDuplicateTask = useCallback((task: Task) => {
     setShowNotificationsInbox(false);
     const dueDateForm = parseDueDateToForm(task.dueDate);
+    const endDateForm = task.endDate ? parseDueDateToForm(task.endDate) : { date: '', time: '' };
     setFormTitle(`${task.title} (cópia)`);
     setFormDesc(task.description);
     setFormDate(dueDateForm.date);
     setFormTime(dueDateForm.time);
+    setFormEndTime(endDateForm.time);
     setFormPriority(task.priority);
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
@@ -1099,6 +1141,7 @@ export default function App() {
     const summary = [
       `${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}`,
       `${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}`,
+      `${result.deduplicated} duplicata${result.deduplicated === 1 ? '' : 's'} resolvida${result.deduplicated === 1 ? '' : 's'}`,
     ];
 
     emitNotification(
@@ -1182,13 +1225,33 @@ export default function App() {
   const taskDueDateError = useMemo(() => {
     if (!formDate) return '';
 
-    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime));
+    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime));
     if (isPast(dueDateValue) && !isToday(dueDateValue)) {
       return 'Escolha uma data de hoje em diante.';
     }
 
     return '';
-  }, [formDate, formTime]);
+  }, [formDate, formTime, noTimeReminderFallbackTime]);
+
+  const taskEndTimeError = useMemo(() => {
+    if (!formDate) return '';
+
+    const requiresEndTime = formCategory.trim().toLocaleLowerCase('pt-BR') === 'trabalho';
+    if (requiresEndTime && !formEndTime) {
+      return 'Horário final obrigatório para categoria Trabalho.';
+    }
+
+    if (!formEndTime) return '';
+
+    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime));
+    const endDateValue = new Date(buildDueDateFromForm(formDate, formEndTime));
+
+    if (endDateValue.getTime() <= dueDateValue.getTime()) {
+      return 'O horário final precisa ser depois do horário inicial.';
+    }
+
+    return '';
+  }, [formCategory, formDate, formEndTime, formTime, noTimeReminderFallbackTime]);
 
   const recurringDates = useMemo(() => {
     if (!formRecurrenceEnabled || !formDate || !formRecurrenceUntil) return [];
@@ -1347,17 +1410,24 @@ export default function App() {
       return;
     }
 
+    if (taskEndTimeError) {
+      emitNotification('Horário final inválido', taskEndTimeError, 'warning');
+      return;
+    }
+
     if (recurrenceError) {
       emitNotification('Repetição inválida', recurrenceError, 'warning');
       return;
     }
 
-    const dueDate = buildDueDateFromForm(formDate, formTime);
+    const dueDate = buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime);
+    const endDate = formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
 
     const payload = {
       title: formTitle,
       description: formDesc,
       dueDate,
+      endDate,
       priority: formPriority,
       category: formCategory,
       tags: formTags,
@@ -1386,7 +1456,8 @@ export default function App() {
             for (const dateValue of recurringDates) {
               const created = await createTask({
                 ...payload,
-                dueDate: buildDueDateFromForm(dateValue, formTime),
+                dueDate: buildDueDateFromForm(dateValue, formTime, noTimeReminderFallbackTime),
+                endDate: formEndTime ? buildDueDateFromForm(dateValue, formEndTime) : null,
               });
               if (created.syncStatus === 'pending') offlineCount += 1;
               if (created.externalCalendarSyncStatus === 'failed') calendarFailedCount += 1;
@@ -1442,20 +1513,23 @@ export default function App() {
     formCategory,
     formDate,
     formDesc,
+    formEndTime,
     formPriority,
     formTime,
     formTitle,
     formTags,
-      formSuppressHolidayNotifications,
-      isTaskSubmitting,
-      resetTaskForm,
-      recurringDates,
-      recurrenceError,
-      formRecurrenceEnabled,
-      formRecurrenceUntil,
-      taskDueDateError,
-      updateTask,
-    ]);
+    noTimeReminderFallbackTime,
+    formSuppressHolidayNotifications,
+    isTaskSubmitting,
+    resetTaskForm,
+    recurringDates,
+    recurrenceError,
+    formRecurrenceEnabled,
+    formRecurrenceUntil,
+    taskDueDateError,
+    taskEndTimeError,
+    updateTask,
+  ]);
 
   const handleSubmitNote = useCallback(async () => {
     if (!noteTitle.trim() || isNoteSubmitting) return;
@@ -2898,7 +2972,11 @@ export default function App() {
         setDate={setFormDate}
         time={formTime}
         setTime={setFormTime}
+        endTime={formEndTime}
+        setEndTime={setFormEndTime}
+        noTimeReminderFallbackTime={noTimeReminderFallbackTime}
         dueDateError={taskDueDateError}
+        endTimeError={taskEndTimeError}
         minimumDate={minimumTaskDate}
         priority={formPriority}
         setPriority={setFormPriority}
@@ -2993,6 +3071,8 @@ export default function App() {
         onToggleConfirmDelete={() => saveConfig({ confirmDelete: !configConfirmDelete })}
         showCompleted={configShowCompleted}
         onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
+        noTimeReminderMinutes={configNoTimeReminderMinutes}
+        onChangeNoTimeReminderMinutes={(minutes) => saveConfig({ noTimeReminderMinutes: minutes })}
         categories={categoryOptions}
         tags={tagOptions}
         onCreateCategory={createCategory}

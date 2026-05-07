@@ -164,6 +164,7 @@ function areStringArraysEqual(left: string[], right: string[]): boolean {
 
 function buildCreatedHistoryEntry(input: {
   dueDate?: string | null;
+  endDate?: string | null;
   priority: string;
   category: string;
   tags: string[];
@@ -178,6 +179,10 @@ function buildCreatedHistoryEntry(input: {
     details.push(`Tags iniciais: ${input.tags.join(', ')}.`);
   }
 
+  if (input.endDate) {
+    details.push('Horário final definido.');
+  }
+
   return createHistoryEntry('created', 'Lembrete criado', 'O lembrete foi registrado.', details);
 }
 
@@ -187,6 +192,7 @@ function buildUpdateHistoryEntry(
     title: unknown;
     description: unknown;
     dueDate: unknown;
+    endDate: unknown;
     priority: unknown;
     category: unknown;
     tags: string[];
@@ -200,6 +206,7 @@ function buildUpdateHistoryEntry(
   if (String(current.title ?? '') !== String(next.title ?? '')) changedDetails.push('Título atualizado.');
   if (String(current.description ?? '') !== String(next.description ?? '')) changedDetails.push('Descrição atualizada.');
   if (normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate)) changedDetails.push('Prazo alterado.');
+  if (normalizeDateValue(current.end_date) !== normalizeDateValue(next.endDate)) changedDetails.push('Horário final alterado.');
   if (String(current.priority ?? '') !== String(next.priority ?? '')) changedDetails.push('Prioridade alterada.');
   if (String(current.category ?? '') !== String(next.category ?? '')) changedDetails.push('Categoria alterada.');
   if (!areStringArraysEqual(currentTags, next.tags)) changedDetails.push('Tags atualizadas.');
@@ -212,7 +219,9 @@ function buildUpdateHistoryEntry(
 
   const currentStatus = String(current.status ?? 'pending');
   const nextStatus = String(next.status ?? currentStatus);
-  const dueDateChanged = normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate);
+  const dueDateChanged =
+    normalizeDateValue(current.due_date) !== normalizeDateValue(next.dueDate) ||
+    normalizeDateValue(current.end_date) !== normalizeDateValue(next.endDate);
   const onlyStatusChanged = changedDetails.length === 1 && changedDetails[0] === 'Status alterado.';
 
   if (onlyStatusChanged && currentStatus !== nextStatus) {
@@ -273,6 +282,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           title,
           description,
           due_date    AS "dueDate",
+          end_date    AS "endDate",
           priority,
           category,
           tags,
@@ -306,6 +316,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       title,
       description,
       dueDate,
+      endDate,
       priority,
       category,
       suppressHolidayNotifications,
@@ -314,6 +325,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
     const history = JSON.stringify([
       buildCreatedHistoryEntry({
         dueDate,
+        endDate,
         priority,
         category,
         tags,
@@ -327,6 +339,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           title,
           description,
           due_date,
+          end_date,
           priority,
           category,
           tags,
@@ -338,6 +351,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${title},
           ${description},
           ${dueDate || null},
+          ${endDate || null},
           ${priority},
           ${category},
           ${tags},
@@ -350,6 +364,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           title,
           description,
           due_date    AS "dueDate",
+          end_date    AS "endDate",
           priority,
           category,
           tags,
@@ -374,6 +389,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           title,
           description,
           due_date    AS "dueDate",
+          end_date    AS "endDate",
           priority,
           category,
           tags,
@@ -424,6 +440,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         title,
         description,
         dueDate,
+        endDate,
         priority,
         category,
         status,
@@ -437,6 +454,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           title,
           description,
           due_date,
+          end_date,
           priority,
           category,
           tags,
@@ -456,6 +474,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         title: title !== undefined ? title : cur.title,
         description: description !== undefined ? description : cur.description,
         dueDate: dueDate !== undefined ? dueDate || null : cur.due_date,
+        endDate: endDate !== undefined ? endDate || null : cur.end_date,
         priority: priority !== undefined ? priority : cur.priority,
         category: categoryValue,
         tags: tagsValue,
@@ -464,6 +483,21 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           : cur.suppress_holiday_notifications,
         status: status !== undefined ? status : cur.status,
       };
+      const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined;
+      if (
+        shouldValidateEndDateRequirement &&
+        String(nextValues.category).trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
+        !nextValues.endDate
+      ) {
+        return json(400, { error: 'Horário final obrigatório para categoria Trabalho' });
+      }
+      if (
+        nextValues.dueDate &&
+        nextValues.endDate &&
+        Date.parse(String(nextValues.endDate)) <= Date.parse(String(nextValues.dueDate))
+      ) {
+        return json(400, { error: 'Horário final precisa ser depois do horário inicial' });
+      }
       const historyEntry = buildUpdateHistoryEntry(cur, nextValues);
       const historyUpdate = historyEntry ? JSON.stringify([historyEntry]) : null;
 
@@ -472,6 +506,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           title       = ${nextValues.title},
           description = ${nextValues.description},
           due_date    = ${nextValues.dueDate},
+          end_date    = ${nextValues.endDate},
           priority    = ${nextValues.priority},
           category    = ${nextValues.category},
           tags        = ${nextValues.tags},
@@ -485,6 +520,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           title,
           description,
           due_date    AS "dueDate",
+          end_date    AS "endDate",
           priority,
           category,
           tags,
@@ -509,6 +545,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           title,
           description,
           due_date    AS "dueDate",
+          end_date    AS "endDate",
           priority,
           category,
           tags,
@@ -610,6 +647,7 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
         title,
         description,
         due_date    AS "dueDate",
+        end_date    AS "endDate",
         priority,
         category,
         tags,

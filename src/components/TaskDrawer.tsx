@@ -8,6 +8,7 @@ import {
   Layers3,
   Loader2,
   Repeat,
+  Search,
   Sparkles,
   Tag,
   X,
@@ -79,7 +80,11 @@ interface TaskDrawerProps {
   setDate: (value: string) => void;
   time: string;
   setTime: (value: string) => void;
+  endTime: string;
+  setEndTime: (value: string) => void;
+  noTimeReminderFallbackTime: string;
   dueDateError?: string;
+  endTimeError?: string;
   minimumDate?: string;
   priority: Priority;
   setPriority: (value: Priority) => void;
@@ -105,6 +110,13 @@ interface TaskDrawerProps {
 
 function normalizeTaxonomyValue(value: string) {
   return value.trim().replace(/\s+/g, ' ');
+}
+
+function normalizeSearchValue(value: string) {
+  return normalizeTaxonomyValue(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR');
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -254,7 +266,11 @@ export function TaskDrawer({
   setDate,
   time,
   setTime,
+  endTime,
+  setEndTime,
+  noTimeReminderFallbackTime,
   dueDateError = '',
+  endTimeError = '',
   minimumDate,
   priority,
   setPriority,
@@ -279,6 +295,7 @@ export function TaskDrawer({
 }: TaskDrawerProps) {
   const isEditing = Boolean(editingTask);
   const [activeTab, setActiveTab] = React.useState<TaskDrawerTab>('details');
+  const [categorySearch, setCategorySearch] = React.useState('');
   const [tagDraft, setTagDraft] = React.useState('');
   const [tagFeedback, setTagFeedback] = React.useState('');
   const swipe = useSwipeToClose({
@@ -291,6 +308,7 @@ export function TaskDrawer({
   React.useEffect(() => {
     if (open) {
       setActiveTab('details');
+      setCategorySearch('');
       setTagDraft('');
       setTagFeedback('');
     }
@@ -298,12 +316,41 @@ export function TaskDrawer({
 
   const titleCount = title.trim().length;
   const summaryDue = date || 'Defina a data';
-  const summaryTime = time || 'Dia todo';
+  const summaryTime = endTime
+    ? `${time || noTimeReminderFallbackTime} - ${endTime}`
+    : time || noTimeReminderFallbackTime;
   const summaryPriority = PRIORITY_LABELS[priority];
   const availableTagSuggestions = React.useMemo(
-    () => tagOptions.filter((item) => !tags.includes(item)),
+    () => tagOptions.filter((item) => (
+      !tags.some((tag) => normalizeSearchValue(tag) === normalizeSearchValue(item))
+    )),
     [tagOptions, tags],
   );
+  const filteredCategoryOptions = React.useMemo(() => {
+    const normalizedSearch = normalizeSearchValue(categorySearch);
+    if (!normalizedSearch) return categoryOptions;
+
+    const filteredOptions = categoryOptions.filter((item) =>
+      normalizeSearchValue(item).includes(normalizedSearch),
+    );
+
+    return filteredOptions.includes(category)
+      ? filteredOptions
+      : [category, ...filteredOptions].filter(Boolean);
+  }, [category, categoryOptions, categorySearch]);
+
+  const handleCategorySearchChange = React.useCallback((value: string) => {
+    setCategorySearch(value);
+
+    const normalizedValue = normalizeSearchValue(value);
+    const exactMatch = categoryOptions.find((item) =>
+      normalizeSearchValue(item) === normalizedValue,
+    );
+
+    if (exactMatch) {
+      setCategory(exactMatch);
+    }
+  }, [categoryOptions, setCategory]);
 
   const isSuggestionActive = React.useCallback(
     (suggestionKey: RecurrenceSuggestion) => {
@@ -318,25 +365,25 @@ export function TaskDrawer({
   const addTag = React.useCallback(
     (value: string) => {
       const normalized = normalizeTaxonomyValue(value);
-      if (!normalized || tags.includes(normalized)) return;
-      setTags([...tags, normalized]);
+      if (!normalized) return;
+
+      const tagKey = normalizeSearchValue(normalized);
+      if (tags.some((item) => normalizeSearchValue(item) === tagKey)) return;
+
+      const registeredTag = tagOptions.find((item) => normalizeSearchValue(item) === tagKey);
+      setTags([...tags, registeredTag ?? normalized]);
       setTagDraft('');
       setTagFeedback('');
     },
-    [setTags, tags],
+    [setTags, tagOptions, tags],
   );
 
   const handleAddExistingTag = React.useCallback(() => {
     const normalized = normalizeTaxonomyValue(tagDraft);
     if (!normalized) return;
 
-    if (!tagOptions.includes(normalized)) {
-      setTagFeedback('Cadastre novas tags em Configurações antes de usá-las nos lembretes.');
-      return;
-    }
-
     addTag(normalized);
-  }, [addTag, tagDraft, tagOptions]);
+  }, [addTag, tagDraft]);
 
   const removeTag = React.useCallback(
     (value: string) => {
@@ -511,41 +558,81 @@ export function TaskDrawer({
                                 />
                               </div>
 
-                              <div className="space-y-2">
-                                <div className="relative">
-                                  <Clock3 className="field-icon" size={18} />
-                                  <input
-                                    type="time"
-                                    step={60}
-                                    inputMode="numeric"
-                                    data-testid="task-time-input"
-                                    value={time}
-                                    disabled={isSubmitting}
-                                    onChange={(event) => setTime(event.target.value)}
-                                    className="field-control field-control-with-icon"
-                                  />
-                                </div>
+                              <div className="space-y-3">
+                                <label className="space-y-2">
+                                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                                    Horário inicial
+                                  </span>
+                                  <div className="relative">
+                                    <Clock3 className="field-icon" size={18} />
+                                    <input
+                                      type="time"
+                                      step={60}
+                                      inputMode="numeric"
+                                      data-testid="task-time-input"
+                                      value={time}
+                                      disabled={isSubmitting}
+                                      onChange={(event) => setTime(event.target.value)}
+                                      className="field-control field-control-with-icon"
+                                    />
+                                  </div>
+                                </label>
 
-                                <button
-                                  type="button"
-                                  data-testid="task-time-clear"
-                                  disabled={isSubmitting || !time}
-                                  onClick={() => setTime('')}
-                                  className="action-ghost h-10 w-full justify-center rounded-xl border border-slate-200/70 px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
-                                >
-                                  Sem horário
-                                </button>
+                                <label className="space-y-2">
+                                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                                    Horário final
+                                  </span>
+                                  <div className="relative">
+                                    <Clock3 className="field-icon" size={18} />
+                                    <input
+                                      type="time"
+                                      step={60}
+                                      inputMode="numeric"
+                                      data-testid="task-end-time-input"
+                                      value={endTime}
+                                      disabled={isSubmitting}
+                                      onChange={(event) => setEndTime(event.target.value)}
+                                      aria-invalid={endTimeError ? 'true' : 'false'}
+                                      className={cn(
+                                        'field-control field-control-with-icon',
+                                        endTimeError &&
+                                          'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:focus:border-rose-400',
+                                      )}
+                                    />
+                                  </div>
+                                </label>
+
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <button
+                                    type="button"
+                                    data-testid="task-time-clear"
+                                    disabled={isSubmitting || !time}
+                                    onClick={() => setTime('')}
+                                    className="action-ghost h-10 w-full justify-center rounded-xl border border-slate-200/70 px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
+                                  >
+                                    Sem início
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-testid="task-end-time-clear"
+                                    disabled={isSubmitting || !endTime}
+                                    onClick={() => setEndTime('')}
+                                    className="action-ghost h-10 w-full justify-center rounded-xl border border-slate-200/70 px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
+                                  >
+                                    Sem final
+                                  </button>
+                                </div>
                               </div>
                             </div>
 
                             <p
                               className={cn(
                                 'mt-2 text-sm',
-                                dueDateError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
+                                dueDateError || endTimeError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
                               )}
                               data-testid="task-date-help"
                             >
-                              {dueDateError || 'O horário é opcional. Sem horário, o lembrete vale para o dia todo.'}
+                              {dueDateError || endTimeError || `Sem horário inicial, o lembrete usa o padrão das configurações: ${noTimeReminderFallbackTime}.`}
                             </p>
                           </div>
 
@@ -567,19 +654,43 @@ export function TaskDrawer({
 
                             <div>
                               <FieldLabel>Categoria</FieldLabel>
-                              <select
-                                value={category}
-                                disabled={isSubmitting}
-                                data-testid="task-category-select"
-                                onChange={(event) => setCategory(event.target.value)}
-                                className="field-control cursor-pointer"
-                              >
-                                {categoryOptions.map((item) => (
-                                  <option key={item} value={item}>
-                                    {item}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="space-y-2">
+                                <div className="relative">
+                                  <Search className="field-icon" size={18} />
+                                  <input
+                                    type="text"
+                                    value={categorySearch}
+                                    list="task-category-options"
+                                    disabled={isSubmitting}
+                                    onChange={(event) => handleCategorySearchChange(event.target.value)}
+                                    placeholder="Buscar categoria"
+                                    data-testid="task-category-search-input"
+                                    className="field-control field-control-with-icon"
+                                  />
+                                  <datalist id="task-category-options">
+                                    {categoryOptions.map((item) => (
+                                      <option key={item} value={item} />
+                                    ))}
+                                  </datalist>
+                                </div>
+
+                                <select
+                                  value={category}
+                                  disabled={isSubmitting}
+                                  data-testid="task-category-select"
+                                  onChange={(event) => {
+                                    setCategory(event.target.value);
+                                    setCategorySearch('');
+                                  }}
+                                  className="field-control cursor-pointer"
+                                >
+                                  {filteredCategoryOptions.map((item) => (
+                                    <option key={item} value={item}>
+                                      {item}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                           </div>
 
@@ -598,7 +709,7 @@ export function TaskDrawer({
                                     handleAddExistingTag();
                                   }
                                 }}
-                                placeholder={tagOptions.length > 0 ? 'Selecione uma tag já cadastrada' : 'Cadastre tags em Configurações'}
+                                placeholder={tagOptions.length > 0 ? 'Buscar ou criar tag' : 'Criar primeira tag'}
                                 data-testid="task-tag-input"
                                 className="field-control"
                               />
@@ -665,7 +776,7 @@ export function TaskDrawer({
                             </div>
 
                             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                              Categorias e novas tags são cadastradas em Configurações, junto com as demais personalizações do sistema.
+                              Tags novas adicionadas aqui ficam disponíveis para os próximos lembretes.
                             </p>
 
                             {tagFeedback && (
@@ -858,7 +969,7 @@ export function TaskDrawer({
                     form="task-form"
                     type="submit"
                     data-testid="task-submit-button"
-                    disabled={isSubmitting || Boolean(dueDateError) || Boolean(recurrenceError)}
+                    disabled={isSubmitting || Boolean(dueDateError) || Boolean(endTimeError) || Boolean(recurrenceError)}
                     className="action-primary w-full justify-center rounded-2xl py-3.5 disabled:cursor-wait disabled:opacity-70 sm:min-w-[240px] sm:w-auto sm:py-4"
                   >
                     {isSubmitting ? (

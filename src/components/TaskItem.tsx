@@ -72,6 +72,8 @@ function TaskItemComponent({
   const isCompleted = task.status === 'completed';
   const isBusy = isDeleting || isToggling;
   const timeLabel = getTaskTimeLabel(task.dueDate);
+  const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
+  const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
   const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
@@ -311,7 +313,7 @@ function TaskItemComponent({
             {formatDate()}
           </span>
 
-          {timeLabel && !compact && (
+          {timeRangeLabel && !compact && (
             <span
               data-testid="task-time-badge"
               className={cn(
@@ -321,7 +323,7 @@ function TaskItemComponent({
                   : 'border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
               )}
             >
-              {timeLabel}
+              {timeRangeLabel}
             </span>
           )}
 

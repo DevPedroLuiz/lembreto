@@ -29,6 +29,11 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
 
   await sql`
     ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ
+  `;
+
+  await sql`
+    ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
   `;
 
@@ -185,14 +190,26 @@ export async function getTaskTaxonomy(sql: SqlClient, userId: string) {
   `;
 
   const tagsRows = await sql`
-    SELECT DISTINCT tag_name AS name
+    SELECT
+      (ARRAY_AGG(tag_name ORDER BY usage_count DESC, tag_name ASC))[1] AS name,
+      MAX(usage_count) AS usage_count
     FROM (
-      SELECT name AS tag_name FROM user_tags WHERE user_id = ${userId}
-      UNION
-      SELECT unnest(tags) AS tag_name FROM tasks WHERE user_id = ${userId}
+      SELECT name AS tag_name, 0 AS usage_count
+      FROM user_tags
+      WHERE user_id = ${userId}
+      UNION ALL
+      SELECT tag_name, COUNT(*)::INT AS usage_count
+      FROM (
+        SELECT unnest(tags) AS tag_name
+        FROM tasks
+        WHERE user_id = ${userId}
+      ) task_tag_names
+      WHERE tag_name IS NOT NULL AND btrim(tag_name) != ''
+      GROUP BY lower(tag_name), tag_name
     ) tag_names
     WHERE tag_name IS NOT NULL AND btrim(tag_name) != ''
-    ORDER BY tag_name ASC
+    GROUP BY lower(tag_name)
+    ORDER BY MAX(usage_count) DESC, (ARRAY_AGG(tag_name ORDER BY usage_count DESC, tag_name ASC))[1] ASC
   `;
 
   const categories = normalizeUnique([

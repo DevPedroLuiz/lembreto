@@ -50,6 +50,17 @@ function getCalendarSyncWindowStart(now = new Date()): Date {
   return new Date(`${year}-${month}-${day}T00:00:00-03:00`);
 }
 
+function buildDuplicateKey(input: { title: string; dueDate: string | null }): string | null {
+  if (!input.dueDate) return null;
+  const dueDate = new Date(input.dueDate);
+  if (Number.isNaN(dueDate.getTime())) return null;
+
+  return [
+    input.title.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR'),
+    dueDate.toISOString(),
+  ].join('|');
+}
+
 export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
   if (!ensureCalendarSchemaPromise) {
     ensureCalendarSchemaPromise = (async () => {
@@ -352,6 +363,7 @@ export async function getTaskForCalendarSync(
       title,
       description,
       due_date AS "dueDate",
+      end_date AS "endDate",
       priority,
       category,
       tags,
@@ -374,6 +386,7 @@ export async function getTaskForCalendarSync(
     title: String(row.title),
     description: String(row.description ?? ''),
     dueDate: row.dueDate ? new Date(String(row.dueDate)).toISOString() : null,
+    endDate: row.endDate ? new Date(String(row.endDate)).toISOString() : null,
     priority: String(row.priority) as CalendarTaskForSync['priority'],
     category: String(row.category ?? 'Geral'),
     tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
@@ -478,6 +491,101 @@ async function listSyncableTaskIds(sql: SqlClient, userId: string): Promise<stri
   return rows.map((row) => String(row.id));
 }
 
+async function cleanupDuplicateLocalTasks(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+}): Promise<{ removed: number; errors: string[] }> {
+  await ensureCalendarIntegrationSchema(input.sql);
+
+  const rows = await input.sql`
+    SELECT
+      id,
+      title,
+      due_date AS "dueDate",
+      external_calendar_provider AS "externalCalendarProvider",
+      external_calendar_event_id AS "externalCalendarEventId",
+      created_at AS "createdAt"
+    FROM tasks
+    WHERE user_id = ${input.userId}
+      AND due_date IS NOT NULL
+    ORDER BY created_at ASC
+  `;
+
+  const groups = new Map<string, Array<{
+    id: string;
+    title: string;
+    dueDate: string | null;
+    externalCalendarProvider: CalendarProvider | null;
+    externalCalendarEventId: string | null;
+    createdAt: string;
+  }>>();
+
+  for (const row of rows) {
+    const item = {
+      id: String(row.id),
+      title: String(row.title ?? ''),
+      dueDate: row.dueDate ? new Date(String(row.dueDate)).toISOString() : null,
+      externalCalendarProvider: row.externalCalendarProvider
+        ? String(row.externalCalendarProvider) as CalendarProvider
+        : null,
+      externalCalendarEventId: typeof row.externalCalendarEventId === 'string'
+        ? row.externalCalendarEventId
+        : null,
+      createdAt: row.createdAt ? new Date(String(row.createdAt)).toISOString() : '',
+    };
+    const key = buildDuplicateKey(item);
+    if (!key) continue;
+
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+
+  const errors: string[] = [];
+  let removed = 0;
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+
+    const sorted = [...group].sort((left, right) => {
+      const leftHasProviderEvent = left.externalCalendarProvider === input.provider && left.externalCalendarEventId ? 0 : 1;
+      const rightHasProviderEvent = right.externalCalendarProvider === input.provider && right.externalCalendarEventId ? 0 : 1;
+      if (leftHasProviderEvent !== rightHasProviderEvent) return leftHasProviderEvent - rightHasProviderEvent;
+      return left.createdAt.localeCompare(right.createdAt);
+    });
+    const keeper = sorted[0];
+    const duplicates = sorted.slice(1);
+
+    for (const duplicate of duplicates) {
+      const task = await getTaskForCalendarSync(input.sql, input.userId, duplicate.id);
+      if (task?.externalCalendarProvider && task.externalCalendarEventId) {
+        const removedExternal = await removeTaskFromExternalCalendar({
+          sql: input.sql,
+          userId: input.userId,
+          task,
+          clearLocalState: false,
+        });
+
+        if (!removedExternal.ok) {
+          errors.push(removedExternal.error ?? `Falha ao remover duplicata externa do lembrete ${duplicate.id}.`);
+          continue;
+        }
+      }
+
+      await input.sql`
+        DELETE FROM tasks
+        WHERE id = ${duplicate.id}
+          AND user_id = ${input.userId}
+          AND id <> ${keeper.id}
+      `;
+      removed += 1;
+    }
+  }
+
+  return { removed, errors };
+}
+
 async function externalEventAlreadyImported(input: {
   sql: SqlClient;
   userId: string;
@@ -494,6 +602,73 @@ async function externalEventAlreadyImported(input: {
   `;
 
   return rows.length > 0;
+}
+
+async function findMatchingTaskForExternalEvent(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+  event: ExternalCalendarEvent;
+}): Promise<{ id: string; externalCalendarEventId: string | null } | null> {
+  const eventKey = buildDuplicateKey({ title: input.event.title, dueDate: input.event.dueDate });
+  if (!eventKey) return null;
+
+  const rows = await input.sql`
+    SELECT
+      id,
+      title,
+      due_date AS "dueDate",
+      external_calendar_provider AS "externalCalendarProvider",
+      external_calendar_event_id AS "externalCalendarEventId",
+      created_at AS "createdAt"
+    FROM tasks
+    WHERE user_id = ${input.userId}
+      AND due_date IS NOT NULL
+    ORDER BY created_at ASC
+  `;
+
+  for (const row of rows) {
+    const taskKey = buildDuplicateKey({
+      title: String(row.title ?? ''),
+      dueDate: row.dueDate ? new Date(String(row.dueDate)).toISOString() : null,
+    });
+    if (taskKey !== eventKey) continue;
+
+    const taskProvider = row.externalCalendarProvider
+      ? String(row.externalCalendarProvider) as CalendarProvider
+      : null;
+    const eventId = typeof row.externalCalendarEventId === 'string'
+      ? row.externalCalendarEventId
+      : null;
+    if (taskProvider === input.provider && eventId === input.event.id) return null;
+
+    return {
+      id: String(row.id),
+      externalCalendarEventId: eventId,
+    };
+  }
+
+  return null;
+}
+
+async function linkExternalEventToExistingTask(input: {
+  sql: SqlClient;
+  userId: string;
+  provider: CalendarProvider;
+  taskId: string;
+  eventId: string;
+}) {
+  await input.sql`
+    UPDATE tasks
+    SET
+      external_calendar_provider = ${input.provider},
+      external_calendar_event_id = ${input.eventId},
+      external_calendar_sync_status = 'synced',
+      external_calendar_last_error = NULL,
+      external_calendar_synced_at = NOW()
+    WHERE id = ${input.taskId}
+      AND user_id = ${input.userId}
+  `;
 }
 
 function buildImportedHistory(provider: CalendarProvider, eventId: string) {
@@ -515,14 +690,26 @@ async function importExternalCalendarEvent(input: {
   userId: string;
   provider: CalendarProvider;
   event: ExternalCalendarEvent;
-}): Promise<boolean> {
+}): Promise<'created' | 'linked' | 'skipped'> {
   if (await externalEventAlreadyImported({
     sql: input.sql,
     userId: input.userId,
     provider: input.provider,
     eventId: input.event.id,
   })) {
-    return false;
+    return 'skipped';
+  }
+
+  const matchingTask = await findMatchingTaskForExternalEvent(input);
+  if (matchingTask) {
+    await linkExternalEventToExistingTask({
+      sql: input.sql,
+      userId: input.userId,
+      provider: input.provider,
+      taskId: matchingTask.id,
+      eventId: input.event.id,
+    });
+    return 'linked';
   }
 
   await input.sql`
@@ -560,7 +747,7 @@ async function importExternalCalendarEvent(input: {
     )
   `;
 
-  return true;
+  return 'created';
 }
 
 export async function syncAllCalendarReminders(input: {
@@ -572,6 +759,7 @@ export async function syncAllCalendarReminders(input: {
   pushed: number;
   imported: number;
   skipped: number;
+  deduplicated: number;
   failed: number;
   errors: string[];
 }> {
@@ -582,6 +770,7 @@ export async function syncAllCalendarReminders(input: {
       pushed: 0,
       imported: 0,
       skipped: 0,
+      deduplicated: 0,
       failed: 1,
       errors: [`Conecte o ${PROVIDER_LABELS[input.provider]} antes de sincronizar.`],
     };
@@ -592,7 +781,19 @@ export async function syncAllCalendarReminders(input: {
   let skipped = 0;
   let failed = 0;
   let imported = 0;
+  let deduplicated = 0;
   const syncWindowStart = getCalendarSyncWindowStart();
+
+  const duplicateCleanup = await cleanupDuplicateLocalTasks({
+    sql: input.sql,
+    userId: input.userId,
+    provider: input.provider,
+  });
+  deduplicated += duplicateCleanup.removed;
+  if (duplicateCleanup.errors.length > 0) {
+    failed += duplicateCleanup.errors.length;
+    errors.push(...duplicateCleanup.errors);
+  }
 
   const taskIds = await listSyncableTaskIds(input.sql, input.userId);
   for (const taskId of taskIds) {
@@ -628,13 +829,14 @@ export async function syncAllCalendarReminders(input: {
         continue;
       }
 
-      const created = await importExternalCalendarEvent({
+      const importResult = await importExternalCalendarEvent({
         sql: input.sql,
         userId: input.userId,
         provider: input.provider,
         event,
       });
-      if (created) imported += 1;
+      if (importResult === 'created') imported += 1;
+      else if (importResult === 'linked') deduplicated += 1;
       else skipped += 1;
     }
 
@@ -651,6 +853,7 @@ export async function syncAllCalendarReminders(input: {
     pushed,
     imported,
     skipped,
+    deduplicated,
     failed,
     errors: Array.from(new Set(errors)).slice(0, 5),
   };

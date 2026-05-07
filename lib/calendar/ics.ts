@@ -6,6 +6,7 @@ export interface CalendarTask {
   title: string;
   description?: string | null;
   dueDate: string | Date;
+  endDate?: string | Date | null;
   priority: string;
   category?: string | null;
   tags?: string[] | null;
@@ -147,7 +148,10 @@ function buildTaskEvent(task: CalendarTask, dtstamp: string): string[] | null {
     lines.push(`DTSTART;VALUE=DATE:${start}`);
     lines.push(`DTEND;VALUE=DATE:${addOneCalendarDay(start)}`);
   } else {
-    const endDate = new Date(dueDate.getTime() + 30 * 60 * 1000);
+    const configuredEndDate = task.endDate ? new Date(task.endDate) : null;
+    const endDate = configuredEndDate && !Number.isNaN(configuredEndDate.getTime()) && configuredEndDate > dueDate
+      ? configuredEndDate
+      : new Date(dueDate.getTime() + 30 * 60 * 1000);
     lines.push(`DTSTART;TZID=${CALENDAR_TIME_ZONE}:${formatZonedDateTime(dueDate)}`);
     lines.push(`DTEND;TZID=${CALENDAR_TIME_ZONE}:${formatZonedDateTime(endDate)}`);
     lines.push('BEGIN:VALARM');

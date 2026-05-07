@@ -55,6 +55,10 @@ function getGoogleCalendarConfig() {
 
 function buildGoogleEventPayload(event: CalendarEventInput) {
   const dueDate = new Date(event.dueDate);
+  const endDate = event.endDate ? new Date(event.endDate) : null;
+  const safeEndDate = endDate && !Number.isNaN(endDate.getTime()) && endDate > dueDate
+    ? endDate
+    : addMinutes(dueDate, 30);
 
   if (isDateOnlyDueDate(event.dueDate)) {
     return {
@@ -78,7 +82,7 @@ function buildGoogleEventPayload(event: CalendarEventInput) {
       timeZone: LEMBRETO_TIME_ZONE,
     },
     end: {
-      dateTime: addMinutes(dueDate, 30).toISOString(),
+      dateTime: safeEndDate.toISOString(),
       timeZone: LEMBRETO_TIME_ZONE,
     },
     reminders: {

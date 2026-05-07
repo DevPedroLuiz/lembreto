@@ -56,6 +56,10 @@ function getOutlookConfig() {
 
 function buildOutlookEventPayload(event: CalendarEventInput) {
   const dueDate = new Date(event.dueDate);
+  const endDate = event.endDate ? new Date(event.endDate) : null;
+  const safeEndDate = endDate && !Number.isNaN(endDate.getTime()) && endDate > dueDate
+    ? endDate
+    : addMinutes(dueDate, 30);
 
   if (isDateOnlyDueDate(event.dueDate)) {
     return {
@@ -90,7 +94,7 @@ function buildOutlookEventPayload(event: CalendarEventInput) {
       timeZone: 'UTC',
     },
     end: {
-      dateTime: addMinutes(dueDate, 30).toISOString(),
+      dateTime: safeEndDate.toISOString(),
       timeZone: 'UTC',
     },
     categories: [event.category, ...event.tags].filter(Boolean),

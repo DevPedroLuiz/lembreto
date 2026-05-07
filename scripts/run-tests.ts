@@ -425,6 +425,7 @@ async function main() {
         pushed: number;
         imported: number;
         skipped: number;
+        deduplicated: number;
         failed: number;
         errors: string[];
       };
@@ -435,6 +436,7 @@ async function main() {
       pushed: 0,
       imported: 0,
       skipped: 0,
+      deduplicated: 0,
       failed: 1,
       errors: ['Conecte o Google Calendar antes de sincronizar.'],
     });

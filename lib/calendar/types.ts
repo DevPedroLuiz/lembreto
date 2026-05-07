@@ -36,6 +36,7 @@ export interface CalendarTaskForSync {
   title: string;
   description: string;
   dueDate: string | null;
+  endDate: string | null;
   priority: TaskPriority;
   category: string;
   tags: string[];
@@ -57,6 +58,7 @@ export interface CalendarEventInput {
   title: string;
   description: string;
   dueDate: string;
+  endDate?: string | null;
   category: string;
   tags: string[];
 }

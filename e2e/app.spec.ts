@@ -141,7 +141,7 @@ async function createTask(page: Page, title: string, options?: { time?: string }
     await page.getByTestId('task-time-input').fill(options.time);
   }
   await page.getByTestId('task-priority-select').selectOption('high');
-  await page.getByTestId('task-category-select').selectOption('Trabalho');
+  await page.getByTestId('task-category-select').selectOption('Geral');
   await page.getByTestId('task-submit-button').click();
 }
 
@@ -227,6 +227,58 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
+  test('uses the configured default time when a reminder is saved without time', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('sidebar-settings-button').click();
+      await page.getByTestId('settings-nav-organization').click();
+      await page.getByTestId('settings-no-time-hours-input').fill('2');
+      await page.getByTestId('settings-no-time-minutes-input').fill('30');
+      await page.getByRole('button', { name: /fechar configura/i }).click();
+
+      await createTask(page, 'Sem horário usa padrão');
+      const task = taskCard(page, 'Sem horário usa padrão');
+      await expect(task.getByTestId('task-time-badge')).toHaveText('02:30');
+      await expect(task.getByTestId('task-all-day-badge')).toHaveCount(0);
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('requires an end time for work reminders', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await page.getByTestId('task-title-input').fill('Reunião de trabalho');
+      await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      await page.getByTestId('task-time-input').fill('09:00');
+      await page.getByTestId('task-category-select').selectOption('Trabalho');
+      await expect(page.getByTestId('task-submit-button')).toBeDisabled();
+      await expect(page.getByTestId('task-date-help')).toContainText('Horário final obrigatório');
+
+      await page.getByTestId('task-end-time-input').fill('10:00');
+      await expect(page.getByTestId('task-submit-button')).toBeEnabled();
+      await page.getByTestId('task-submit-button').click();
+
+      await page.getByTestId('sidebar-tasks').click();
+      const task = taskCard(page, 'Reunião de trabalho');
+      await expect(task).toBeVisible();
+      await expect(task.getByTestId('task-time-badge')).toHaveText('09:00 - 10:00');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('creates recurring reminders across a chosen date range', async ({ page }) => {
     const user = buildE2ETestUser();
     const nextMonday = nextWeekday(new Date(), 1);
@@ -282,10 +334,14 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-title-input').fill('Consulta de rotina');
       await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)));
 
-      await page.getByTestId('task-category-select').selectOption('Saúde');
+      await page.getByTestId('task-category-search-input').fill('saude');
+      await expect(page.getByTestId('task-category-select')).toHaveValue('Saúde');
       await page.getByTestId('task-tag-input').fill('Consulta');
       await page.getByTestId('task-tag-add-button').click();
       await expect(page.getByTestId('task-tag-chip')).toContainText('Consulta');
+      await page.getByTestId('task-tag-input').fill('Retorno');
+      await page.getByTestId('task-tag-add-button').click();
+      await expect(page.getByTestId('task-tag-chip').filter({ hasText: 'Retorno' })).toBeVisible();
 
       await page.getByTestId('task-submit-button').click();
 
@@ -293,6 +349,11 @@ test.describe('Lembreto critical flows', () => {
       await expect(createdTask).toBeVisible();
       await expect(createdTask).toContainText('Saúde');
       await expect(createdTask).toContainText('Consulta');
+
+      await page.getByTestId('sidebar-tasks').click();
+      await page.getByTestId('new-task-button').click();
+      await expect(page.getByTestId('task-tag-suggestion-retorno')).toBeVisible();
+      await page.getByRole('button', { name: /fechar formulário de lembrete/i }).click();
 
       await createdTask.click();
       const taskDetailsDialog = page.getByTestId('task-details-dialog');
@@ -622,8 +683,8 @@ test.describe('Lembreto critical flows', () => {
       await createTask(page, 'Validar token rotacionado');
       const rotatedTokenTask = taskCard(page, 'Validar token rotacionado');
       await expect(rotatedTokenTask).toBeVisible();
-      await expect(rotatedTokenTask.getByTestId('task-time-badge')).toHaveCount(0);
-      await expect(rotatedTokenTask.getByTestId('task-due-badge')).toHaveAttribute('title', 'Dia todo');
+      await expect(rotatedTokenTask.getByTestId('task-time-badge')).toHaveText('01:00');
+      await expect(rotatedTokenTask.getByTestId('task-all-day-badge')).toHaveCount(0);
 
       await page.getByTestId('sidebar-logout').click();
       await expect(page.getByTestId('auth-submit-button')).toBeVisible();

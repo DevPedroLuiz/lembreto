@@ -4,6 +4,7 @@ export type TaskCreatePayload = {
   title: string;
   description: string;
   dueDate: string;
+  endDate?: string | null;
   priority: Priority;
   category: string;
   tags: string[];
@@ -99,6 +100,7 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
     title: item.payload.title,
     description: item.payload.description,
     dueDate: item.payload.dueDate,
+    endDate: item.payload.endDate ?? null,
     priority: item.payload.priority,
     category: item.payload.category,
     tags: item.payload.tags,

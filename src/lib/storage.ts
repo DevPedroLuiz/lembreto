@@ -17,6 +17,7 @@ export interface AppConfig {
   taskDateFilterMode?: string;
   taskDateFilterStart?: string;
   taskDateFilterEnd?: string;
+  noTimeReminderMinutes?: number;
 }
 
 export const LS = {

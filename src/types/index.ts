@@ -26,6 +26,7 @@ export interface Task {
   title: string;
   description: string;
   dueDate: string;
+  endDate?: string | null;
   priority: Priority;
   category: string;
   tags: string[];
@@ -57,6 +58,7 @@ export interface CalendarSyncAllResult {
   pushed: number;
   imported: number;
   skipped: number;
+  deduplicated: number;
   failed: number;
   errors: string[];
 }

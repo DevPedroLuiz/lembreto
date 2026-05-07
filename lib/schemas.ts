@@ -88,16 +88,34 @@ export const createTaskSchema = z.object({
   title: titleSchema,
   description: descriptionSchema.default(''),
   dueDate: dueDateSchema.nullable().optional(),
+  endDate: dueDateSchema.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
   suppressHolidayNotifications: z.boolean().default(false),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' && !value.endDate) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['endDate'],
+      message: 'Horário final obrigatório para categoria Trabalho',
+    });
+  }
+
+  if (value.dueDate && value.endDate && Date.parse(value.endDate) <= Date.parse(value.dueDate)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['endDate'],
+      message: 'Horário final precisa ser depois do horário inicial',
+    });
+  }
+});
 
 export const updateTaskSchema = z.object({
   title: titleSchema.optional(),
   description: descriptionSchema.optional(),
   dueDate: dueDateSchema.nullable().optional(),
+  endDate: dueDateSchema.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),

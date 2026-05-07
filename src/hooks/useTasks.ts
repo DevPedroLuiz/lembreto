@@ -266,6 +266,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       title: string;
       description: string;
       dueDate: string | null;
+      endDate: string | null;
       priority: Priority;
       category: string;
       tags: string[];

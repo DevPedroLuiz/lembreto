@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title       TEXT        NOT NULL,
   description TEXT        NOT NULL DEFAULT '',
   due_date    TIMESTAMPTZ,
+  end_date    TIMESTAMPTZ,
   priority    TEXT        NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
   category    TEXT        NOT NULL DEFAULT 'Geral',
   suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE,
