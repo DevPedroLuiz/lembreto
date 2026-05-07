@@ -572,8 +572,14 @@ export default function App() {
   }, [activeTab]);
 
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (event: Event) => {
       if (!auth.token) return;
+
+      const failedToken = event instanceof CustomEvent &&
+        typeof event.detail?.token === 'string'
+        ? event.detail.token
+        : null;
+      if (failedToken && failedToken !== auth.token) return;
 
       triggerToastOnly('Sessão encerrada', 'Sua sessão expirou. Faça login novamente.');
       void auth.logout();

@@ -16,7 +16,7 @@ export class ApiError extends Error {
 
 function emitUnauthorizedIfNeeded(status: number, token?: string) {
   if (status !== 401 || !token || typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+  window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, { detail: { token } }));
 }
 
 async function parseJsonSafe(res: Response) {

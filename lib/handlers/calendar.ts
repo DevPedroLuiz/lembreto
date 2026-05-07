@@ -73,15 +73,17 @@ function redirectToSettings(context: HandlerContext, params: Record<string, stri
 
 async function requireCalendarAuth(context: HandlerContext) {
   try {
+    const authorizationHeader = context.request.headers.authorization as string | undefined;
+    if (authorizationHeader) {
+      return await requireAuthFromAuthorizationHeader(context.sql, authorizationHeader);
+    }
+
     const sessionToken = getSessionTokenFromCookieHeader(context.request.headers.cookie as string | undefined);
     if (sessionToken) {
       return await requireAuthFromToken(context.sql, sessionToken);
     }
 
-    return await requireAuthFromAuthorizationHeader(
-      context.sql,
-      context.request.headers.authorization as string | undefined,
-    );
+    return await requireAuthFromAuthorizationHeader(context.sql, authorizationHeader);
   } catch (error) {
     const authFailure = getAuthFailureResponse(error);
     if (authFailure) return json(authFailure.status, { error: authFailure.error });
