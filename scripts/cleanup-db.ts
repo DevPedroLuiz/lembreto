@@ -1,12 +1,8 @@
-import { neon } from '@neondatabase/serverless';
+import { createSqlClient } from '../lib/db.js';
 import { cleanupDatabase } from '../lib/db-maintenance.js';
 import { logInfo, logError } from '../lib/logger.js';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL nao definida.');
-}
-
-const sql = neon(process.env.DATABASE_URL);
+const sql = createSqlClient();
 
 async function cleanup() {
   const result = await cleanupDatabase(sql);

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { neon } from '@neondatabase/serverless';
+import { createSqlClient } from './lib/db.js';
 import { logError, logInfo } from './lib/logger.js';
 import {
   type HandlerContext,
@@ -64,7 +64,7 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = createSqlClient();
 
 function withRequestMeta(req: express.Request, res: express.Response, next: express.NextFunction) {
   const requestId =

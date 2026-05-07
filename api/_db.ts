@@ -1,9 +1,5 @@
-import { neon } from '@neondatabase/serverless';
+import { createSqlClient } from '../lib/db.js';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL não definida nas variáveis de ambiente.');
-}
-
-const sql = neon(process.env.DATABASE_URL);
+const sql = createSqlClient();
 
 export default sql;
