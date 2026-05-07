@@ -78,6 +78,7 @@ export class NotificationReferenceUnavailableError extends Error {
 
 export const UPCOMING_REMINDER_MINUTES = 15;
 export const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
+let ensureNotificationsInfrastructurePromise: Promise<void> | null = null;
 
 function isForeignKeyReferenceError(error: unknown) {
   if (!error || typeof error !== 'object') return false;
@@ -263,66 +264,115 @@ async function sendPushNotificationToUser(
   );
 }
 
+async function hasNotificationsInfrastructure(sql: SqlClient): Promise<boolean> {
+  const rows = await sql`
+    SELECT
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'notifications_enabled'
+      ) AS "hasUserSetting",
+      to_regclass('public.notifications') IS NOT NULL AS "hasNotifications",
+      to_regclass('public.push_subscriptions') IS NOT NULL AS "hasPushSubscriptions",
+      to_regclass('public.idx_notifications_user_created') IS NOT NULL AS "hasCreatedIndex",
+      to_regclass('public.idx_notifications_user_read') IS NOT NULL AS "hasReadIndex",
+      to_regclass('public.idx_notifications_user_dedupe') IS NOT NULL AS "hasDedupeIndex",
+      to_regclass('public.idx_push_subscriptions_user_seen') IS NOT NULL AS "hasPushIndex"
+  `;
+
+  const row = rows[0] as
+    | {
+        hasUserSetting?: boolean;
+        hasNotifications?: boolean;
+        hasPushSubscriptions?: boolean;
+        hasCreatedIndex?: boolean;
+        hasReadIndex?: boolean;
+        hasDedupeIndex?: boolean;
+        hasPushIndex?: boolean;
+      }
+    | undefined;
+
+  return Boolean(
+    row?.hasUserSetting &&
+      row.hasNotifications &&
+      row.hasPushSubscriptions &&
+      row.hasCreatedIndex &&
+      row.hasReadIndex &&
+      row.hasDedupeIndex &&
+      row.hasPushIndex,
+  );
+}
+
 export async function ensureNotificationsInfrastructure(sql: SqlClient) {
-  await sql`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE
-  `;
+  if (!ensureNotificationsInfrastructurePromise) {
+    ensureNotificationsInfrastructurePromise = (async () => {
+      if (await hasNotificationsInfrastructure(sql)) return;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      tone TEXT NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'error')),
-      read BOOLEAN NOT NULL DEFAULT FALSE,
-      target_type TEXT CHECK (target_type IN ('task', 'notifications', 'profile', 'settings')),
-      target_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
-      dedupe_key TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
+      await sql`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE
+      `;
 
-  await sql`
-    ALTER TABLE notifications
-    DROP CONSTRAINT IF EXISTS notifications_dedupe_key_key
-  `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          tone TEXT NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'error')),
+          read BOOLEAN NOT NULL DEFAULT FALSE,
+          target_type TEXT CHECK (target_type IN ('task', 'notifications', 'profile', 'settings')),
+          target_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+          dedupe_key TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
 
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notifications_user_created
-    ON notifications(user_id, created_at DESC)
-  `;
+      await sql`
+        ALTER TABLE notifications
+        DROP CONSTRAINT IF EXISTS notifications_dedupe_key_key
+      `;
 
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notifications_user_read
-    ON notifications(user_id, read, created_at DESC)
-  `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+        ON notifications(user_id, created_at DESC)
+      `;
 
-  await sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
-    ON notifications(user_id, dedupe_key)
-    WHERE dedupe_key IS NOT NULL
-  `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_read
+        ON notifications(user_id, read, created_at DESC)
+      `;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      endpoint TEXT NOT NULL UNIQUE,
-      p256dh TEXT NOT NULL,
-      auth TEXT NOT NULL,
-      expiration_time BIGINT,
-      user_agent TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
+        ON notifications(user_id, dedupe_key)
+        WHERE dedupe_key IS NOT NULL
+      `;
 
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_seen
-    ON push_subscriptions(user_id, last_seen_at DESC)
-  `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          endpoint TEXT NOT NULL UNIQUE,
+          p256dh TEXT NOT NULL,
+          auth TEXT NOT NULL,
+          expiration_time BIGINT,
+          user_agent TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_seen
+        ON push_subscriptions(user_id, last_seen_at DESC)
+      `;
+    })();
+  }
+
+  await ensureNotificationsInfrastructurePromise;
 }
 
 export async function listNotificationsForUser(sql: SqlClient, userId: string) {
