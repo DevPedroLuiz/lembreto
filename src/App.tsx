@@ -1296,7 +1296,6 @@ export default function App() {
       setReschedulingTaskIds((prev) => new Set(prev).add(task.id));
       const updated = await updateTask(task.id, {
         dueDate: buildQuickRescheduleDate(task, preset),
-        status: 'pending',
       });
 
       setSelectedTask(updated);
