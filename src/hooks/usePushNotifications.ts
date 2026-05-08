@@ -27,7 +27,7 @@ interface UsePushNotificationsOptions {
   enabled: boolean;
   pushPublicKey: string | null;
   notificationPermission: NotificationPermission;
-  onPushMessage?: () => void;
+  onPushMessage?: (payload: unknown) => void;
 }
 
 export function usePushNotifications({
@@ -184,7 +184,7 @@ export function usePushNotifications({
 
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'PUSH_NOTIFICATION_RECEIVED') {
-        onPushMessage();
+        onPushMessage(event.data.payload);
       }
     };
 

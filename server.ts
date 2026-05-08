@@ -49,6 +49,7 @@ import {
 } from './lib/handlers/calendar.js';
 import {
   handleNotificationById,
+  handleAlarmSnooze,
   handleNotificationsCollection,
   handleNotificationsCron,
   handleNotificationPushSubscriptions,
@@ -163,6 +164,7 @@ async function startServer() {
   app.put('/api/notifications/settings', run(handleNotificationSettings));
   app.post('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.delete('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
+  app.post('/api/notifications/alarms/:id/snooze', run(handleAlarmSnooze));
   app.put('/api/notifications/:id', run(handleNotificationById));
 
   app.get('/api/calendar/integrations', run(handleCalendarIntegrations));

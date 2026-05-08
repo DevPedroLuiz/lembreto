@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import {
   handleNotificationById,
+  handleAlarmSnooze,
   handleNotificationMarkAllRead,
   handleNotificationPushSubscriptions,
   handleNotificationSettings,
@@ -31,6 +32,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'mark-all-read') {
       return handleNotificationMarkAllRead({ sql, request });
+    }
+
+    if (action === 'alarm-snooze') {
+      return handleAlarmSnooze({ sql, request });
     }
 
     if (notificationId) {

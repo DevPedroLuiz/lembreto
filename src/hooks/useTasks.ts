@@ -272,6 +272,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       tags: string[];
       suppressHolidayNotifications: boolean;
       alarmEnabled: boolean;
+      mutedUntil: string | null;
+      noTimeReminderMinutes: number;
       status: Status;
     }>,
   ) => {
@@ -336,7 +338,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       throw new Error('Aguarde a sincronizacao deste lembrete.');
     }
 
-    const newStatus: Status = task.status === 'pending' ? 'completed' : 'pending';
+    const newStatus: Status = task.status === 'pending' || task.status === 'overdue' ? 'completed' : 'pending';
 
     setTasks((prev) =>
       prev.map((currentTask) => (

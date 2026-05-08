@@ -78,7 +78,7 @@ function buildOutlookEventPayload(event: CalendarEventInput) {
         timeZone: LEMBRETO_TIME_ZONE,
       },
       categories: [event.category, ...event.tags].filter(Boolean),
-      reminderMinutesBeforeStart: 15,
+      reminderMinutesBeforeStart: 0,
       isReminderOn: false,
     };
   }
@@ -98,8 +98,9 @@ function buildOutlookEventPayload(event: CalendarEventInput) {
       timeZone: 'UTC',
     },
     categories: [event.category, ...event.tags].filter(Boolean),
-    reminderMinutesBeforeStart: 15,
-    isReminderOn: true,
+    // O Lembreto mantém o motor oficial de avisos; o Outlook fica como espelho visual.
+    reminderMinutesBeforeStart: 0,
+    isReminderOn: false,
   };
 }
 

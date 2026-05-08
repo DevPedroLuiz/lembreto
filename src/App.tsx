@@ -113,6 +113,7 @@ const ALARM_SNOOZE_MINUTES = 10;
 const ALARM_RING_DURATION_MS = 2 * 60 * 1000;
 
 type ActiveAlarm = {
+  scheduleId?: string;
   taskId: string;
   taskTitle: string;
   dueDate: string;
@@ -446,7 +447,27 @@ export default function App() {
     [noteContextTaskId, tasks],
   );
 
-  const refreshNotificationsFromPush = useCallback(() => {
+  const refreshNotificationsFromPush = useCallback((payload: unknown) => {
+    const data = payload && typeof payload === 'object' && 'data' in payload
+      ? (payload as { data?: Record<string, unknown> }).data
+      : null;
+
+    if (data?.kind === 'alarm' || data?.type === 'alarm') {
+      const taskId = typeof data.taskId === 'string' ? data.taskId : null;
+      const taskTitle = typeof data.taskTitle === 'string' ? data.taskTitle : 'Lembrete';
+      const dueDate = typeof data.dueDate === 'string' ? data.dueDate : new Date().toISOString();
+      if (taskId) {
+        setActiveAlarm({
+          scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+          taskId,
+          taskTitle,
+          dueDate,
+          startedAt: Date.now(),
+        });
+        return;
+      }
+    }
+
     if (!auth.token) return;
     void refreshNotifications(auth.token).catch(() => {
       // best effort sync after a push arrives
@@ -829,6 +850,11 @@ export default function App() {
       // alarm sound is best effort; the visible alarm stays available.
     }
   }, [stopAlarmSound]);
+
+  useEffect(() => {
+    if (!activeAlarm?.scheduleId) return;
+    startAlarmSound();
+  }, [activeAlarm?.scheduleId, startAlarmSound]);
 
   const emitNotification = useCallback((
     title: string,
@@ -1538,6 +1564,7 @@ export default function App() {
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
       alarmEnabled: formAlarmEnabled,
+      noTimeReminderMinutes: configNoTimeReminderMinutes,
       ...(editingTask?.status === 'draft' ? { status: 'pending' as const } : {}),
     };
 
@@ -1622,6 +1649,7 @@ export default function App() {
     formDesc,
     formEndTime,
     formAlarmEnabled,
+    configNoTimeReminderMinutes,
     formPriority,
     formTime,
     formTitle,
@@ -1673,6 +1701,7 @@ export default function App() {
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
       alarmEnabled: formAlarmEnabled,
+      noTimeReminderMinutes: configNoTimeReminderMinutes,
       status: 'draft' as const,
     };
 
@@ -1702,6 +1731,7 @@ export default function App() {
     formDesc,
     formEndTime,
     formAlarmEnabled,
+    configNoTimeReminderMinutes,
     formPriority,
     formSuppressHolidayNotifications,
     formTags,
@@ -1897,11 +1927,38 @@ export default function App() {
 
     const dueDate = parseISO(activeAlarm.dueDate);
     const alarmKey = `${activeAlarm.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
-    alarmSnoozeUntilRef.current.set(alarmKey, Date.now() + ALARM_SNOOZE_MINUTES * 60 * 1000);
+    if (activeAlarm.scheduleId && auth.token) {
+      void apiPost(
+        `/api/notifications/alarms/${activeAlarm.scheduleId}/snooze`,
+        { minutes: ALARM_SNOOZE_MINUTES },
+        auth.token,
+      ).catch(() => {
+        alarmSnoozeUntilRef.current.set(alarmKey, Date.now() + ALARM_SNOOZE_MINUTES * 60 * 1000);
+      });
+    } else {
+      alarmSnoozeUntilRef.current.set(alarmKey, Date.now() + ALARM_SNOOZE_MINUTES * 60 * 1000);
+    }
     stopAlarmSound();
     setActiveAlarm(null);
     triggerToastOnly('Alarme adiado', `Vamos tocar novamente em ${ALARM_SNOOZE_MINUTES} minutos.`);
-  }, [activeAlarm, stopAlarmSound, triggerToastOnly]);
+  }, [activeAlarm, auth.token, stopAlarmSound, triggerToastOnly]);
+
+  const completeActiveAlarmTask = useCallback(() => {
+    if (!activeAlarm) return;
+
+    const taskId = activeAlarm.taskId;
+    stopAlarmSound();
+    setActiveAlarm(null);
+    void updateTask(taskId, { status: 'completed' }).then(() => {
+      triggerToastOnly('Lembrete concluído', 'O alarme foi encerrado e o lembrete foi marcado como concluído.');
+    }).catch((error) => {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível concluir o lembrete.',
+        'error',
+      );
+    });
+  }, [activeAlarm, emitNotification, stopAlarmSound, triggerToastOnly, updateTask]);
 
   const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2368,15 +2425,6 @@ export default function App() {
         startedAt: now,
       });
       startAlarmSound();
-      emitNotification(
-        'Alarme tocando',
-        `"${task.title}" chegou ao horário definido.`,
-        'warning',
-        {
-          target: { type: 'task', taskId: task.id },
-          dedupeKey: `alarm-ringing:${task.id}:${format(new Date(targetTime), 'yyyy-MM-dd-HH-mm')}`,
-        },
-      );
       alarmAutoCloseTimerRef.current = window.setTimeout(() => {
         alarmDismissedKeysRef.current.add(alarmKey);
         stopAlarmSound();
@@ -2386,7 +2434,6 @@ export default function App() {
     }
   }, [
     activeAlarm,
-    emitNotification,
     notificationClock,
     notificationsEnabled,
     shouldSuppressHolidayNotification,
@@ -3359,7 +3406,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
               <button
                 type="button"
                 data-testid="active-alarm-snooze"
@@ -3375,6 +3422,14 @@ export default function App() {
                 className="action-primary justify-center"
               >
                 Fechar alarme
+              </button>
+              <button
+                type="button"
+                data-testid="active-alarm-complete"
+                onClick={completeActiveAlarmTask}
+                className="action-primary justify-center"
+              >
+                Concluir
               </button>
             </div>
           </motion.div>

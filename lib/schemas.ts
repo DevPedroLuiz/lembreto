@@ -3,6 +3,7 @@ import { validateAvatarDataUrl } from './avatar.js';
 import {
   CALENDAR_PROVIDERS,
   NOTE_MODES,
+  NOTIFICATION_SCHEDULE_KINDS,
   NOTIFICATION_TONES,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -23,6 +24,8 @@ const dueDateSchema = z.string().refine(
   (value) => !Number.isNaN(Date.parse(value)),
   'Data inválida',
 );
+const optionalDateSchema = dueDateSchema.nullable().optional();
+
 const avatarSchema = z.string().superRefine((value, ctx) => {
   const result = validateAvatarDataUrl(value);
   if (!result.valid) {
@@ -87,13 +90,15 @@ export const profileUpdateSchema = z.object({
 export const createTaskSchema = z.object({
   title: titleSchema,
   description: descriptionSchema.default(''),
-  dueDate: dueDateSchema.nullable().optional(),
-  endDate: dueDateSchema.nullable().optional(),
+  dueDate: optionalDateSchema,
+  endDate: optionalDateSchema,
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
   suppressHolidayNotifications: z.boolean().default(false),
   alarmEnabled: z.boolean().default(false),
+  mutedUntil: optionalDateSchema,
+  noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
   status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
   if (
@@ -121,13 +126,15 @@ export const createTaskSchema = z.object({
 export const updateTaskSchema = z.object({
   title: titleSchema.optional(),
   description: descriptionSchema.optional(),
-  dueDate: dueDateSchema.nullable().optional(),
-  endDate: dueDateSchema.nullable().optional(),
+  dueDate: optionalDateSchema,
+  endDate: optionalDateSchema,
   priority: z.enum(TASK_PRIORITIES).optional(),
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
   suppressHolidayNotifications: z.boolean().optional(),
   alarmEnabled: z.boolean().optional(),
+  mutedUntil: optionalDateSchema,
+  noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
   status: z.enum(TASK_STATUSES).optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
@@ -175,6 +182,7 @@ export const createNotificationSchema = z.object({
   message: z.string().trim().min(1, 'Mensagem obrigatória').max(500, 'Mensagem muito longa'),
   tone: z.enum(NOTIFICATION_TONES).default('info'),
   target: notificationTargetSchema.optional(),
+  kind: z.enum(NOTIFICATION_SCHEDULE_KINDS).optional(),
   dedupeKey: z.string().trim().max(255, 'Chave de deduplicação muito longa').optional(),
 }).strict();
 
@@ -198,6 +206,10 @@ export const pushSubscriptionSchema = z.object({
 
 export const deletePushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url('Endpoint de push inválido').max(4096, 'Endpoint de push muito longo'),
+}).strict();
+
+export const snoozeAlarmSchema = z.object({
+  minutes: z.number().int().min(1).max(24 * 60).default(10),
 }).strict();
 
 export const calendarProviderSchema = z.enum(CALENDAR_PROVIDERS);

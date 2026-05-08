@@ -4,7 +4,6 @@ import {
   clearNotificationsForUser,
   createNotification,
   deletePushSubscription,
-  generateScheduledNotifications,
   getNotificationsEnabled,
   getPushPublicKey,
   isPushConfigured,
@@ -16,12 +15,17 @@ import {
   upsertPushSubscription,
 } from '../notifications.js';
 import {
+  processNotificationSchedules,
+  snoozeAlarmSchedule,
+} from '../notification-schedules.js';
+import {
   createNotificationSchema,
   deletePushSubscriptionSchema,
   formatZodError,
   pushSubscriptionSchema,
   updateNotificationSchema,
   updateNotificationSettingsSchema,
+  snoozeAlarmSchema,
 } from '../schemas.js';
 import {
   empty,
@@ -271,6 +275,33 @@ export async function handleNotificationPushSubscriptions(context: HandlerContex
   return methodNotAllowed();
 }
 
+export async function handleAlarmSnooze(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireNotificationAuth(context);
+  if ('status' in auth) return auth;
+
+  const { request, sql } = context;
+  if (request.method !== 'POST') return methodNotAllowed();
+
+  const scheduleId = resolveNotificationId(context);
+  if (!scheduleId) {
+    return json(400, { error: 'Alarme nÃ£o encontrado' });
+  }
+
+  const parsed = snoozeAlarmSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    return json(400, { error: formatZodError(parsed.error) });
+  }
+
+  try {
+    const result = await snoozeAlarmSchedule(sql, auth.user.id, scheduleId, parsed.data.minutes);
+    if (!result) return json(404, { error: 'Alarme nÃ£o encontrado' });
+    return json(201, result);
+  } catch (error) {
+    logError('alarm_snooze_failed', error, getRequestMeta(request, { userId: auth.user.id, scheduleId }));
+    return json(500, { error: 'Erro ao adiar alarme' });
+  }
+}
+
 export async function handleNotificationsCron(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
 
@@ -281,10 +312,9 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
-    const result = await generateScheduledNotifications(sql);
+    const result = await processNotificationSchedules(sql);
     logInfo('cron_notifications_completed', getRequestMeta(request, {
-      scannedTasks: result.scannedTasks,
-      createdNotifications: result.createdNotifications,
+      ...result,
     }));
     return json(200, { ok: true, ...result });
   } catch (error) {

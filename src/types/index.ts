@@ -32,6 +32,16 @@ export interface Task {
   tags: string[];
   suppressHolidayNotifications: boolean;
   alarmEnabled: boolean;
+  reminderMode?: 'timed' | 'floating';
+  expiresAt?: string | null;
+  overdueSince?: string | null;
+  overdueExpiresAt?: string | null;
+  completedAt?: string | null;
+  completionSource?: 'user' | 'system' | 'calendar_sync' | null;
+  deletedAt?: string | null;
+  mutedUntil?: string | null;
+  autoDeletedReason?: string | null;
+  autoDeletedAt?: string | null;
   status: Status;
   createdAt: string;
   syncStatus?: 'pending';
@@ -146,6 +156,7 @@ export interface AppNotification {
   tone: 'info' | 'success' | 'warning' | 'error';
   target?: NotificationTarget;
   dedupeKey?: string;
+  kind?: 'pre_notice' | 'notification' | 'alarm' | 'floating_reminder' | 'overdue_reminder';
 }
 
 export const DEFAULT_CATEGORIES = ['Geral', 'Trabalho', 'Pessoal', 'Estudos'] as const;

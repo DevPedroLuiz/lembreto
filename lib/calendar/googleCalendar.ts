@@ -66,6 +66,10 @@ function buildGoogleEventPayload(event: CalendarEventInput) {
       description: event.description,
       start: { date: formatDateOnly(dueDate) },
       end: { date: formatDateOnly(addMinutes(dueDate, 24 * 60)) },
+      reminders: event.reminders ?? {
+        useDefault: false,
+        overrides: [],
+      },
       extendedProperties: {
         private: {
           source: 'lembreto',
@@ -87,9 +91,7 @@ function buildGoogleEventPayload(event: CalendarEventInput) {
     },
     reminders: {
       useDefault: false,
-      overrides: [
-        { method: 'popup', minutes: 15 },
-      ],
+      overrides: [],
     },
     extendedProperties: {
       private: {

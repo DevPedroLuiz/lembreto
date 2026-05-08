@@ -1,6 +1,10 @@
 import { format } from 'date-fns';
 import webpush from 'web-push';
-import { type NotificationTargetType, type NotificationTone } from './contracts.js';
+import {
+  type NotificationScheduleKind,
+  type NotificationTargetType,
+  type NotificationTone,
+} from './contracts.js';
 import { isHolidayForLocationOnDate } from './holidays.js';
 import type { SqlClient } from './handlers/core.js';
 import { logError, logInfo, logWarn } from './logger.js';
@@ -19,6 +23,7 @@ export interface AppNotificationRecord {
   tone: NotificationTone;
   target?: NotificationTarget | { type: Exclude<NotificationTargetType, 'task'> };
   dedupeKey?: string;
+  kind?: NotificationScheduleKind;
 }
 
 interface NotificationRow {
@@ -31,6 +36,8 @@ interface NotificationRow {
   targetType: NotificationTargetType | null;
   targetTaskId: string | null;
   dedupeKey: string | null;
+  sourceScheduleId?: string | null;
+  kind?: NotificationScheduleKind | null;
 }
 
 interface PushSubscriptionRow {
@@ -57,6 +64,8 @@ export interface CreateNotificationInput {
   tone: NotificationTone;
   target?: AppNotificationRecord['target'];
   dedupeKey?: string;
+  sourceScheduleId?: string | null;
+  kind?: NotificationScheduleKind;
 }
 
 export interface CreateNotificationResult {
@@ -115,6 +124,7 @@ export function mapNotificationRow(row: NotificationRow): AppNotificationRecord 
     tone: row.tone,
     target: buildTarget(row),
     dedupeKey: row.dedupeKey ?? undefined,
+    kind: row.kind ?? undefined,
   };
 }
 
@@ -179,6 +189,7 @@ function buildPushPayload(notification: AppNotificationRecord) {
       target: notification.target ?? { type: 'notifications' },
       tone: notification.tone,
       createdAt: notification.createdAt,
+      kind: notification.kind,
     },
   };
 }
@@ -199,6 +210,15 @@ async function sendPushNotificationToUser(
   userId: string,
   notification: AppNotificationRecord,
 ) {
+  await sendPushPayloadToUser(sql, userId, buildPushPayload(notification), notification.id);
+}
+
+export async function sendPushPayloadToUser(
+  sql: SqlClient,
+  userId: string,
+  payload: unknown,
+  notificationId?: string,
+) {
   const client = getWebPushClient();
   if (!client) return;
 
@@ -217,7 +237,7 @@ async function sendPushNotificationToUser(
   const subscriptions = rows as unknown as PushSubscriptionRow[];
   if (subscriptions.length === 0) return;
 
-  const payload = JSON.stringify(buildPushPayload(notification));
+  const serializedPayload = JSON.stringify(payload);
 
   await Promise.allSettled(
     subscriptions.map(async (subscription) => {
@@ -230,7 +250,7 @@ async function sendPushNotificationToUser(
               auth: subscription.auth,
             },
           },
-          payload,
+          serializedPayload,
         );
       } catch (error) {
         const statusCode =
@@ -257,7 +277,7 @@ async function sendPushNotificationToUser(
         logError('push_notification_send_failed', error, {
           userId,
           endpoint: subscription.endpoint,
-          notificationId: notification.id,
+          notificationId,
         });
       }
     }),
@@ -276,6 +296,13 @@ async function hasNotificationsInfrastructure(sql: SqlClient): Promise<boolean> 
       ) AS "hasUserSetting",
       to_regclass('public.notifications') IS NOT NULL AS "hasNotifications",
       to_regclass('public.push_subscriptions') IS NOT NULL AS "hasPushSubscriptions",
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'notifications'
+          AND column_name = 'kind'
+      ) AS "hasNotificationKind",
       to_regclass('public.idx_notifications_user_created') IS NOT NULL AS "hasCreatedIndex",
       to_regclass('public.idx_notifications_user_read') IS NOT NULL AS "hasReadIndex",
       to_regclass('public.idx_notifications_user_dedupe') IS NOT NULL AS "hasDedupeIndex",
@@ -287,6 +314,7 @@ async function hasNotificationsInfrastructure(sql: SqlClient): Promise<boolean> 
         hasUserSetting?: boolean;
         hasNotifications?: boolean;
         hasPushSubscriptions?: boolean;
+        hasNotificationKind?: boolean;
         hasCreatedIndex?: boolean;
         hasReadIndex?: boolean;
         hasDedupeIndex?: boolean;
@@ -295,9 +323,10 @@ async function hasNotificationsInfrastructure(sql: SqlClient): Promise<boolean> 
     | undefined;
 
   return Boolean(
-    row?.hasUserSetting &&
+      row?.hasUserSetting &&
       row.hasNotifications &&
       row.hasPushSubscriptions &&
+      row.hasNotificationKind &&
       row.hasCreatedIndex &&
       row.hasReadIndex &&
       row.hasDedupeIndex &&
@@ -333,6 +362,18 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
       await sql`
         ALTER TABLE notifications
         DROP CONSTRAINT IF EXISTS notifications_dedupe_key_key
+      `;
+
+      await sql`
+        ALTER TABLE notifications
+        ADD COLUMN IF NOT EXISTS source_schedule_id UUID
+      `;
+
+      await sql`
+        ALTER TABLE notifications
+        ADD COLUMN IF NOT EXISTS kind TEXT CHECK (
+          kind IN ('pre_notice', 'notification', 'alarm', 'floating_reminder', 'overdue_reminder')
+        )
       `;
 
       await sql`
@@ -388,7 +429,8 @@ export async function listNotificationsForUser(sql: SqlClient, userId: string) {
       tone,
       target_type AS "targetType",
       target_task_id AS "targetTaskId",
-      dedupe_key AS "dedupeKey"
+      dedupe_key AS "dedupeKey",
+      kind
     FROM notifications
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
@@ -493,7 +535,7 @@ export async function createNotification(
 
   try {
     inserted = await sql`
-      INSERT INTO notifications (user_id, title, message, tone, target_type, target_task_id, dedupe_key)
+      INSERT INTO notifications (user_id, title, message, tone, target_type, target_task_id, dedupe_key, source_schedule_id, kind)
       VALUES (
         ${input.userId},
         ${input.title},
@@ -501,7 +543,9 @@ export async function createNotification(
         ${input.tone},
         ${targetType},
         ${targetTaskId},
-        ${input.dedupeKey ?? null}
+        ${input.dedupeKey ?? null},
+        ${input.sourceScheduleId ?? null},
+        ${input.kind ?? null}
       )
       ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
       RETURNING
@@ -513,7 +557,8 @@ export async function createNotification(
         tone,
         target_type AS "targetType",
         target_task_id AS "targetTaskId",
-        dedupe_key AS "dedupeKey"
+        dedupe_key AS "dedupeKey",
+        kind
     `;
   } catch (error) {
     if (isForeignKeyReferenceError(error)) {
@@ -554,7 +599,8 @@ export async function createNotification(
       tone,
       target_type AS "targetType",
       target_task_id AS "targetTaskId",
-      dedupe_key AS "dedupeKey"
+      dedupe_key AS "dedupeKey",
+      kind
     FROM notifications
     WHERE user_id = ${input.userId} AND dedupe_key = ${input.dedupeKey}
     LIMIT 1
@@ -591,7 +637,8 @@ export async function markNotificationReadState(
       tone,
       target_type AS "targetType",
       target_task_id AS "targetTaskId",
-      dedupe_key AS "dedupeKey"
+      dedupe_key AS "dedupeKey",
+      kind
   `;
 
   return rows.length > 0 ? mapNotificationRow(rows[0] as unknown as NotificationRow) : null;

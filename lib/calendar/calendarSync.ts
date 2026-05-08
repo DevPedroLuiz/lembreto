@@ -4,6 +4,7 @@ import type { SqlClient } from '../handlers/core.js';
 import { signCalendarOAuthState, verifyCalendarOAuthState } from '../jwt.js';
 import { buildCalendarEventInput, LEMBRETO_TIME_ZONE } from './eventPayload.js';
 import { decryptCalendarToken, encryptCalendarToken } from './crypto.js';
+import { syncTaskNotificationSchedules } from '../notification-schedules.js';
 import { googleCalendarClient, buildGoogleCalendarAuthorizationUrl } from './googleCalendar.js';
 import { outlookCalendarClient, buildOutlookCalendarAuthorizationUrl } from './outlookCalendar.js';
 import type {
@@ -91,6 +92,7 @@ export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
       `;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_last_error TEXT`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_synced_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
       await sql`
         CREATE INDEX IF NOT EXISTS idx_tasks_external_calendar
         ON tasks(user_id, external_calendar_provider, external_calendar_event_id)
@@ -374,7 +376,9 @@ export async function getTaskForCalendarSync(
       external_calendar_last_error AS "externalCalendarLastError",
       external_calendar_synced_at AS "externalCalendarSyncedAt"
     FROM tasks
-    WHERE id = ${taskId} AND user_id = ${userId}
+    WHERE id = ${taskId}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
   `;
 
   const row = rows[0];
@@ -485,6 +489,8 @@ async function listSyncableTaskIds(sql: SqlClient, userId: string): Promise<stri
     FROM tasks
     WHERE user_id = ${userId}
       AND due_date IS NOT NULL
+      AND deleted_at IS NULL
+      AND status <> 'cancelled'
     ORDER BY created_at ASC
   `;
 
@@ -509,6 +515,8 @@ async function cleanupDuplicateLocalTasks(input: {
     FROM tasks
     WHERE user_id = ${input.userId}
       AND due_date IS NOT NULL
+      AND deleted_at IS NULL
+      AND status <> 'cancelled'
     ORDER BY created_at ASC
   `;
 
@@ -574,7 +582,10 @@ async function cleanupDuplicateLocalTasks(input: {
       }
 
       await input.sql`
-        DELETE FROM tasks
+        UPDATE tasks
+        SET
+          status = 'cancelled',
+          deleted_at = COALESCE(deleted_at, NOW())
         WHERE id = ${duplicate.id}
           AND user_id = ${input.userId}
           AND id <> ${keeper.id}
@@ -624,6 +635,8 @@ async function findMatchingTaskForExternalEvent(input: {
     FROM tasks
     WHERE user_id = ${input.userId}
       AND due_date IS NOT NULL
+      AND deleted_at IS NULL
+      AND status <> 'cancelled'
     ORDER BY created_at ASC
   `;
 
@@ -668,6 +681,7 @@ async function linkExternalEventToExistingTask(input: {
       external_calendar_synced_at = NOW()
     WHERE id = ${input.taskId}
       AND user_id = ${input.userId}
+      AND deleted_at IS NULL
   `;
 }
 
@@ -712,7 +726,7 @@ async function importExternalCalendarEvent(input: {
     return 'linked';
   }
 
-  await input.sql`
+  const inserted = await input.sql`
     INSERT INTO tasks (
       user_id,
       title,
@@ -745,7 +759,11 @@ async function importExternalCalendarEvent(input: {
       ${null},
       NOW()
     )
+    RETURNING id
   `;
+  if (inserted[0]?.id) {
+    await syncTaskNotificationSchedules(input.sql, input.userId, String(inserted[0].id));
+  }
 
   return 'created';
 }

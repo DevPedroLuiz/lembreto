@@ -14,6 +14,11 @@ import {
 } from '../holidays.js';
 import { logError, logInfo } from '../logger.js';
 import {
+  cancelPendingNotificationSchedulesForTask,
+  ensureNotificationSchedulingInfrastructure,
+  syncTaskNotificationSchedules,
+} from '../notification-schedules.js';
+import {
   createTaskCategorySchema,
   createTaskSchema,
   createTaskTagSchema,
@@ -292,6 +297,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
 
   await ensureTaskTaxonomySchema(sql);
   await ensureCalendarIntegrationSchema(sql);
+  await ensureNotificationSchedulingInfrastructure(sql);
 
   if (request.method === 'GET') {
     try {
@@ -308,6 +314,16 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           alarm_enabled AS "alarmEnabled",
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
           status,
           history,
           created_at  AS "createdAt",
@@ -318,6 +334,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           external_calendar_synced_at AS "externalCalendarSyncedAt"
         FROM tasks
         WHERE user_id = ${user.id}
+          AND deleted_at IS NULL
+          AND status <> 'cancelled'
         ORDER BY created_at DESC
       `;
       return json(200, rows);
@@ -343,6 +361,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       status,
       suppressHolidayNotifications,
       alarmEnabled,
+      mutedUntil,
+      noTimeReminderMinutes,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
     const history = JSON.stringify([
@@ -370,6 +390,10 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           tags,
           suppress_holiday_notifications,
           alarm_enabled,
+          reminder_mode,
+          expires_at,
+          muted_until,
+          floating_interval_minutes,
           status,
           history
         )
@@ -384,6 +408,10 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${tags},
           ${suppressHolidayNotifications},
           ${alarmEnabled},
+          ${dueDate ? 'timed' : 'floating'},
+          ${dueDate ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)},
+          ${mutedUntil || null},
+          ${dueDate ? null : noTimeReminderMinutes ?? 60},
           ${status},
           ${history}::jsonb
         )
@@ -399,7 +427,17 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           alarm_enabled AS "alarmEnabled",
-          status,
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
+         status,
           history,
           created_at  AS "createdAt",
           external_calendar_provider AS "externalCalendarProvider",
@@ -410,6 +448,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       `;
 
       await syncTaskTaxonomy(sql, user.id, category, tags);
+      await syncTaskNotificationSchedules(sql, user.id, String(rows[0].id), {
+        floatingIntervalMinutes: noTimeReminderMinutes ?? null,
+      });
       if (status === 'pending') {
         await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       }
@@ -425,8 +466,18 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           priority,
           category,
          tags,
-         suppress_holiday_notifications AS "suppressHolidayNotifications",
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
           alarm_enabled AS "alarmEnabled",
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
          status,
           history,
           created_at  AS "createdAt",
@@ -458,6 +509,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
 
   await ensureTaskTaxonomySchema(sql);
   await ensureCalendarIntegrationSchema(sql);
+  await ensureNotificationSchedulingInfrastructure(sql);
 
   if (!id) {
     return json(400, { error: 'Tarefa não encontrada' });
@@ -479,6 +531,8 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         status,
         alarmEnabled,
         suppressHolidayNotifications,
+        mutedUntil,
+        noTimeReminderMinutes,
       } = parsed.data;
       const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
 
@@ -495,6 +549,8 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           status,
           alarm_enabled,
           suppress_holiday_notifications,
+          muted_until,
+          floating_interval_minutes,
           history
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
       `;
@@ -517,6 +573,10 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           ? suppressHolidayNotifications
           : cur.suppress_holiday_notifications,
         alarmEnabled: alarmEnabled !== undefined ? alarmEnabled : cur.alarm_enabled,
+        mutedUntil: mutedUntil !== undefined ? mutedUntil || null : cur.muted_until,
+        floatingIntervalMinutes: noTimeReminderMinutes !== undefined
+          ? noTimeReminderMinutes
+          : cur.floating_interval_minutes,
         status: status !== undefined ? status : cur.status,
       };
       const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined || status !== undefined;
@@ -550,7 +610,26 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           tags        = ${nextValues.tags},
           suppress_holiday_notifications = ${nextValues.suppressHolidayNotifications},
           alarm_enabled = ${nextValues.alarmEnabled},
+          reminder_mode = ${nextValues.dueDate ? 'timed' : 'floating'},
+          expires_at = CASE
+            WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN COALESCE(expires_at, NOW() + INTERVAL '24 hours')
+            ELSE NULL
+          END,
+          overdue_since = CASE WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL ELSE overdue_since END,
+          overdue_expires_at = CASE WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL ELSE overdue_expires_at END,
+          muted_until = ${nextValues.mutedUntil},
+          floating_interval_minutes = ${nextValues.dueDate ? null : nextValues.floatingIntervalMinutes ?? 60},
           status      = ${nextValues.status},
+          completed_at = CASE
+            WHEN ${nextValues.status} = 'completed' THEN COALESCE(completed_at, NOW())
+            WHEN ${nextValues.status} IN ('pending', 'overdue') THEN NULL
+            ELSE completed_at
+          END,
+          completion_source = CASE
+            WHEN ${nextValues.status} = 'completed' THEN COALESCE(completion_source, 'user')
+            WHEN ${nextValues.status} IN ('pending', 'overdue') THEN NULL
+            ELSE completion_source
+          END,
           history     = COALESCE(history, '[]'::jsonb) || COALESCE(${historyUpdate}::jsonb, '[]'::jsonb)
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
@@ -565,6 +644,16 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           alarm_enabled AS "alarmEnabled",
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
           status,
           history,
           created_at  AS "createdAt",
@@ -576,6 +665,13 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       `;
 
       await syncTaskTaxonomy(sql, user.id, categoryValue, tagsValue);
+      if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled' || String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
+        await cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id);
+      } else {
+        await syncTaskNotificationSchedules(sql, user.id, String(rows[0].id), {
+          floatingIntervalMinutes: noTimeReminderMinutes ?? null,
+        });
+      }
       await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
       const syncedRows = await sql`
@@ -591,6 +687,16 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           alarm_enabled AS "alarmEnabled",
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
           status,
           history,
           created_at  AS "createdAt",
@@ -619,7 +725,15 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           task: taskForCalendar,
         });
       }
-      await sql`DELETE FROM tasks WHERE id = ${id} AND user_id = ${user.id}`;
+      await sql`
+        UPDATE tasks
+        SET
+          status = 'cancelled',
+          deleted_at = COALESCE(deleted_at, NOW())
+        WHERE id = ${id}
+          AND user_id = ${user.id}
+      `;
+      await cancelPendingNotificationSchedulesForTask(sql, id, user.id);
       logInfo('task_deleted', getRequestMeta(request, { userId: user.id, taskId: id }));
       return { status: 204 };
     } catch (error) {
@@ -682,6 +796,7 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
   const { request, sql } = context;
 
   try {
+    await ensureNotificationSchedulingInfrastructure(sql);
     const rows = await sql`
       SELECT
         id,
@@ -698,6 +813,7 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
       WHERE user_id = ${user.id}
         AND due_date IS NOT NULL
         AND status = 'pending'
+        AND deleted_at IS NULL
       ORDER BY due_date ASC
     `;
     const calendar = buildTasksIcs(rows as unknown as CalendarTask[]);

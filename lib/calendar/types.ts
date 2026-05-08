@@ -61,6 +61,10 @@ export interface CalendarEventInput {
   endDate?: string | null;
   category: string;
   tags: string[];
+  reminders?: {
+    useDefault: boolean;
+    overrides: Array<Record<string, never>>;
+  };
 }
 
 export interface ExternalCalendarEvent {

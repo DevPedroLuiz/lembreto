@@ -39,5 +39,9 @@ export function buildCalendarEventInput(task: CalendarTaskForSync): CalendarEven
     endDate: task.endDate,
     category: task.category || 'Geral',
     tags: task.tags,
+    reminders: {
+      useDefault: false,
+      overrides: [],
+    },
   };
 }

@@ -10,6 +10,8 @@ export type TaskCreatePayload = {
   tags: string[];
   suppressHolidayNotifications: boolean;
   alarmEnabled?: boolean;
+  mutedUntil?: string | null;
+  noTimeReminderMinutes?: number;
   status?: Status;
 };
 
