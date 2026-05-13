@@ -15,6 +15,7 @@ import {
   upsertPushSubscription,
 } from '../notifications.js';
 import {
+  dismissAlarmSchedule,
   processNotificationSchedules,
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
@@ -299,6 +300,28 @@ export async function handleAlarmSnooze(context: HandlerContext): Promise<Handle
   } catch (error) {
     logError('alarm_snooze_failed', error, getRequestMeta(request, { userId: auth.user.id, scheduleId }));
     return json(500, { error: 'Erro ao adiar alarme' });
+  }
+}
+
+export async function handleAlarmDismiss(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireNotificationAuth(context);
+  if ('status' in auth) return auth;
+
+  const { request, sql } = context;
+  if (request.method !== 'POST') return methodNotAllowed();
+
+  const scheduleId = resolveNotificationId(context);
+  if (!scheduleId) {
+    return json(400, { error: 'Alarme não encontrado' });
+  }
+
+  try {
+    const result = await dismissAlarmSchedule(sql, auth.user.id, scheduleId);
+    if (!result) return json(404, { error: 'Alarme não encontrado' });
+    return json(200, result);
+  } catch (error) {
+    logError('alarm_dismiss_failed', error, getRequestMeta(request, { userId: auth.user.id, scheduleId }));
+    return json(500, { error: 'Erro ao fechar alarme' });
   }
 }
 

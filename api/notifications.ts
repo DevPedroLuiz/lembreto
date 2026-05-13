@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import {
+  handleAlarmDismiss,
   handleNotificationById,
   handleAlarmSnooze,
   handleNotificationMarkAllRead,
@@ -36,6 +37,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'alarm-snooze') {
       return handleAlarmSnooze({ sql, request });
+    }
+
+    if (action === 'alarm-dismiss') {
+      return handleAlarmDismiss({ sql, request });
     }
 
     if (notificationId) {

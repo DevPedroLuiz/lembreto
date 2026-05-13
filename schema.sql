@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS notification_schedules (
   sent_at TIMESTAMPTZ,
   failed_at TIMESTAMPTZ,
   cancelled_at TIMESTAMPTZ,
+  dismissed_at TIMESTAMPTZ,
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -250,6 +251,9 @@ CREATE INDEX IF NOT EXISTS idx_notification_schedules_user_task
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_schedules_dedupe
   ON notification_schedules(user_id, dedupe_key);
+
+ALTER TABLE notification_schedules
+ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ;
 
 ALTER TABLE notifications
 ADD COLUMN IF NOT EXISTS source_schedule_id UUID;
@@ -275,6 +279,10 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_read
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
   ON notifications(user_id, dedupe_key)
   WHERE dedupe_key IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_source_schedule
+  ON notifications(source_schedule_id)
+  WHERE source_schedule_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

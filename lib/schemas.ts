@@ -7,7 +7,6 @@ import {
   NOTIFICATION_TONES,
   TASK_PRIORITIES,
   TASK_STATUSES,
-  requiresWorkEndDateForStatus,
 } from './contracts.js';
 
 const nameSchema = z.string().trim().min(1, 'Nome obrigatório').max(80, 'Nome muito longo');
@@ -26,6 +25,20 @@ const dueDateSchema = z.string().refine(
   'Data inválida',
 );
 const optionalDateSchema = dueDateSchema.nullable().optional();
+const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
+const WORK_END_AFTER_START_MESSAGE = 'Horário final precisa ser depois do horário inicial.';
+
+function normalizeCategoryForValidation(value: string): string {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function isWorkCategory(value: string): boolean {
+  return normalizeCategoryForValidation(value) === 'trabalho';
+}
 
 const avatarSchema = z.string().superRefine((value, ctx) => {
   const result = validateAvatarDataUrl(value);
@@ -102,15 +115,11 @@ export const createTaskSchema = z.object({
   noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
   status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
-  if (
-    requiresWorkEndDateForStatus(value.status) &&
-    value.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
-    !value.endDate
-  ) {
+  if (isWorkCategory(value.category) && (!value.dueDate || !value.endDate)) {
     ctx.addIssue({
       code: 'custom',
-      path: ['endDate'],
-      message: 'Horário final obrigatório para categoria Trabalho',
+      path: !value.dueDate ? ['dueDate'] : ['endDate'],
+      message: WORK_TIME_REQUIRED_MESSAGE,
     });
   }
 
@@ -118,7 +127,7 @@ export const createTaskSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['endDate'],
-      message: 'Horário final precisa ser depois do horário inicial',
+      message: WORK_END_AFTER_START_MESSAGE,
     });
   }
 });

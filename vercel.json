@@ -3,7 +3,8 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "crons": [
-    { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
+    { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/notifications", "schedule": "* * * * *" }
   ],
   "rewrites": [
     { "source": "/api/tasks/metadata", "destination": "/api/tasks?action=metadata" },
@@ -31,6 +32,7 @@
     { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications?action=mark-all-read" },
     { "source": "/api/notifications/push-subscriptions", "destination": "/api/notifications?action=push-subscriptions" },
     { "source": "/api/notifications/alarms/:id/snooze", "destination": "/api/notifications?action=alarm-snooze&id=:id" },
+    { "source": "/api/notifications/alarms/:id/dismiss", "destination": "/api/notifications?action=alarm-dismiss&id=:id" },
     { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
     { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]

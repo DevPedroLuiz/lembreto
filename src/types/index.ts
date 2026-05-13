@@ -156,6 +156,7 @@ export interface AppNotification {
   tone: 'info' | 'success' | 'warning' | 'error';
   target?: NotificationTarget;
   dedupeKey?: string;
+  sourceScheduleId?: string;
   kind?: 'pre_notice' | 'notification' | 'alarm' | 'floating_reminder' | 'overdue_reminder';
 }
 

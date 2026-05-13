@@ -36,7 +36,6 @@ import {
   upsertUserTags,
 } from '../task-taxonomy.js';
 import { signCalendarFeedToken, verifyCalendarFeedToken } from '../jwt.js';
-import { requiresWorkEndDateForStatus } from '../contracts.js';
 import {
   type HandlerContext,
   type HandlerResult,
@@ -61,6 +60,8 @@ const PRIORITY_HISTORY_LABELS: Record<string, string> = {
   medium: 'media',
   high: 'alta',
 };
+const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
+const WORK_END_AFTER_START_MESSAGE = 'Horário final precisa ser depois do horário inicial.';
 
 let taskInfrastructureReady: Promise<void> | null = null;
 
@@ -211,6 +212,18 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter(Boolean)
     : [];
+}
+
+function normalizeCategoryForValidation(value: string): string {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function isWorkCategory(value: string): boolean {
+  return normalizeCategoryForValidation(value) === 'trabalho';
 }
 
 async function syncTaskCalendarBestEffort(
@@ -608,21 +621,18 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           : cur.floating_interval_minutes,
         status: status !== undefined ? status : cur.status,
       };
-      const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined || status !== undefined;
       if (
-        shouldValidateEndDateRequirement &&
-        requiresWorkEndDateForStatus(String(nextValues.status)) &&
-        String(nextValues.category).trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
-        !nextValues.endDate
+        isWorkCategory(String(nextValues.category)) &&
+        (!nextValues.dueDate || !nextValues.endDate)
       ) {
-        return json(400, { error: 'Horário final obrigatório para categoria Trabalho' });
+        return json(400, { error: WORK_TIME_REQUIRED_MESSAGE });
       }
       if (
         nextValues.dueDate &&
         nextValues.endDate &&
         Date.parse(String(nextValues.endDate)) <= Date.parse(String(nextValues.dueDate))
       ) {
-        return json(400, { error: 'Horário final precisa ser depois do horário inicial' });
+        return json(400, { error: WORK_END_AFTER_START_MESSAGE });
       }
       const historyEntry = buildUpdateHistoryEntry(cur, nextValues);
       const historyUpdate = historyEntry ? jsonbParameter(sql, [historyEntry]) : null;

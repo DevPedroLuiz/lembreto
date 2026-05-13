@@ -48,6 +48,7 @@ import {
   handleCalendarTaskSync,
 } from './lib/handlers/calendar.js';
 import {
+  handleAlarmDismiss,
   handleNotificationById,
   handleAlarmSnooze,
   handleNotificationsCollection,
@@ -165,6 +166,7 @@ async function startServer() {
   app.post('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.delete('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));
   app.post('/api/notifications/alarms/:id/snooze', run(handleAlarmSnooze));
+  app.post('/api/notifications/alarms/:id/dismiss', run(handleAlarmDismiss));
   app.put('/api/notifications/:id', run(handleNotificationById));
 
   app.get('/api/calendar/integrations', run(handleCalendarIntegrations));

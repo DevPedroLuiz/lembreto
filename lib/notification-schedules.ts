@@ -332,6 +332,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
       sent_at TIMESTAMPTZ,
       failed_at TIMESTAMPTZ,
       cancelled_at TIMESTAMPTZ,
+      dismissed_at TIMESTAMPTZ,
       error_message TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -340,6 +341,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
   await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_due ON notification_schedules(status, notify_at)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_user_task ON notification_schedules(user_id, task_id)`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_schedules_dedupe ON notification_schedules(user_id, dedupe_key)`;
+  await sql`ALTER TABLE notification_schedules ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ`;
   await ensureNotificationsInfrastructure(sql);
   await sql`
     DO $$
@@ -674,7 +676,10 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
     WITH due AS (
       SELECT id
       FROM notification_schedules
-      WHERE status = 'pending'
+      WHERE (
+          status = 'pending'
+          OR (status = 'processing' AND processing_started_at < NOW() - INTERVAL '10 minutes')
+        )
         AND notify_at <= NOW()
       ORDER BY notify_at ASC
       LIMIT ${limit}
@@ -735,6 +740,30 @@ async function fetchTaskForSchedule(sql: SqlClient, schedule: ScheduleRow): Prom
 }
 
 async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
+  const result = await createNotification(sql, {
+    userId: schedule.userId,
+    title: schedule.title,
+    message: schedule.message,
+    tone: schedule.tone,
+    target: { type: 'task', taskId: schedule.taskId },
+    dedupeKey: schedule.dedupeKey,
+    sourceScheduleId: schedule.id,
+    kind: 'alarm',
+    sendPush: false,
+  });
+
+  if (!result.created) {
+    logInfo('notification_schedule_deduplicated', {
+      userId: schedule.userId,
+      taskId: schedule.taskId,
+      scheduleId: schedule.id,
+      kind: schedule.kind,
+      dedupeKey: schedule.dedupeKey,
+      notificationId: result.notification.id,
+    });
+    return false;
+  }
+
   await sendPushPayloadToUser(sql, schedule.userId, {
     title: schedule.title,
     body: schedule.message,
@@ -742,9 +771,13 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
     icon: '/icon.png',
     badge: '/icon.png',
     data: {
+      id: result.notification.id,
+      notificationId: result.notification.id,
       kind: 'alarm',
       type: 'alarm',
       scheduleId: schedule.id,
+      sourceScheduleId: schedule.id,
+      dedupeKey: schedule.dedupeKey,
       taskId: schedule.taskId,
       taskTitle: task.title,
       dueDate: schedule.notifyAt,
@@ -752,7 +785,9 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
       target: { type: 'task', taskId: schedule.taskId },
       tone: schedule.tone,
     },
-  }, schedule.id);
+  }, result.notification.id);
+
+  return true;
 }
 
 async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
@@ -809,7 +844,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   if (schedule.kind === 'alarm') {
     await sendAlarmSchedule(sql, schedule, task);
   } else {
-    await createNotification(sql, {
+    const result = await createNotification(sql, {
       userId: schedule.userId,
       title: schedule.title,
       message: schedule.message,
@@ -819,6 +854,17 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
       sourceScheduleId: schedule.id,
       kind: schedule.kind,
     });
+
+    if (!result.created) {
+      logInfo('notification_schedule_deduplicated', {
+        userId: schedule.userId,
+        taskId: schedule.taskId,
+        scheduleId: schedule.id,
+        kind: schedule.kind,
+        dedupeKey: schedule.dedupeKey,
+        notificationId: result.notification.id,
+      });
+    }
   }
 
   await updateScheduleStatus(sql, schedule.id, 'sent');
@@ -861,18 +907,30 @@ export async function processNotificationSchedules(sql: SqlClient, limit = MAX_C
 
 export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, scheduleId: string, minutes: number) {
   await ensureNotificationSchedulingInfrastructure(sql);
+  const claimedRows = await sql`
+    UPDATE notification_schedules
+    SET
+      status = 'sent',
+      sent_at = COALESCE(sent_at, NOW()),
+      dismissed_at = NOW(),
+      updated_at = NOW()
+    WHERE id = ${scheduleId}
+      AND user_id = ${userId}
+      AND kind = 'alarm'
+      AND dismissed_at IS NULL
+      AND status <> 'cancelled'
+    RETURNING task_id AS "taskId", title, message, tone
+  `;
+
+  const claimed = claimedRows[0];
+  if (!claimed) return null;
+
   const rows = await sql`
     SELECT
-      notification_schedules.task_id AS "taskId",
-      notification_schedules.title,
-      notification_schedules.message,
-      notification_schedules.tone,
       tasks.title AS "taskTitle"
-    FROM notification_schedules
-    INNER JOIN tasks ON tasks.id = notification_schedules.task_id
-    WHERE notification_schedules.id = ${scheduleId}
-      AND notification_schedules.user_id = ${userId}
-      AND notification_schedules.kind = 'alarm'
+    FROM tasks
+    WHERE tasks.id = ${String(claimed.taskId)}
+      AND tasks.user_id = ${userId}
       AND tasks.deleted_at IS NULL
     LIMIT 1
   `;
@@ -913,6 +971,37 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
 
   logInfo('alarm_snoozed', { userId, taskId: task.id, scheduleId, minutes, notifyAt: notifyAt.toISOString() });
   return { taskId: task.id, notifyAt: notifyAt.toISOString() };
+}
+
+export async function dismissAlarmSchedule(sql: SqlClient, userId: string, scheduleId: string) {
+  await ensureNotificationSchedulingInfrastructure(sql);
+  const rows = await sql`
+    UPDATE notification_schedules
+    SET
+      status = 'sent',
+      sent_at = COALESCE(sent_at, NOW()),
+      dismissed_at = COALESCE(dismissed_at, NOW()),
+      updated_at = NOW()
+    WHERE id = ${scheduleId}
+      AND user_id = ${userId}
+      AND kind = 'alarm'
+      AND status <> 'cancelled'
+    RETURNING task_id AS "taskId", dismissed_at AS "dismissedAt"
+  `;
+
+  const row = rows[0];
+  if (!row) return null;
+
+  logInfo('alarm_dismissed', {
+    userId,
+    taskId: String(row.taskId),
+    scheduleId,
+  });
+
+  return {
+    taskId: String(row.taskId),
+    dismissedAt: new Date(String(row.dismissedAt)).toISOString(),
+  };
 }
 
 export async function cleanupExpiredFloatingTasks(sql: SqlClient) {

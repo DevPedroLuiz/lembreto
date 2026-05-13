@@ -114,11 +114,71 @@ const ALARM_RING_DURATION_MS = 2 * 60 * 1000;
 
 type ActiveAlarm = {
   scheduleId?: string;
+  notificationId?: string;
+  dedupeKey?: string;
   taskId: string;
   taskTitle: string;
   dueDate: string;
   startedAt: number;
 };
+
+const DISMISSED_ALARMS_STORAGE_KEY = 'lembreto.dismissedAlarms.v1';
+const LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY = 'lembreto.localNotificationDedupe.v1';
+
+function normalizeCategoryForValidation(value: string): string {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function isWorkCategory(value: string): boolean {
+  return normalizeCategoryForValidation(value) === 'trabalho';
+}
+
+function readDismissedAlarmKeys(): string[] {
+  return readStringListFromLocalStorage(DISMISSED_ALARMS_STORAGE_KEY);
+}
+
+function readStringListFromLocalStorage(key: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberDismissedAlarmKey(key: string) {
+  rememberStringInLocalStorage(DISMISSED_ALARMS_STORAGE_KEY, key);
+}
+
+function rememberStringInLocalStorage(storageKey: string, value: string) {
+  try {
+    const keys = new Set(readStringListFromLocalStorage(storageKey));
+    keys.add(value);
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify(Array.from(keys).slice(-200)),
+    );
+  } catch {
+    // Local dedupe is best effort; backend state is still authoritative online.
+  }
+}
+
+function buildAlarmInstanceKey(input: {
+  scheduleId?: string;
+  dedupeKey?: string;
+  taskId: string;
+  dueDate: string;
+}) {
+  if (input.dedupeKey) return input.dedupeKey;
+  if (input.scheduleId) return `schedule:${input.scheduleId}`;
+  const dueDate = parseISO(input.dueDate);
+  return `${input.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
+}
 
 function fallbackCopyText(text: string) {
   const textarea = document.createElement('textarea');
@@ -393,6 +453,7 @@ export default function App() {
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
   const previousPendingOfflineTaskCountRef = useRef(0);
+  const seenPushKeysRef = useRef<Set<string>>(new Set());
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
   const alarmDismissedKeysRef = useRef<Set<string>>(new Set());
   const alarmSnoozeUntilRef = useRef<Map<string, number>>(new Map());
@@ -456,14 +517,33 @@ export default function App() {
       const taskId = typeof data.taskId === 'string' ? data.taskId : null;
       const taskTitle = typeof data.taskTitle === 'string' ? data.taskTitle : 'Lembrete';
       const dueDate = typeof data.dueDate === 'string' ? data.dueDate : new Date().toISOString();
+      const scheduleId = typeof data.scheduleId === 'string' ? data.scheduleId : undefined;
+      const notificationId = typeof data.notificationId === 'string'
+        ? data.notificationId
+        : typeof data.id === 'string'
+          ? data.id
+          : undefined;
+      const dedupeKey = typeof data.dedupeKey === 'string' ? data.dedupeKey : undefined;
       if (taskId) {
+        const alarmKey = buildAlarmInstanceKey({ scheduleId, dedupeKey, taskId, dueDate });
+        if (seenPushKeysRef.current.has(alarmKey) || alarmDismissedKeysRef.current.has(alarmKey)) {
+          return;
+        }
+        seenPushKeysRef.current.add(alarmKey);
         setActiveAlarm({
-          scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+          scheduleId,
+          notificationId,
+          dedupeKey,
           taskId,
           taskTitle,
           dueDate,
           startedAt: Date.now(),
         });
+        if (auth.token) {
+          void refreshNotifications(auth.token).catch(() => {
+            // best effort sync after an alarm push arrives
+          });
+        }
         return;
       }
     }
@@ -496,6 +576,8 @@ export default function App() {
     if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
     if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
     setConfigNoTimeReminderMinutes(normalizeNoTimeReminderMinutes(cfg.noTimeReminderMinutes));
+    alarmDismissedKeysRef.current = new Set(readDismissedAlarmKeys());
+    localNotificationDedupeRef.current = new Set(readStringListFromLocalStorage(LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY));
   }, []);
 
   useEffect(() => {
@@ -603,6 +685,7 @@ export default function App() {
       welcomedUserIdRef.current = null;
       notificationPreferenceHydratedRef.current = false;
       notificationsOverrideRef.current = null;
+      seenPushKeysRef.current.clear();
       return;
     }
 
@@ -919,6 +1002,7 @@ export default function App() {
       const localDedupeKey = `offline:${options.dedupeKey}`;
       if (localNotificationDedupeRef.current.has(localDedupeKey)) return;
       localNotificationDedupeRef.current.add(localDedupeKey);
+      rememberStringInLocalStorage(LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY, localDedupeKey);
     }
 
     if (!options?.skipToast) {
@@ -1349,6 +1433,10 @@ export default function App() {
   }, [emitNotification, reschedulingTaskIds, updateTask]);
 
   const taskDueDateError = useMemo(() => {
+    if (isWorkCategory(formCategory) && (!formDate || !formTime)) {
+      return 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
+    }
+
     if (!formDate) return '';
 
     const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime));
@@ -1357,12 +1445,16 @@ export default function App() {
     }
 
     return '';
-  }, [formDate, formTime, noTimeReminderFallbackTime]);
+  }, [formCategory, formDate, formTime, noTimeReminderFallbackTime]);
 
   const taskEndTimeError = useMemo(() => {
+    if (isWorkCategory(formCategory) && (!formDate || !formTime || !formEndTime)) {
+      return 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
+    }
+
     if (!formDate) return '';
 
-    const requiresEndTime = formCategory.trim().toLocaleLowerCase('pt-BR') === 'trabalho';
+    const requiresEndTime = isWorkCategory(formCategory);
     if (requiresEndTime && !formEndTime) {
       return 'Horário final obrigatório para categoria Trabalho.';
     }
@@ -1529,12 +1621,14 @@ export default function App() {
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formTitle.trim() || !formDate || isTaskSubmitting) return;
+    if (!formTitle.trim() || isTaskSubmitting) return;
 
     if (taskDueDateError) {
       emitNotification('Prazo inválido', taskDueDateError, 'warning');
       return;
     }
+
+    if (!formDate) return;
 
     if (taskEndTimeError) {
       emitNotification('Horário final inválido', taskEndTimeError, 'warning');
@@ -1678,6 +1772,11 @@ export default function App() {
       return;
     }
 
+    if (taskEndTimeError) {
+      emitNotification('Horário final inválido', taskEndTimeError, 'warning');
+      return;
+    }
+
     if (formAlarmEnabled && !formTime) {
       emitNotification('Horário obrigatório', 'Informe o horário inicial para salvar o rascunho com alarme.', 'warning');
       return;
@@ -1741,6 +1840,7 @@ export default function App() {
     noTimeReminderFallbackTime,
     resetTaskForm,
     taskDueDateError,
+    taskEndTimeError,
     updateTask,
   ]);
 
@@ -1920,20 +2020,30 @@ export default function App() {
 
   const closeActiveAlarm = useCallback(() => {
     if (activeAlarm) {
-      const dueDate = parseISO(activeAlarm.dueDate);
-      const alarmKey = `${activeAlarm.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
+      const alarmKey = buildAlarmInstanceKey(activeAlarm);
       alarmDismissedKeysRef.current.add(alarmKey);
+      rememberDismissedAlarmKey(alarmKey);
+      if (activeAlarm.scheduleId && auth.token) {
+        void apiPost(
+          `/api/notifications/alarms/${activeAlarm.scheduleId}/dismiss`,
+          {},
+          auth.token,
+        ).catch(() => {
+          // The local dismissal still prevents repeat ringing in this session.
+        });
+      }
     }
 
     stopAlarmSound();
     setActiveAlarm(null);
-  }, [activeAlarm, stopAlarmSound]);
+  }, [activeAlarm, auth.token, stopAlarmSound]);
 
   const snoozeActiveAlarm = useCallback(() => {
     if (!activeAlarm) return;
 
-    const dueDate = parseISO(activeAlarm.dueDate);
-    const alarmKey = `${activeAlarm.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
+    const alarmKey = buildAlarmInstanceKey(activeAlarm);
+    alarmDismissedKeysRef.current.add(alarmKey);
+    rememberDismissedAlarmKey(alarmKey);
     if (activeAlarm.scheduleId && auth.token) {
       void apiPost(
         `/api/notifications/alarms/${activeAlarm.scheduleId}/snooze`,
@@ -2406,7 +2516,7 @@ export default function App() {
   }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
 
   useEffect(() => {
-    if (!notificationsEnabled || timedPendingTasks.length === 0 || activeAlarm) return;
+    if (isOnline || !notificationsEnabled || timedPendingTasks.length === 0 || activeAlarm) return;
 
     const now = new Date(notificationClock).getTime();
 
@@ -2434,6 +2544,7 @@ export default function App() {
       startAlarmSound();
       alarmAutoCloseTimerRef.current = window.setTimeout(() => {
         alarmDismissedKeysRef.current.add(alarmKey);
+        rememberDismissedAlarmKey(alarmKey);
         stopAlarmSound();
         setActiveAlarm(null);
       }, ALARM_RING_DURATION_MS);
@@ -2441,6 +2552,7 @@ export default function App() {
     }
   }, [
     activeAlarm,
+    isOnline,
     notificationClock,
     notificationsEnabled,
     shouldSuppressHolidayNotification,

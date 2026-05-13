@@ -1,4 +1,6 @@
 self.__LEMBRETO_SW_VERSION = '2026-05-06-1';
+const recentPushKeys = new Map();
+const PUSH_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 const APP_CACHE = `lembreto-app-${self.__LEMBRETO_SW_VERSION}`;
 const RUNTIME_CACHE = `lembreto-runtime-${self.__LEMBRETO_SW_VERSION}`;
@@ -107,6 +109,17 @@ function normalizeNotificationPayload(payload) {
     };
   }
 
+  const data = payload.data && typeof payload.data === 'object'
+    ? payload.data
+    : { path: '/?notificationTarget=notifications' };
+  const stableTag = typeof payload.tag === 'string'
+    ? payload.tag
+    : typeof data.dedupeKey === 'string'
+      ? data.dedupeKey
+      : typeof data.scheduleId === 'string'
+        ? `alarm:${data.scheduleId}`
+        : 'lembreto-notification';
+
   return {
     title: typeof payload.title === 'string' && payload.title.trim().length > 0
       ? payload.title
@@ -116,10 +129,8 @@ function normalizeNotificationPayload(payload) {
       : 'Voce recebeu uma nova notificacao.',
     icon: typeof payload.icon === 'string' ? payload.icon : '/icon.png',
     badge: typeof payload.badge === 'string' ? payload.badge : '/icon.png',
-    tag: typeof payload.tag === 'string' ? payload.tag : 'lembreto-notification',
-    data: payload.data && typeof payload.data === 'object'
-      ? payload.data
-      : { path: '/?notificationTarget=notifications' },
+    tag: stableTag,
+    data,
   };
 }
 
@@ -127,6 +138,21 @@ self.addEventListener('push', (event) => {
   const payload = normalizeNotificationPayload(event.data ? event.data.json() : null);
 
   event.waitUntil((async () => {
+    const now = Date.now();
+    for (const [key, seenAt] of recentPushKeys.entries()) {
+      if (now - seenAt > PUSH_DEDUPE_WINDOW_MS) recentPushKeys.delete(key);
+    }
+
+    const pushKey =
+      payload.data && typeof payload.data.dedupeKey === 'string'
+        ? payload.data.dedupeKey
+        : payload.data && typeof payload.data.scheduleId === 'string'
+          ? `schedule:${payload.data.scheduleId}`
+          : payload.tag;
+
+    if (recentPushKeys.has(pushKey)) return;
+    recentPushKeys.set(pushKey, now);
+
     const clients = await self.clients.matchAll({
       type: 'window',
       includeUncontrolled: true,
