@@ -20,6 +20,23 @@ import type { Priority, Status, Task, TaskTaxonomy, User } from '../types';
 
 type TaskPayload = TaskCreatePayload;
 
+function mergeStringLists(primary: string[], secondary: string[]) {
+  return Array.from(new Set([...primary, ...secondary]));
+}
+
+function mergeTaskLists(primary: Task[], secondary: Task[]) {
+  const seen = new Set<string>();
+  const merged: Task[] = [];
+
+  for (const task of [...primary, ...secondary]) {
+    if (seen.has(task.id)) continue;
+    seen.add(task.id);
+    merged.push(task);
+  }
+
+  return merged;
+}
+
 function findOfflineTask(queueId: string, userId: string): Task {
   const item = loadOfflineTaskCreates(userId).find((current) => current.id === queueId);
   if (!item) throw new Error('Lembrete offline nao encontrado');
@@ -197,11 +214,11 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
         saveTaskCache(userId, syncedTasks);
         saveTaskTaxonomyCache(userId, syncedTaxonomy);
-        setTasks(mergeTasksWithOfflineCreates(syncedTasks, offlineCreates));
+        setTasks((prev) => mergeTasksWithOfflineCreates(mergeTaskLists(syncedTasks, prev), offlineCreates));
 
         const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, offlineCreates);
-        setCategories(mergedTaxonomy.categories);
-        setTags(mergedTaxonomy.tags);
+        setCategories((prev) => mergeStringLists(mergedTaxonomy.categories, prev));
+        setTags((prev) => mergeStringLists(mergedTaxonomy.tags, prev));
         setPendingOfflineTaskCount(offlineCreates.length);
       })
       .catch(() => {

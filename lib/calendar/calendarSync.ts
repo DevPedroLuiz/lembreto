@@ -686,7 +686,7 @@ async function linkExternalEventToExistingTask(input: {
 }
 
 function buildImportedHistory(provider: CalendarProvider, eventId: string) {
-  return JSON.stringify([{
+  return [{
     id: crypto.randomUUID(),
     action: 'created',
     title: 'Evento importado',
@@ -696,7 +696,7 @@ function buildImportedHistory(provider: CalendarProvider, eventId: string) {
       `Evento externo: ${eventId}.`,
       'Sincronização em lote.',
     ],
-  }]);
+  }];
 }
 
 async function importExternalCalendarEvent(input: {
@@ -752,7 +752,7 @@ async function importExternalCalendarEvent(input: {
       ${'Agenda externa'},
       ${[input.provider === 'google' ? 'Google Calendar' : 'Outlook Calendar']},
       ${'pending'},
-      ${buildImportedHistory(input.provider, input.event.id)}::jsonb,
+      ${input.sql.json ? input.sql.json(buildImportedHistory(input.provider, input.event.id)) : JSON.stringify(buildImportedHistory(input.provider, input.event.id))}::jsonb,
       ${input.provider},
       ${input.event.id},
       ${'synced'},

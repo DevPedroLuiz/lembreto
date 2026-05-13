@@ -25,16 +25,16 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
   await sql`
     DO $$
     BEGIN
-      LOCK TABLE tasks IN ACCESS EXCLUSIVE MODE;
-
       IF EXISTS (
         SELECT 1
         FROM pg_constraint
         WHERE conrelid = 'tasks'::regclass
           AND conname = 'tasks_status_check'
           AND (
+            pg_get_constraintdef(oid) NOT LIKE '%overdue%' OR
             pg_get_constraintdef(oid) NOT LIKE '%draft%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%inactive%'
+            pg_get_constraintdef(oid) NOT LIKE '%inactive%' OR
+            pg_get_constraintdef(oid) NOT LIKE '%cancelled%'
           )
       ) THEN
         ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
@@ -48,7 +48,7 @@ export async function ensureTaskTaxonomySchema(sql: SqlClient) {
       ) THEN
         ALTER TABLE tasks
         ADD CONSTRAINT tasks_status_check
-        CHECK (status IN ('pending', 'completed', 'draft', 'inactive'));
+        CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'));
       END IF;
     END $$;
   `;

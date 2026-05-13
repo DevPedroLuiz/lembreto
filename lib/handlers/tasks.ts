@@ -61,6 +61,21 @@ const PRIORITY_HISTORY_LABELS: Record<string, string> = {
   high: 'alta',
 };
 
+let taskInfrastructureReady: Promise<void> | null = null;
+
+async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
+  taskInfrastructureReady ??= (async () => {
+    await ensureTaskTaxonomySchema(sql);
+    await ensureCalendarIntegrationSchema(sql);
+    await ensureNotificationSchedulingInfrastructure(sql);
+  })().catch((error) => {
+    taskInfrastructureReady = null;
+    throw error;
+  });
+
+  return taskInfrastructureReady;
+}
+
 function resolveTaskId(context: HandlerContext): string | null {
   const paramId = context.request.params?.id;
   if (paramId) return paramId;
@@ -118,6 +133,53 @@ async function syncTaskTaxonomy(sql: HandlerContext['sql'], userId: string, cate
   await upsertUserTags(sql, userId, tags);
 }
 
+async function syncTaskTaxonomyBestEffort(
+  context: HandlerContext,
+  userId: string,
+  taskId: string,
+  category: string,
+  tags: string[],
+) {
+  try {
+    await syncTaskTaxonomy(context.sql, userId, category, tags);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string' &&
+      (error.message.includes('user_categories_user_id_fkey') || error.message.includes('user_tags_user_id_fkey'))
+    ) {
+      return;
+    }
+
+    logError('task_taxonomy_sync_failed', error, getRequestMeta(context.request, { userId, taskId }));
+  }
+}
+
+async function syncTaskNotificationSchedulesBestEffort(
+  context: HandlerContext,
+  userId: string,
+  taskId: string,
+  options?: { floatingIntervalMinutes: number | null },
+) {
+  try {
+    await syncTaskNotificationSchedules(context.sql, userId, taskId, options);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string' &&
+      error.message.includes('notification_schedules_user_id_fkey')
+    ) {
+      return;
+    }
+
+    logError('task_notification_schedule_sync_failed', error, getRequestMeta(context.request, { userId, taskId }));
+  }
+}
+
 function createHistoryEntry(
   action: TaskHistoryAction,
   title: string,
@@ -132,6 +194,10 @@ function createHistoryEntry(
     createdAt: new Date().toISOString(),
     ...(details.length > 0 ? { details } : {}),
   };
+}
+
+function jsonbParameter(sql: HandlerContext['sql'], value: unknown) {
+  return sql.json ? sql.json(value) : JSON.stringify(value);
 }
 
 function normalizeDateValue(value: unknown): string | null {
@@ -295,9 +361,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
   const user = auth.user;
   const { request, sql } = context;
 
-  await ensureTaskTaxonomySchema(sql);
-  await ensureCalendarIntegrationSchema(sql);
-  await ensureNotificationSchedulingInfrastructure(sql);
+  await ensureTaskInfrastructure(sql);
 
   if (request.method === 'GET') {
     try {
@@ -365,7 +429,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       noTimeReminderMinutes,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
-    const history = JSON.stringify([
+    const history = jsonbParameter(sql, [
       buildCreatedHistoryEntry({
         dueDate,
         endDate,
@@ -447,49 +511,15 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
 
-      await syncTaskTaxonomy(sql, user.id, category, tags);
-      await syncTaskNotificationSchedules(sql, user.id, String(rows[0].id), {
+      void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), category, tags);
+      void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
         floatingIntervalMinutes: noTimeReminderMinutes ?? null,
       });
       if (status === 'pending') {
-        await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
+        void syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       }
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
-      const syncedRows = await sql`
-        SELECT
-          id,
-          user_id     AS "userId",
-          title,
-          description,
-          due_date    AS "dueDate",
-          end_date    AS "endDate",
-          priority,
-          category,
-         tags,
-          suppress_holiday_notifications AS "suppressHolidayNotifications",
-          alarm_enabled AS "alarmEnabled",
-          reminder_mode AS "reminderMode",
-          expires_at AS "expiresAt",
-          overdue_since AS "overdueSince",
-          overdue_expires_at AS "overdueExpiresAt",
-          deleted_at AS "deletedAt",
-          completed_at AS "completedAt",
-          completion_source AS "completionSource",
-          auto_deleted_reason AS "autoDeletedReason",
-          auto_deleted_at AS "autoDeletedAt",
-          muted_until AS "mutedUntil",
-         status,
-          history,
-          created_at  AS "createdAt",
-          external_calendar_provider AS "externalCalendarProvider",
-          external_calendar_event_id AS "externalCalendarEventId",
-          external_calendar_sync_status AS "externalCalendarSyncStatus",
-          external_calendar_last_error AS "externalCalendarLastError",
-          external_calendar_synced_at AS "externalCalendarSyncedAt"
-        FROM tasks
-        WHERE id = ${rows[0].id} AND user_id = ${user.id}
-      `;
-      return json(201, syncedRows[0] ?? rows[0]);
+      return json(201, rows[0]);
     } catch (error) {
       logError('task_create_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao criar tarefa' });
@@ -507,9 +537,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
   const { request, sql } = context;
   const id = resolveTaskId(context);
 
-  await ensureTaskTaxonomySchema(sql);
-  await ensureCalendarIntegrationSchema(sql);
-  await ensureNotificationSchedulingInfrastructure(sql);
+  await ensureTaskInfrastructure(sql);
 
   if (!id) {
     return json(400, { error: 'Tarefa não encontrada' });
@@ -597,7 +625,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         return json(400, { error: 'Horário final precisa ser depois do horário inicial' });
       }
       const historyEntry = buildUpdateHistoryEntry(cur, nextValues);
-      const historyUpdate = historyEntry ? JSON.stringify([historyEntry]) : null;
+      const historyUpdate = historyEntry ? jsonbParameter(sql, [historyEntry]) : null;
 
       const rows = await sql`
         UPDATE tasks SET
@@ -664,51 +692,19 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
 
-      await syncTaskTaxonomy(sql, user.id, categoryValue, tagsValue);
+      void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), categoryValue, tagsValue);
       if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled' || String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
-        await cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id);
+        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id).catch((error) => {
+          logError('task_notification_schedule_cancel_failed', error, getRequestMeta(request, { userId: user.id, taskId: id }));
+        });
       } else {
-        await syncTaskNotificationSchedules(sql, user.id, String(rows[0].id), {
+        void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
           floatingIntervalMinutes: noTimeReminderMinutes ?? null,
         });
       }
-      await syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
+      void syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
-      const syncedRows = await sql`
-        SELECT
-          id,
-          user_id     AS "userId",
-          title,
-          description,
-          due_date    AS "dueDate",
-          end_date    AS "endDate",
-          priority,
-          category,
-          tags,
-          suppress_holiday_notifications AS "suppressHolidayNotifications",
-          alarm_enabled AS "alarmEnabled",
-          reminder_mode AS "reminderMode",
-          expires_at AS "expiresAt",
-          overdue_since AS "overdueSince",
-          overdue_expires_at AS "overdueExpiresAt",
-          deleted_at AS "deletedAt",
-          completed_at AS "completedAt",
-          completion_source AS "completionSource",
-          auto_deleted_reason AS "autoDeletedReason",
-          auto_deleted_at AS "autoDeletedAt",
-          muted_until AS "mutedUntil",
-          status,
-          history,
-          created_at  AS "createdAt",
-          external_calendar_provider AS "externalCalendarProvider",
-          external_calendar_event_id AS "externalCalendarEventId",
-          external_calendar_sync_status AS "externalCalendarSyncStatus",
-          external_calendar_last_error AS "externalCalendarLastError",
-          external_calendar_synced_at AS "externalCalendarSyncedAt"
-        FROM tasks
-        WHERE id = ${rows[0].id} AND user_id = ${user.id}
-      `;
-      return json(200, syncedRows[0] ?? rows[0]);
+      return json(200, rows[0]);
     } catch (error) {
       logError('task_update_failed', error, getRequestMeta(request, { userId: user.id, taskId: id }));
       return json(500, { error: 'Erro ao atualizar tarefa' });

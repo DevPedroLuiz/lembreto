@@ -79,8 +79,52 @@ function formatHistoryDate(value: string): string {
   }
 }
 
+function normalizeHistoryEvent(value: unknown): TaskHistoryEvent | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  const id = typeof item.id === 'string' ? item.id : null;
+  const action = typeof item.action === 'string' ? item.action : null;
+  const title = typeof item.title === 'string' ? item.title : null;
+  const description = typeof item.description === 'string' ? item.description : null;
+  const createdAt = typeof item.createdAt === 'string'
+    ? item.createdAt
+    : typeof item.created_at === 'string'
+      ? item.created_at
+      : null;
+
+  if (!id || !action || !title || !description || !createdAt) return null;
+
+  return {
+    id,
+    action: action as TaskHistoryEvent['action'],
+    title,
+    description,
+    createdAt,
+    details: Array.isArray(item.details) ? item.details.map(String) : undefined,
+  };
+}
+
+function normalizeTaskHistory(value: unknown): TaskHistoryEvent[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (typeof item === 'string') {
+      try {
+        return normalizeTaskHistory(JSON.parse(item));
+      } catch {
+        return [];
+      }
+    }
+
+    if (Array.isArray(item)) return normalizeTaskHistory(item);
+
+    const event = normalizeHistoryEvent(item);
+    return event ? [event] : [];
+  });
+}
+
 function buildTaskHistory(task: Task): TaskHistoryEvent[] {
-  const savedHistory = Array.isArray(task.history) ? task.history : [];
+  const savedHistory = normalizeTaskHistory(task.history);
 
   if (savedHistory.length > 0) {
     return [...savedHistory].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));

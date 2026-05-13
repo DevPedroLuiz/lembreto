@@ -272,13 +272,34 @@ export function formatOverdueDuration(minutes: number): string {
 
 export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient) {
   await sql`
-    ALTER TABLE tasks
-    DROP CONSTRAINT IF EXISTS tasks_status_check
-  `;
-  await sql`
-    ALTER TABLE tasks
-    ADD CONSTRAINT tasks_status_check
-    CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'))
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'tasks'::regclass
+          AND conname = 'tasks_status_check'
+          AND (
+            pg_get_constraintdef(oid) NOT LIKE '%overdue%' OR
+            pg_get_constraintdef(oid) NOT LIKE '%draft%' OR
+            pg_get_constraintdef(oid) NOT LIKE '%inactive%' OR
+            pg_get_constraintdef(oid) NOT LIKE '%cancelled%'
+          )
+      ) THEN
+        ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'tasks'::regclass
+          AND conname = 'tasks_status_check'
+      ) THEN
+        ALTER TABLE tasks
+        ADD CONSTRAINT tasks_status_check
+        CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'));
+      END IF;
+    END $$;
   `;
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE`;
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'timed' CHECK (reminder_mode IN ('timed', 'floating'))`;
@@ -321,13 +342,19 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_schedules_dedupe ON notification_schedules(user_id, dedupe_key)`;
   await ensureNotificationsInfrastructure(sql);
   await sql`
-    ALTER TABLE notifications
-    DROP CONSTRAINT IF EXISTS notifications_source_schedule_id_fkey
-  `;
-  await sql`
-    ALTER TABLE notifications
-    ADD CONSTRAINT notifications_source_schedule_id_fkey
-    FOREIGN KEY (source_schedule_id) REFERENCES notification_schedules(id) ON DELETE SET NULL
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'notifications'::regclass
+          AND conname = 'notifications_source_schedule_id_fkey'
+      ) THEN
+        ALTER TABLE notifications
+        ADD CONSTRAINT notifications_source_schedule_id_fkey
+        FOREIGN KEY (source_schedule_id) REFERENCES notification_schedules(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
   `;
 }
 

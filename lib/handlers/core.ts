@@ -3,6 +3,7 @@ export interface SqlClient {
     strings: TemplateStringsArray,
     ...params: unknown[]
   ): Promise<Array<Record<string, unknown>>>;
+  json?: (value: unknown) => unknown;
 }
 
 export interface HandlerRequest {
