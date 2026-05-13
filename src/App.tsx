@@ -1804,8 +1804,10 @@ export default function App() {
 
       if (newStatus === 'completed') {
         playSuccessSound();
+        triggerToastOnly('Parabéns!', `"${task.title}" foi concluído.`);
         emitNotification('Parabéns!', `"${task.title}" foi concluído.`, 'success', {
           target: { type: 'task', taskId: task.id },
+          skipToast: true,
         });
       }
 
@@ -1820,15 +1822,20 @@ export default function App() {
         return next;
       });
     }
-  }, [emitNotification, playSuccessSound, toggleStatus, togglingTaskIds]);
+  }, [emitNotification, playSuccessSound, toggleStatus, togglingTaskIds, triggerToastOnly]);
 
   const handleToggleFromDetails = useCallback(async (task: Task) => {
-    const result = await handleToggle(task);
-    if (result?.newStatus === 'completed') {
+    const isCompleting = task.status === 'pending' || task.status === 'overdue';
+    const resultPromise = handleToggle(task);
+
+    if (isCompleting) {
       setShowTaskDetails(false);
       setSelectedTask(null);
-      return;
     }
+
+    const result = await resultPromise;
+
+    if (result?.newStatus === 'completed') return;
 
     if (result?.task) {
       setSelectedTask(result.task);

@@ -279,9 +279,12 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
-  test('completes imported work reminders without an end time', async ({ page }) => {
+  test('closes the reminder view after completing overdue imported work reminders without an end time', async ({ page }) => {
     const user = buildE2ETestUser();
     const title = 'Trabalho importado sem fim';
+    const overdue = new Date();
+    overdue.setDate(overdue.getDate() - 1);
+    overdue.setHours(20, 0, 0, 0);
 
     await cleanupUsersByEmail([user.email]);
 
@@ -289,19 +292,26 @@ test.describe('Lembreto critical flows', () => {
       await registerUser(page, user);
       await seedCustomTasksForUser(user.email, [{
         title,
-        dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        dueDate: overdue.toISOString(),
         priority: 'high',
         category: 'Trabalho',
       }]);
       await refreshAuthenticatedPage(page);
 
-      await page.getByTestId('sidebar-tasks').click();
-      await taskCard(page, title).click();
+      await page.getByTestId('dashboard-metric-overdue').click();
+      const dashboardMetricDialog = page.getByTestId('dashboard-metric-dialog');
+      await expect(dashboardMetricDialog).toBeVisible();
+      await dashboardMetricDialog.locator(`[data-testid="task-item"][data-task-title="${title}"]`).click();
+      const taskDetailsDialog = page.getByTestId('task-details-dialog');
+      await expect(taskDetailsDialog).toBeVisible();
+      await expect(page.getByTestId('task-details-back')).toContainText(/Voltar para atrasados/i);
+
       const updateResponsePromise = page.waitForResponse((response) =>
         response.url().includes('/api/tasks/') &&
         response.request().method() === 'PUT',
       );
-      await page.getByTestId('task-details-toggle').click();
+      await taskDetailsDialog.getByTestId('task-details-toggle').click();
+      await expect(taskDetailsDialog).toHaveCount(0);
       const updateResponse = await updateResponsePromise;
 
       expect(updateResponse.status()).toBe(200);
