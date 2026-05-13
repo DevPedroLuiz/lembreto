@@ -7,6 +7,7 @@ import {
   NOTIFICATION_TONES,
   TASK_PRIORITIES,
   TASK_STATUSES,
+  requiresWorkEndDateForStatus,
 } from './contracts.js';
 
 const nameSchema = z.string().trim().min(1, 'Nome obrigatório').max(80, 'Nome muito longo');
@@ -102,8 +103,7 @@ export const createTaskSchema = z.object({
   status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
   if (
-    value.status !== 'draft' &&
-    value.status !== 'inactive' &&
+    requiresWorkEndDateForStatus(value.status) &&
     value.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
     !value.endDate
   ) {

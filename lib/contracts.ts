@@ -25,3 +25,7 @@ export type ExternalCalendarSyncStatus = (typeof EXTERNAL_CALENDAR_SYNC_STATUSES
 export type ReminderMode = (typeof REMINDER_MODES)[number];
 export type NotificationScheduleKind = (typeof NOTIFICATION_SCHEDULE_KINDS)[number];
 export type NotificationScheduleStatus = (typeof NOTIFICATION_SCHEDULE_STATUSES)[number];
+
+export function requiresWorkEndDateForStatus(status: string | undefined): boolean {
+  return status === 'pending' || status === 'overdue';
+}

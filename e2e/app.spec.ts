@@ -279,6 +279,38 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
+  test('completes imported work reminders without an end time', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const title = 'Trabalho importado sem fim';
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [{
+        title,
+        dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        priority: 'high',
+        category: 'Trabalho',
+      }]);
+      await refreshAuthenticatedPage(page);
+
+      await page.getByTestId('sidebar-tasks').click();
+      await taskCard(page, title).click();
+      const updateResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/') &&
+        response.request().method() === 'PUT',
+      );
+      await page.getByTestId('task-details-toggle').click();
+      const updateResponse = await updateResponsePromise;
+
+      expect(updateResponse.status()).toBe(200);
+      await expect(page.getByText(`"${title}" foi concluído.`)).toBeVisible();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('saves drafts and promotes them from the drafts tab', async ({ page }) => {
     const user = buildE2ETestUser();
     const title = 'Rascunho de proposta';

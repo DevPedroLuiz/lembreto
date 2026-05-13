@@ -81,6 +81,7 @@ async function main() {
     handleCalendarIntegrations,
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
+  const { requiresWorkEndDateForStatus } = await import('../lib/contracts.js');
 
   await run('buildTokenJti composes subject and iat', () => {
     assert.equal(buildTokenJti({ sub: 'user-1', iat: 42 }), 'user-1_42');
@@ -250,6 +251,15 @@ async function main() {
     if (!result.success) {
       assert.equal(formatZodError(result.error), 'Envie ao menos um campo para atualizar');
     }
+  });
+
+  await run('work end time requirement applies only to active statuses', () => {
+    assert.equal(requiresWorkEndDateForStatus('pending'), true);
+    assert.equal(requiresWorkEndDateForStatus('overdue'), true);
+    assert.equal(requiresWorkEndDateForStatus('completed'), false);
+    assert.equal(requiresWorkEndDateForStatus('cancelled'), false);
+    assert.equal(requiresWorkEndDateForStatus('inactive'), false);
+    assert.equal(requiresWorkEndDateForStatus('draft'), false);
   });
 
   await run('calendar export builds Google/Outlook compatible ICS', () => {

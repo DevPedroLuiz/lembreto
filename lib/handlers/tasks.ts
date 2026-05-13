@@ -36,6 +36,7 @@ import {
   upsertUserTags,
 } from '../task-taxonomy.js';
 import { signCalendarFeedToken, verifyCalendarFeedToken } from '../jwt.js';
+import { requiresWorkEndDateForStatus } from '../contracts.js';
 import {
   type HandlerContext,
   type HandlerResult,
@@ -610,8 +611,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       const shouldValidateEndDateRequirement = category !== undefined || endDate !== undefined || status !== undefined;
       if (
         shouldValidateEndDateRequirement &&
-        String(nextValues.status) !== 'draft' &&
-        String(nextValues.status) !== 'inactive' &&
+        requiresWorkEndDateForStatus(String(nextValues.status)) &&
         String(nextValues.category).trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
         !nextValues.endDate
       ) {
