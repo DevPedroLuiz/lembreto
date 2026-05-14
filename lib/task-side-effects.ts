@@ -468,7 +468,11 @@ export async function processTaskSideEffects(
   sql: SqlClient,
   limit = TASK_SIDE_EFFECT_LIMIT,
   maxDurationMs = MAX_SIDE_EFFECT_DURATION_MS,
-  options: { ensureInfrastructure?: boolean; notificationSchedulesOnly?: boolean } = {},
+  options: {
+    ensureInfrastructure?: boolean;
+    notificationSchedulesOnly?: boolean;
+    precomputedDiagnostics?: SideEffectDiagnostics;
+  } = {},
 ): Promise<ProcessTaskSideEffectsSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), TASK_SIDE_EFFECT_LIMIT);
@@ -484,7 +488,7 @@ export async function processTaskSideEffects(
     logWarn('task_side_effects_reclaimed', { reclaimed });
   }
 
-  const sideEffectDiagnostics = await getSideEffectDiagnostics(sql);
+  const sideEffectDiagnostics = options.precomputedDiagnostics ?? await getSideEffectDiagnostics(sql);
   const jobs = await claimDueSideEffects(sql, processLimit, {
     notificationSchedulesOnly: options.notificationSchedulesOnly,
   });

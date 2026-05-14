@@ -990,6 +990,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, {
               ensureInfrastructure: false,
               notificationSchedulesOnly: true,
+              precomputedDiagnostics: preliminarySideEffectDiagnostics,
             }),
             budgetMs,
             fallbackSideEffects(budgetMs),
