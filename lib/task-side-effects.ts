@@ -202,23 +202,26 @@ function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, nu
 }
 
 async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagnostics> {
-  const [overviewRows, pendingKindRows, dueKindRows] = await Promise.all([
+  const [
+    nowRows,
+    pendingOverviewRows,
+    pendingKindRows,
+    dueKindRows,
+    processingRows,
+    failedRows,
+    doneRows,
+  ] = await Promise.all([
+    sql`SELECT NOW() AS "postgresNow"`,
     sql`
       SELECT
-        NOW() AS "postgresNow",
-        MIN(available_at) FILTER (WHERE status = 'pending') AS "oldestPendingAvailableAt",
+        MIN(available_at) AS "oldestPendingAvailableAt",
         COUNT(*) FILTER (
-          WHERE status = 'pending'
-            AND available_at <= NOW()
+          WHERE available_at <= NOW()
             AND cancelled_at IS NULL
         ) AS "duePendingCount",
-        COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
-        COUNT(*) FILTER (WHERE status = 'failed') AS "failedCount",
-        COUNT(*) FILTER (WHERE status = 'done') AS "doneCount",
-        EXTRACT(EPOCH FROM (
-          NOW() - MIN(available_at) FILTER (WHERE status = 'pending')
-        )) AS "oldestPendingAgeSeconds"
+        EXTRACT(EPOCH FROM (NOW() - MIN(available_at))) AS "oldestPendingAgeSeconds"
       FROM task_side_effects
+      WHERE status = 'pending'
     `,
     sql`
       SELECT kind, COUNT(*) AS count
@@ -236,18 +239,22 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
       GROUP BY kind
       ORDER BY kind ASC
     `,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'processing'`,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'failed'`,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'done'`,
   ]);
 
-  const overview = overviewRows[0] ?? {};
+  const now = nowRows[0] ?? {};
+  const overview = pendingOverviewRows[0] ?? {};
   return {
-    postgresNow: toIso(overview.postgresNow),
+    postgresNow: toIso(now.postgresNow),
     oldestPendingAvailableAt: toIso(overview.oldestPendingAvailableAt),
     duePendingCount: toCount(overview.duePendingCount),
     pendingByKind: mapCountByKind(pendingKindRows),
     dueByKind: mapCountByKind(dueKindRows),
-    processingCount: toCount(overview.processingCount),
-    failedCount: toCount(overview.failedCount),
-    doneCount: toCount(overview.doneCount),
+    processingCount: toCount(processingRows[0]?.count),
+    failedCount: toCount(failedRows[0]?.count),
+    doneCount: toCount(doneRows[0]?.count),
     oldestPendingAgeSeconds: overview.oldestPendingAgeSeconds === null || overview.oldestPendingAgeSeconds === undefined
       ? null
       : toCount(overview.oldestPendingAgeSeconds),

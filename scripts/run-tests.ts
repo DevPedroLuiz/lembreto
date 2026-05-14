@@ -108,20 +108,26 @@ function createNotificationScheduleSqlMock(options?: {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
 
-    if (query.includes('NOW() AS "postgresNow"')) {
+    if (query.includes('SELECT NOW() AS "postgresNow"')) {
+      return [{ postgresNow: now.toISOString() }];
+    }
+
+    if (query.includes('MIN(notify_at)')) {
       const isDue = schedule.status === 'pending' &&
         new Date(schedule.notifyAt) <= now &&
         schedule.sentAt === null &&
         schedule.cancelledAt === null;
       return [{
-        postgresNow: now.toISOString(),
         oldestPendingNotifyAt: schedule.status === 'pending' ? schedule.notifyAt : null,
         duePendingCount: isDue ? 1 : 0,
         futurePendingCount: schedule.status === 'pending' && !isDue ? 1 : 0,
-        processingCount: schedule.status === 'processing' ? 1 : 0,
-        failedCount: schedule.status === 'failed' ? 1 : 0,
-        cancelledCount: schedule.status === 'cancelled' ? 1 : 0,
       }];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count FROM notification_schedules WHERE status =')) {
+      const status = String(values[0] ?? '');
+      const statusFromQuery = query.match(/status = '([^']+)'/)?.[1] ?? status;
+      return [{ count: schedule.status === statusFromQuery ? 1 : 0 }];
     }
 
     if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
@@ -334,24 +340,29 @@ function createTaskSideEffectsSqlMock(options?: {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
 
-    if (query.includes('FROM task_side_effects') && query.includes('NOW() AS "postgresNow"')) {
+    if (query.includes('SELECT NOW() AS "postgresNow"')) {
+      return [{ postgresNow: now.toISOString() }];
+    }
+
+    if (query.includes('FROM task_side_effects') && query.includes('MIN(available_at)')) {
       const dueJobs = jobs.filter((job) => (
         job.status === 'pending' &&
         new Date(job.availableAt) <= now &&
         job.cancelledAt === null
       ));
       return [{
-        postgresNow: now.toISOString(),
         oldestPendingAvailableAt: jobs
           .filter((job) => job.status === 'pending')
           .map((job) => job.availableAt)
           .sort()[0] ?? null,
         duePendingCount: dueJobs.length,
-        processingCount: jobs.filter((job) => job.status === 'processing').length,
-        failedCount: jobs.filter((job) => job.status === 'failed').length,
-        doneCount: jobs.filter((job) => job.status === 'done').length,
         oldestPendingAgeSeconds: dueJobs.length > 0 ? 0 : null,
       }];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count FROM task_side_effects WHERE status =')) {
+      const statusFromQuery = query.match(/status = '([^']+)'/)?.[1] ?? '';
+      return [{ count: jobs.filter((job) => job.status === statusFromQuery).length }];
     }
 
     if (query.includes('FROM task_side_effects') && query.includes('GROUP BY kind')) {

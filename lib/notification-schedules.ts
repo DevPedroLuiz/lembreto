@@ -985,27 +985,31 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
 }
 
 async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnostics> {
-  const [overviewRows, pendingKindRows, dueKindRows] = await Promise.all([
+  const [
+    nowRows,
+    pendingOverviewRows,
+    pendingKindRows,
+    dueKindRows,
+    processingRows,
+    failedRows,
+    cancelledRows,
+  ] = await Promise.all([
+    sql`SELECT NOW() AS "postgresNow"`,
     sql`
       SELECT
-        NOW() AS "postgresNow",
-        MIN(notify_at) FILTER (WHERE status = 'pending') AS "oldestPendingNotifyAt",
+        MIN(notify_at) AS "oldestPendingNotifyAt",
         COUNT(*) FILTER (
-          WHERE status = 'pending'
-            AND notify_at <= NOW()
+          WHERE notify_at <= NOW()
             AND sent_at IS NULL
             AND cancelled_at IS NULL
         ) AS "duePendingCount",
         COUNT(*) FILTER (
-          WHERE status = 'pending'
-            AND notify_at > NOW()
+          WHERE notify_at > NOW()
             AND sent_at IS NULL
             AND cancelled_at IS NULL
-        ) AS "futurePendingCount",
-        COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
-        COUNT(*) FILTER (WHERE status = 'failed') AS "failedCount",
-        COUNT(*) FILTER (WHERE status = 'cancelled') AS "cancelledCount"
+        ) AS "futurePendingCount"
       FROM notification_schedules
+      WHERE status = 'pending'
     `,
     sql`
       SELECT kind, COUNT(*) AS count
@@ -1024,19 +1028,23 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
       GROUP BY kind
       ORDER BY kind ASC
     `,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing'`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed'`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled'`,
   ]);
 
-  const overview = overviewRows[0] ?? {};
+  const now = nowRows[0] ?? {};
+  const overview = pendingOverviewRows[0] ?? {};
   return {
-    postgresNow: toIso(overview.postgresNow),
+    postgresNow: toIso(now.postgresNow),
     oldestPendingNotifyAt: toIso(overview.oldestPendingNotifyAt),
     duePendingCount: toCount(overview.duePendingCount),
     futurePendingCount: toCount(overview.futurePendingCount),
     pendingByKind: mapCountByKind(pendingKindRows),
     dueByKind: mapCountByKind(dueKindRows),
-    processingCount: toCount(overview.processingCount),
-    failedCount: toCount(overview.failedCount),
-    cancelledCount: toCount(overview.cancelledCount),
+    processingCount: toCount(processingRows[0]?.count),
+    failedCount: toCount(failedRows[0]?.count),
+    cancelledCount: toCount(cancelledRows[0]?.count),
   };
 }
 
