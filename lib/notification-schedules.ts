@@ -10,6 +10,7 @@ import { logError, logInfo, logWarn } from './logger.js';
 import {
   createNotification,
   ensureNotificationsInfrastructure,
+  getPushSendTimeoutMs,
   sendPushPayloadToUser,
 } from './notifications.js';
 
@@ -990,6 +991,7 @@ async function updateScheduleStatus(sql: SqlClient, scheduleId: string, status: 
       sent_at = CASE WHEN ${status} = 'sent' THEN NOW() ELSE sent_at END,
       failed_at = CASE WHEN ${status} = 'failed' THEN NOW() ELSE failed_at END,
       cancelled_at = CASE WHEN ${status} = 'cancelled' THEN NOW() ELSE cancelled_at END,
+      processing_started_at = CASE WHEN ${status} = 'processing' THEN processing_started_at ELSE NULL END,
       error_message = ${errorMessage ?? null},
       updated_at = NOW()
     WHERE id = ${scheduleId}
@@ -1112,7 +1114,8 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
     return false;
   }
 
-  await sendPushPayloadToUser(sql, schedule.userId, {
+  await updateScheduleStatus(sql, schedule.id, 'sent');
+  await sendSchedulePush(sql, schedule, task, {
     title: schedule.title,
     body: schedule.message,
     tag: schedule.dedupeKey,
@@ -1133,16 +1136,47 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
       target: { type: 'task', taskId: schedule.taskId },
       tone: schedule.tone,
     },
-  }, result.notification.id).catch((error) => {
-    logError('alarm_push_dispatch_failed', error, {
+  }, result.notification.id);
+
+  return true;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+async function sendSchedulePush(
+  sql: SqlClient,
+  schedule: ScheduleRow,
+  task: TaskForScheduling,
+  payload: unknown,
+  notificationId: string,
+) {
+  const timeoutMs = getPushSendTimeoutMs();
+  try {
+    await withTimeout(
+      sendPushPayloadToUser(sql, schedule.userId, payload, notificationId),
+      timeoutMs,
+      'schedule_push_timeout',
+    );
+  } catch (error) {
+    logError('notification_schedule_push_failed', error, {
       userId: schedule.userId,
       taskId: schedule.taskId,
       scheduleId: schedule.id,
-      notificationId: result.notification.id,
+      notificationId,
+      kind: schedule.kind,
+      timeoutMs,
+      taskTitle: task.title,
     });
-  });
-
-  return true;
+  }
 }
 
 async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
@@ -1208,6 +1242,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
       dedupeKey: schedule.dedupeKey,
       sourceScheduleId: schedule.id,
       kind: schedule.kind,
+      sendPush: false,
     });
 
     if (!result.created) {
@@ -1219,6 +1254,41 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
         dedupeKey: schedule.dedupeKey,
         notificationId: result.notification.id,
       });
+    } else {
+      await updateScheduleStatus(sql, schedule.id, 'sent');
+      await sendSchedulePush(sql, schedule, task, {
+        title: schedule.title,
+        body: schedule.message,
+        tag: schedule.dedupeKey,
+        icon: '/icon.png',
+        badge: '/icon.png',
+        data: {
+          id: result.notification.id,
+          notificationId: result.notification.id,
+          kind: schedule.kind,
+          type: schedule.kind,
+          scheduleId: schedule.id,
+          sourceScheduleId: schedule.id,
+          dedupeKey: schedule.dedupeKey,
+          taskId: schedule.taskId,
+          taskTitle: task.title,
+          dueDate: schedule.notifyAt,
+          path: `/?notificationTarget=task&taskId=${encodeURIComponent(schedule.taskId)}`,
+          target: { type: 'task', taskId: schedule.taskId },
+          tone: schedule.tone,
+        },
+      }, result.notification.id);
+      if (schedule.kind === 'floating_reminder' || schedule.kind === 'overdue_reminder') {
+        await scheduleNextIncrementalReminder(sql, schedule, task).catch((error) => {
+          logError('notification_schedule_incremental_follow_up_failed', error, {
+            userId: schedule.userId,
+            taskId: schedule.taskId,
+            scheduleId: schedule.id,
+            kind: schedule.kind,
+          });
+        });
+      }
+      return 'sent' as const;
     }
   }
 

@@ -9,7 +9,12 @@ import { isHolidayForLocationOnDate } from './holidays.js';
 import type { SqlClient } from './handlers/core.js';
 import { logError, logInfo, logWarn } from './logger.js';
 
-const PUSH_SEND_TIMEOUT_MS = 5000;
+const DEFAULT_PUSH_SEND_TIMEOUT_MS = 3000;
+
+export function getPushSendTimeoutMs() {
+  const configured = Number(process.env.PUSH_SEND_TIMEOUT_MS ?? DEFAULT_PUSH_SEND_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PUSH_SEND_TIMEOUT_MS;
+}
 
 export interface NotificationTarget {
   type: 'task';
@@ -261,7 +266,7 @@ export async function sendPushPayloadToUser(
             },
           },
           serializedPayload,
-          { timeout: PUSH_SEND_TIMEOUT_MS },
+          { timeout: getPushSendTimeoutMs() },
         );
       } catch (error) {
         const statusCode =

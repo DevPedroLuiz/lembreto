@@ -43,6 +43,24 @@ import {
 
 const SIDE_EFFECT_PROCESS_DURATION_MS = 8000;
 const CALENDAR_SYNC_DURATION_MS = 3000;
+const MAX_CRON_RESPONSE_MS = 20000;
+const DUE_SCHEDULE_LIMIT = 5;
+const DUE_SCHEDULE_DURATION_MS = 10000;
+const SIDE_EFFECT_LIMIT = 3;
+const BACKFILL_LIMIT = 3;
+const BACKFILL_DURATION_MS = 3000;
+const CALENDAR_SYNC_LIMIT = 1;
+const OVERDUE_LIMIT = 3;
+const OVERDUE_DURATION_MS = 3000;
+const CRON_DEADLINE_GUARD_MS = 500;
+
+function remainingBudgetMs(deadline: number, maxStepDurationMs: number) {
+  return Math.max(0, Math.min(maxStepDurationMs, deadline - Date.now() - CRON_DEADLINE_GUARD_MS));
+}
+
+function hasCronBudget(deadline: number) {
+  return remainingBudgetMs(deadline, 1) > 0;
+}
 
 function isAuthorizedCronRequest(context: HandlerContext): boolean {
   const vercelCronHeader = context.request.headers['x-vercel-cron'];
@@ -334,6 +352,8 @@ export async function handleAlarmDismiss(context: HandlerContext): Promise<Handl
 
 export async function handleNotificationsCron(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
+  const startedAt = Date.now();
+  const deadline = startedAt + MAX_CRON_RESPONSE_MS;
 
   if (request.method !== 'GET') return methodNotAllowed();
 
@@ -342,23 +362,109 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
-    const result = await processDueNotificationSchedules(sql);
-    const sideEffects = await processTaskSideEffects(sql, 10, SIDE_EFFECT_PROCESS_DURATION_MS);
-    const backfill = await backfillMissingNotificationSchedules(sql);
-    const calendarSync = await processPendingCalendarSyncs(sql, 5, CALENDAR_SYNC_DURATION_MS);
-    const overdueDetection = await detectOverdueNotificationSchedules(sql);
+    const result = await processDueNotificationSchedules(
+      sql,
+      DUE_SCHEDULE_LIMIT,
+      remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS),
+    );
+    const sideEffects = hasCronBudget(deadline)
+      ? await processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS))
+      : {
+          fetched: 0,
+          processed: 0,
+          done: 0,
+          failed: 0,
+          retried: 0,
+          cancelled: 0,
+          durationMs: 0,
+          hasMore: true,
+          stoppedByTimeLimit: true,
+        };
+    const backfill = hasCronBudget(deadline)
+      ? await backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, remainingBudgetMs(deadline, BACKFILL_DURATION_MS))
+      : {
+          backfilledSchedules: 0,
+          durationMs: 0,
+          hasMore: true,
+          stoppedByTimeLimit: true,
+        };
+    const calendarSync = hasCronBudget(deadline)
+      ? await processPendingCalendarSyncs(sql, CALENDAR_SYNC_LIMIT, remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS))
+      : {
+          scanned: 0,
+          synced: 0,
+          skipped: 0,
+          failed: 0,
+          stoppedByTimeLimit: true,
+          durationMs: 0,
+        };
+    const overdueDetection = hasCronBudget(deadline)
+      ? await detectOverdueNotificationSchedules(sql, OVERDUE_LIMIT, remainingBudgetMs(deadline, OVERDUE_DURATION_MS))
+      : {
+          detectedOverdueTasks: 0,
+          durationMs: 0,
+          hasMore: true,
+          stoppedByTimeLimit: true,
+        };
 
     result.backfilledSchedules = backfill.backfilledSchedules;
     result.detectedOverdueTasks = overdueDetection.detectedOverdueTasks;
-    result.hasMore = result.hasMore || sideEffects.hasMore || backfill.hasMore || overdueDetection.hasMore;
+    const scheduleDurationMs = result.durationMs;
+    const scheduleStoppedByTimeLimit = result.stoppedByTimeLimit;
+    const scheduleHasMore = result.hasMore;
+    const stoppedByTimeLimit =
+      Date.now() >= deadline ||
+      result.stoppedByTimeLimit ||
+      sideEffects.stoppedByTimeLimit ||
+      Boolean('stoppedByTimeLimit' in backfill && backfill.stoppedByTimeLimit) ||
+      calendarSync.stoppedByTimeLimit ||
+      Boolean('stoppedByTimeLimit' in overdueDetection && overdueDetection.stoppedByTimeLimit);
+    const hasMore =
+      result.hasMore ||
+      sideEffects.hasMore ||
+      backfill.hasMore ||
+      overdueDetection.hasMore ||
+      stoppedByTimeLimit;
+    const durationMs = Date.now() - startedAt;
+    result.hasMore = hasMore;
+    result.stoppedByTimeLimit = stoppedByTimeLimit;
+    result.durationMs = durationMs;
+    const schedules = {
+      fetched: result.fetchedSchedules,
+      processed: result.processedSchedules,
+      sent: result.sentSchedules,
+      failed: result.failedSchedules,
+      cancelled: result.cancelledSchedules,
+      rescheduled: result.rescheduledSchedules,
+      reclaimed: result.reclaimedSchedules,
+      durationMs: scheduleDurationMs,
+      stoppedByTimeLimit: scheduleStoppedByTimeLimit,
+      hasMore: scheduleHasMore,
+    };
     logInfo('cron_notifications_completed', getRequestMeta(request, {
+      durationMs,
+      stoppedByTimeLimit,
+      hasMore,
       sideEffects,
-      ...result,
+      schedules,
+      scheduleDiagnostics: result.scheduleDiagnostics,
       backfill,
       calendarSync,
       overdueDetection,
     }));
-    return json(200, { ok: true, sideEffects, ...result, backfill, calendarSync, overdueDetection });
+    return json(200, {
+      ok: true,
+      durationMs,
+      stoppedByTimeLimit,
+      hasMore,
+      schedules,
+      sideEffects,
+      backfill,
+      calendarSync,
+      overdueDetection,
+      scheduleDiagnostics: result.scheduleDiagnostics,
+      ...result,
+    });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));
     return json(500, { error: 'Erro ao gerar notificações agendadas' });

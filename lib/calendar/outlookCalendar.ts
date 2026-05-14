@@ -10,6 +10,7 @@ const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/a
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 const MICROSOFT_GRAPH_URL = 'https://graph.microsoft.com/v1.0';
 const OUTLOOK_CALENDAR_SCOPE = 'offline_access Calendars.ReadWrite';
+const OUTLOOK_FETCH_TIMEOUT_MS = 3000;
 
 interface OutlookTokenResponse {
   access_token?: string;
@@ -52,6 +53,20 @@ function getOutlookConfig() {
   }
 
   return { clientId, clientSecret };
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OUTLOOK_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildOutlookEventPayload(event: CalendarEventInput) {
@@ -181,7 +196,7 @@ export function buildOutlookCalendarAuthorizationUrl(options: {
 export const outlookCalendarClient: CalendarProviderClient = {
   async exchangeCode(code, redirectUri) {
     const { clientId, clientSecret } = getOutlookConfig();
-    const response = await fetch(OUTLOOK_TOKEN_URL, {
+    const response = await fetchWithTimeout(OUTLOOK_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -204,7 +219,7 @@ export const outlookCalendarClient: CalendarProviderClient = {
 
   async refreshTokens(refreshToken) {
     const { clientId, clientSecret } = getOutlookConfig();
-    const response = await fetch(OUTLOOK_TOKEN_URL, {
+    const response = await fetchWithTimeout(OUTLOOK_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -224,7 +239,7 @@ export const outlookCalendarClient: CalendarProviderClient = {
   },
 
   async createEvent(accessToken, calendarId, event) {
-    const response = await fetch(getEventsUrl(calendarId), {
+    const response = await fetchWithTimeout(getEventsUrl(calendarId), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -237,7 +252,7 @@ export const outlookCalendarClient: CalendarProviderClient = {
   },
 
   async updateEvent(accessToken, calendarId, eventId, event) {
-    const response = await fetch(getEventsUrl(calendarId, eventId), {
+    const response = await fetchWithTimeout(getEventsUrl(calendarId, eventId), {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -250,7 +265,7 @@ export const outlookCalendarClient: CalendarProviderClient = {
   },
 
   async deleteEvent(accessToken, calendarId, eventId) {
-    const response = await fetch(getEventsUrl(calendarId, eventId), {
+    const response = await fetchWithTimeout(getEventsUrl(calendarId, eventId), {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -274,7 +289,7 @@ export const outlookCalendarClient: CalendarProviderClient = {
     url += `${url.includes('?') ? '&' : '?'}${params.toString()}`;
 
     while (url && events.length < 500) {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Prefer: `outlook.timezone="${LEMBRETO_TIME_ZONE}"`,

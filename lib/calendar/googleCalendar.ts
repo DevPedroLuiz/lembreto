@@ -10,6 +10,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_CALENDAR_API_URL = 'https://www.googleapis.com/calendar/v3';
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const GOOGLE_FETCH_TIMEOUT_MS = 3000;
 
 interface GoogleTokenResponse {
   access_token?: string;
@@ -51,6 +52,20 @@ function getGoogleCalendarConfig() {
   }
 
   return { clientId, clientSecret };
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildGoogleEventPayload(event: CalendarEventInput) {
@@ -169,7 +184,7 @@ export function buildGoogleCalendarAuthorizationUrl(options: {
 export const googleCalendarClient: CalendarProviderClient = {
   async exchangeCode(code, redirectUri) {
     const { clientId, clientSecret } = getGoogleCalendarConfig();
-    const response = await fetch(GOOGLE_TOKEN_URL, {
+    const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -191,7 +206,7 @@ export const googleCalendarClient: CalendarProviderClient = {
 
   async refreshTokens(refreshToken) {
     const { clientId, clientSecret } = getGoogleCalendarConfig();
-    const response = await fetch(GOOGLE_TOKEN_URL, {
+    const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -210,7 +225,7 @@ export const googleCalendarClient: CalendarProviderClient = {
   },
 
   async createEvent(accessToken, calendarId, event) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${GOOGLE_CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId || 'primary')}/events`,
       {
         method: 'POST',
@@ -226,7 +241,7 @@ export const googleCalendarClient: CalendarProviderClient = {
   },
 
   async updateEvent(accessToken, calendarId, eventId, event) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${GOOGLE_CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}`,
       {
         method: 'PATCH',
@@ -242,7 +257,7 @@ export const googleCalendarClient: CalendarProviderClient = {
   },
 
   async deleteEvent(accessToken, calendarId, eventId) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${GOOGLE_CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}`,
       {
         method: 'DELETE',
@@ -272,7 +287,7 @@ export const googleCalendarClient: CalendarProviderClient = {
       if (timeMin) url.searchParams.set('timeMin', timeMin);
       if (pageToken) url.searchParams.set('pageToken', pageToken);
 
-      const response = await fetch(url.toString(), {
+      const response = await fetchWithTimeout(url.toString(), {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },

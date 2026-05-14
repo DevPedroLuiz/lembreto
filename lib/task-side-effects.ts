@@ -41,6 +41,7 @@ export interface ProcessTaskSideEffectsSummary {
 
 const TASK_SIDE_EFFECT_LIMIT = 10;
 const MAX_SIDE_EFFECT_DURATION_MS = 10000;
+const SIDE_EFFECT_JOB_TIMEOUT_MS = 3000;
 const STUCK_SIDE_EFFECT_RECLAIM_LIMIT = 10;
 const MAX_SIDE_EFFECT_ATTEMPTS = 5;
 
@@ -254,6 +255,17 @@ function getRetryAvailableAt(attemptsBeforeFailure: number) {
   return new Date(Date.now() + backoffMinutes * 60 * 1000);
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
 async function taskExists(sql: SqlClient, userId: string, taskId: string) {
   const rows = await sql`
     SELECT 1
@@ -332,7 +344,9 @@ export async function processTaskSideEffects(
   };
 
   for (const job of jobs) {
-    if (Date.now() - startedAt >= maxDurationMs) {
+    const elapsedMs = Date.now() - startedAt;
+    const remainingMs = maxDurationMs - elapsedMs;
+    if (remainingMs <= 0) {
       summary.hasMore = true;
       summary.stoppedByTimeLimit = true;
       await updateJobStatus(sql, job.id, 'pending', 'side_effect_time_limit', new Date());
@@ -340,7 +354,11 @@ export async function processTaskSideEffects(
     }
 
     try {
-      await processSingleSideEffect(sql, job);
+      await withTimeout(
+        processSingleSideEffect(sql, job),
+        Math.min(remainingMs, SIDE_EFFECT_JOB_TIMEOUT_MS),
+        'side_effect_job_timeout',
+      );
       await updateJobStatus(sql, job.id, 'done');
       summary.done += 1;
     } catch (error) {

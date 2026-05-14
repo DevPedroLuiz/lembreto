@@ -48,6 +48,7 @@ function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean 
 function createNotificationScheduleSqlMock(options?: {
   future?: boolean;
   failPushLookup?: boolean;
+  slowPushLookupMs?: number;
 }) {
   const userId = '11111111-1111-4111-8111-111111111111';
   const taskId = '22222222-2222-4222-8222-222222222222';
@@ -203,6 +204,9 @@ function createNotificationScheduleSqlMock(options?: {
     }
 
     if (query.includes('SELECT notifications_enabled AS "notificationsEnabled"')) {
+      if (options?.slowPushLookupMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.slowPushLookupMs));
+      }
       if (options?.failPushLookup) throw new Error('push lookup failed');
       return [{ notificationsEnabled: true }];
     }
@@ -217,7 +221,8 @@ function createNotificationScheduleSqlMock(options?: {
       schedule.sentAt = status === 'sent' ? now.toISOString() : schedule.sentAt;
       schedule.failedAt = status === 'failed' ? now.toISOString() : schedule.failedAt;
       schedule.cancelledAt = status === 'cancelled' ? now.toISOString() : schedule.cancelledAt;
-      schedule.errorMessage = typeof values[3] === 'string' ? values[3] : null;
+      schedule.processingStartedAt = null;
+      schedule.errorMessage = typeof values[4] === 'string' ? values[4] : null;
       return [];
     }
 
@@ -709,14 +714,55 @@ async function main() {
     }
   });
 
+  await run('slow push does not block due schedule response', async () => {
+    const previousPublicKey = process.env.VAPID_PUBLIC_KEY;
+    const previousPrivateKey = process.env.VAPID_PRIVATE_KEY;
+    const previousPushTimeout = process.env.PUSH_SEND_TIMEOUT_MS;
+    const keys = webpush.generateVAPIDKeys();
+
+    try {
+      process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+      process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+      process.env.PUSH_SEND_TIMEOUT_MS = '20';
+      const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ slowPushLookupMs: 75 });
+      const startedAt = Date.now();
+      const result = await processDueNotificationSchedules(sql, 20, 500);
+      const durationMs = Date.now() - startedAt;
+
+      assert.equal(result.fetchedSchedules, 1);
+      assert.equal(result.sentSchedules, 1);
+      assert.equal(result.failedSchedules, 0);
+      assert.equal(notifications.length, 1);
+      assert.equal(schedule.status, 'sent');
+      assert.notEqual(schedule.sentAt, null);
+      assert.ok(durationMs < 70, `expected slow push timeout before 70ms, got ${durationMs}ms`);
+    } finally {
+      if (previousPublicKey === undefined) delete process.env.VAPID_PUBLIC_KEY;
+      else process.env.VAPID_PUBLIC_KEY = previousPublicKey;
+      if (previousPrivateKey === undefined) delete process.env.VAPID_PRIVATE_KEY;
+      else process.env.VAPID_PRIVATE_KEY = previousPrivateKey;
+      if (previousPushTimeout === undefined) delete process.env.PUSH_SEND_TIMEOUT_MS;
+      else process.env.PUSH_SEND_TIMEOUT_MS = previousPushTimeout;
+    }
+  });
+
   await run('cron processes due schedules before side effects', () => {
     const cronHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
-    const dueIndex = cronHandler.indexOf('processDueNotificationSchedules(sql)');
+    const dueIndex = cronHandler.indexOf('processDueNotificationSchedules(');
     const sideEffectIndex = cronHandler.indexOf('processTaskSideEffects(sql');
 
     assert.ok(dueIndex >= 0);
     assert.ok(sideEffectIndex >= 0);
     assert.ok(dueIndex < sideEffectIndex);
+  });
+
+  await run('cron handler has global deadline and nested schedule response', () => {
+    const cronHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
+
+    assert.ok(cronHandler.includes('const MAX_CRON_RESPONSE_MS = 20000;'));
+    assert.ok(cronHandler.includes('const schedules = {'));
+    assert.ok(cronHandler.includes('return json(200, {'));
+    assert.ok(cronHandler.includes('schedules,'));
   });
 
   console.log('PASS all tests');

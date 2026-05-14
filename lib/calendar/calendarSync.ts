@@ -28,8 +28,20 @@ const PROVIDER_CLIENTS: Record<CalendarProvider, CalendarProviderClient> = {
 };
 
 const ALL_PROVIDERS: CalendarProvider[] = ['google', 'outlook'];
+const CALENDAR_SYNC_JOB_TIMEOUT_MS = 2500;
 
 let ensureCalendarSchemaPromise: Promise<void> | null = null;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
 
 function getCalendarSyncWindowStart(now = new Date()): Date {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -752,16 +764,24 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, max
   let stoppedByTimeLimit = false;
 
   for (const row of rows) {
-    if (Date.now() - startedAt >= maxDurationMs) {
+    const remainingMs = maxDurationMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
       stoppedByTimeLimit = true;
       break;
     }
 
-    const result = await syncTaskToExternalCalendar({
-      sql,
-      userId: String(row.userId),
-      taskId: String(row.id),
-    });
+    const result = await withTimeout(
+      syncTaskToExternalCalendar({
+        sql,
+        userId: String(row.userId),
+        taskId: String(row.id),
+      }),
+      Math.min(remainingMs, CALENDAR_SYNC_JOB_TIMEOUT_MS),
+      'calendar_sync_job_timeout',
+    ).catch(() => ({
+      ok: false as const,
+      error: 'calendar_sync_job_timeout',
+    }));
 
     if (result.ok && result.provider) {
       synced += 1;
