@@ -142,13 +142,35 @@ Se quiser uma camada extra de segurança, configure o ambiente `production` no G
 ## Scheduler externo para lembretes
 
 O projeto inclui um scheduler externo em [`.github/workflows/reminder-scheduler.yml`](.github/workflows/reminder-scheduler.yml).
-Ele chama `GET /api/cron/notifications` a cada 15 minutos para:
+Ele chama `GET /api/cron/notifications` pelo GitHub Actions a cada 1 minuto para:
 
-- avisar minutos antes do horário definido no lembrete;
+- enviar o pre-aviso de 15 minutos;
+- avisar no horario definido no lembrete;
+- disparar alarmes e sonecas no horario correto;
+- processar lembretes sem horario (`floating_reminder`);
 - repetir alertas de lembretes atrasados em intervalos regulares;
-- persistir esses avisos na central de notificações.
+- persistir esses avisos na central de notificacoes.
 
-Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento fica no GitHub Actions, não no cron nativo da Vercel.
+Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento frequente fica fora do cron nativo da Vercel. O `vercel.json` deve manter apenas `/api/cron/cleanup` como cron diario; um cron diario em `/api/cron/notifications` quebra a logica de notificacoes no horario correto.
+
+### Frequencia recomendada
+
+Para producao, chame:
+
+```text
+GET https://SEU-DOMINIO.com/api/cron/notifications
+Authorization: Bearer {CRON_SECRET}
+```
+
+Use a frequencia de 1 minuto para reduzir atraso perceptivel em pre-avisos, notificacoes e alarmes.
+
+Servicos que podem chamar esse endpoint:
+
+- cron-job.org
+- EasyCron
+- UptimeRobot
+- GitHub Actions scheduled workflow
+- Supabase pg_cron, se disponivel
 
 ### Secrets necessários
 
@@ -157,7 +179,7 @@ No GitHub Actions, configure:
 - `APP_URL`
 - `CRON_SECRET`
 
-Na Vercel, configure o mesmo `CRON_SECRET` nas variaveis de ambiente do projeto.
+Na Vercel, configure o mesmo `CRON_SECRET` nas variaveis de ambiente do projeto. O valor de `CRON_SECRET` nos GitHub Actions Secrets precisa ser igual ao valor configurado na Vercel.
 
 Exemplo:
 
@@ -166,8 +188,8 @@ Exemplo:
 
 ### Como funciona
 
-O workflow roda nos minutos `7, 22, 37 e 52` de cada hora para evitar concentração no topo da hora.
-Cada execução faz uma chamada autenticada para:
+O workflow roda a cada 1 minuto.
+Cada execucao faz uma chamada autenticada para:
 
 ```text
 GET {APP_URL}/api/cron/notifications
@@ -175,6 +197,8 @@ Authorization: Bearer {CRON_SECRET}
 ```
 
 Se quiser testar manualmente, abra a aba `Actions` no GitHub e rode `Reminder Scheduler` com `workflow_dispatch`.
+
+O `vercel.json` deve manter apenas `/api/cron/cleanup` no Vercel Cron diario, com schedule como `0 3 * * *`. Nao recoloque `/api/cron/notifications` no Vercel Cron; esse endpoint e acionado pelo GitHub Actions.
 
 ## Operação
 
