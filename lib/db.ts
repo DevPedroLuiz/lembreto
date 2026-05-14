@@ -7,8 +7,13 @@ export function createSqlClient(databaseUrl = process.env.DATABASE_URL): SqlClie
     throw new Error('DATABASE_URL nao definida nas variaveis de ambiente.');
   }
 
+  const shouldDisableSsl =
+    databaseUrl.includes('sslmode=disable') ||
+    databaseUrl.includes('localhost') ||
+    databaseUrl.includes('127.0.0.1');
+
   return postgres(databaseUrl, {
-    ssl: 'require',
+    ssl: shouldDisableSsl ? false : 'require',
     max: 1,
     prepare: false,
   }) as unknown as SqlClient;

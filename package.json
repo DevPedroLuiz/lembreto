@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
+    "setup:test-db": "tsx --env-file=.env.local scripts/setup-test-db.ts",
     "test": "tsx --env-file=.env.local scripts/run-tests.ts",
     "test:e2e": "playwright test",
     "cleanup:db": "tsx --env-file=.env.local scripts/cleanup-db.ts"

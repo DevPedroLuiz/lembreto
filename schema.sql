@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- ============================================================
 -- SCHEMA COMPLETO — Lembreto
 -- Execute no SQL Editor do Supabase antes do primeiro deploy.
