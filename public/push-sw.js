@@ -112,12 +112,12 @@ function normalizeNotificationPayload(payload) {
   const data = payload.data && typeof payload.data === 'object'
     ? payload.data
     : { path: '/?notificationTarget=notifications' };
-  const stableTag = typeof payload.tag === 'string'
-    ? payload.tag
-    : typeof data.dedupeKey === 'string'
-      ? data.dedupeKey
-      : typeof data.scheduleId === 'string'
-        ? `alarm:${data.scheduleId}`
+  const stableTag = typeof data.dedupeKey === 'string'
+    ? data.dedupeKey
+    : typeof data.scheduleId === 'string'
+      ? `alarm:${data.scheduleId}`
+      : typeof payload.tag === 'string'
+        ? payload.tag
         : 'lembreto-notification';
 
   return {

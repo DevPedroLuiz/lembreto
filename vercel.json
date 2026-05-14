@@ -3,6 +3,7 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "crons": [
+    { "path": "/api/cron/notifications", "schedule": "0 9 * * *" },
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
   ],
   "rewrites": [

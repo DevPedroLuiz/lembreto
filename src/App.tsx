@@ -1926,16 +1926,15 @@ export default function App() {
 
   const handleToggleFromDetails = useCallback(async (task: Task) => {
     const isCompleting = task.status === 'pending' || task.status === 'overdue';
-    const resultPromise = handleToggle(task);
+    const result = await handleToggle(task);
 
-    if (isCompleting) {
-      setShowTaskDetails(false);
-      setSelectedTask(null);
+    if (result?.newStatus === 'completed') {
+      if (isCompleting) {
+        setShowTaskDetails(false);
+        setSelectedTask(null);
+      }
+      return;
     }
-
-    const result = await resultPromise;
-
-    if (result?.newStatus === 'completed') return;
 
     if (result?.task) {
       setSelectedTask(result.task);
@@ -2065,9 +2064,9 @@ export default function App() {
 
     const taskId = activeAlarm.taskId;
     stopAlarmSound();
-    setActiveAlarm(null);
     void updateTask(taskId, { status: 'completed' }).then(() => {
       triggerToastOnly('Lembrete concluído', 'O alarme foi encerrado e o lembrete foi marcado como concluído.');
+      setActiveAlarm(null);
     }).catch((error) => {
       emitNotification(
         'Erro',
