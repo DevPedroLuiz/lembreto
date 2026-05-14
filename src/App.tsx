@@ -2197,7 +2197,7 @@ export default function App() {
     }
   }, [configConfirmDelete, deleteTask, emitNotification, selectedTask]);
 
-  const handleDeleteFromDetails = useCallback((task: Task) => {
+  const handleDeleteFromDetails = useCallback(async (task: Task) => {
     if (deletingTaskIds.has(task.id)) return;
 
     setSelectedTask(task);
@@ -2209,23 +2209,20 @@ export default function App() {
       return;
     }
 
+    setDeletingTaskIds((prev) => new Set(prev).add(task.id));
     try {
-      setDeletingTaskIds((prev) => new Set(prev).add(task.id));
-      void deleteTask(task.id).then(() => {
-        emitNotification('Lembrete removido', 'O lembrete foi excluído com sucesso.', 'info', { toastOnly: true });
-        setSelectedTask(null);
-        setShowTaskDetails(false);
-      }).catch(() => {
-        emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
-      }).finally(() => {
-        setDeletingTaskIds((prev) => {
-          const next = new Set(prev);
-          next.delete(task.id);
-          return next;
-        });
-      });
+      await deleteTask(task.id);
+      emitNotification('Lembrete removido', 'O lembrete foi excluído com sucesso.', 'info', { toastOnly: true });
+      setSelectedTask(null);
+      setShowTaskDetails(false);
     } catch {
       emitNotification('Erro', 'Falha ao excluir o lembrete.', 'error');
+    } finally {
+      setDeletingTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
     }
   }, [configConfirmDelete, deleteTask, deletingTaskIds, emitNotification]);
 
@@ -3280,7 +3277,7 @@ export default function App() {
                       className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
                     >
                       {isSyncingOfflineTasks
-                        ? 'Sincronizando...'
+                        ? 'Enviando offline'
                         : `${pendingOfflineTaskCount} offline`}
                     </span>
                   )}

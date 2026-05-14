@@ -129,6 +129,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       setCategories([]);
       setTags([]);
       setPendingOfflineTaskCount(0);
+      setIsSyncingOfflineTasks(false);
       return;
     }
 
@@ -344,6 +345,12 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
   const createTask = useCallback(async (payload: TaskPayload) => {
     if (!userId) throw new Error('Nao autenticado');
+    const startedAt = Date.now();
+    console.info('createTask:start', {
+      hasToken: Boolean(token),
+      hasDueDate: Boolean(payload.dueDate),
+      status: payload.status ?? 'pending',
+    });
 
     const queueOfflineCreate = () => {
       const queued = enqueueOfflineTaskCreate(userId, payload);
@@ -353,13 +360,18 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       setCategories((prev) => Array.from(new Set([...prev, optimisticTask.category])));
       setTags((prev) => Array.from(new Set([...prev, ...(optimisticTask.tags ?? [])])));
       setPendingOfflineTaskCount((prev) => prev + 1);
+      console.info('createTask:success', {
+        mode: 'offline',
+        taskId: optimisticTask.id,
+        durationMs: Date.now() - startedAt,
+      });
 
       return optimisticTask;
     };
 
-    if (!token) return queueOfflineCreate();
-
     try {
+      if (!token) return queueOfflineCreate();
+
       const created = await apiPost<Task>('/api/tasks', payload, token);
       tasksMutationVersionRef.current += 1;
       taxonomyMutationVersionRef.current += 1;
@@ -367,10 +379,21 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       setCategories((prev) => Array.from(new Set([...prev, created.category])));
       setTags((prev) => Array.from(new Set([...prev, ...(created.tags ?? [])])));
       saveTaskCache(userId, [created, ...loadTaskCache(userId)]);
+      console.info('createTask:success', {
+        mode: 'online',
+        taskId: created.id,
+        durationMs: Date.now() - startedAt,
+      });
       return created;
     } catch (error) {
       if (isOfflineRequestError(error)) return queueOfflineCreate();
+      console.error('createTask:error', {
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+        durationMs: Date.now() - startedAt,
+      });
       throw error;
+    } finally {
+      console.info('createTask:finally', { durationMs: Date.now() - startedAt });
     }
   }, [token, userId]);
 

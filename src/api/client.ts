@@ -14,6 +14,8 @@ export class ApiError extends Error {
   }
 }
 
+const DEFAULT_FETCH_TIMEOUT_MS = 15000;
+
 function emitUnauthorizedIfNeeded(status: number, token?: string) {
   if (status !== 401 || !token || typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, { detail: { token } }));
@@ -34,12 +36,32 @@ function getApiErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
+async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(path, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError('Tempo esgotado ao falar com o servidor. Tente novamente em instantes.', 408);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function apiPost<T = unknown>(
   path: string,
   body: object,
   token?: string
 ): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: 'POST',
     headers: buildHeaders(token),
     body: JSON.stringify(body),
@@ -55,7 +77,7 @@ export async function apiPut<T = unknown>(
   body: object,
   token: string
 ): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: 'PUT',
     headers: buildHeaders(token),
     body: JSON.stringify(body),
@@ -70,7 +92,7 @@ export async function apiGet<T = unknown>(
   path: string,
   token: string
 ): Promise<T> {
-  const res = await fetch(path, { headers: buildHeaders(token) });
+  const res = await fetchWithTimeout(path, { headers: buildHeaders(token) });
   const data = await parseJsonSafe(res);
   emitUnauthorizedIfNeeded(res.status, token);
   if (!res.ok) throw new ApiError(getApiErrorMessage(data, 'Erro desconhecido'), res.status);
@@ -78,7 +100,7 @@ export async function apiGet<T = unknown>(
 }
 
 export async function apiDelete(path: string, token: string, body?: object): Promise<void> {
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: 'DELETE',
     headers: buildHeaders(token),
     ...(body ? { body: JSON.stringify(body) } : {}),

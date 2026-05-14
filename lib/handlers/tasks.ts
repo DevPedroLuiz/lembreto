@@ -469,6 +469,11 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
     ]);
 
     const totalStartedAt = Date.now();
+    logInfo('tasks:create:start', getRequestMeta(request, {
+      userId: user.id,
+      hasDueDate: Boolean(effectiveDueDate),
+      status,
+    }));
     try {
       const dbStartedAt = Date.now();
       const rows = await sql`
@@ -553,9 +558,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
 
       await syncTaskTaxonomyBestEffort(context, user.id, taskId, category, tags);
       const totalMs = Date.now() - totalStartedAt;
-      logInfo('tasks:create:db-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: dbMs }));
-      logInfo('tasks:create:enqueue-side-effects-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: enqueueMs }));
-      logInfo('tasks:create:total-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: totalMs }));
+      logInfo('tasks:create:insert-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: dbMs }));
+      logInfo('tasks:create:enqueue-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: enqueueMs }));
+      logInfo('tasks:create:response-total-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: totalMs }));
       logInfo('task_created', getRequestMeta(request, { userId: user.id, taskId }));
       return json(201, rows[0]);
     } catch (error) {
