@@ -1448,7 +1448,7 @@ export default function App() {
   }, [formCategory, formDate, formTime, noTimeReminderFallbackTime]);
 
   const taskEndTimeError = useMemo(() => {
-    if (isWorkCategory(formCategory) && (!formDate || !formTime || !formEndTime)) {
+    if (isWorkCategory(formCategory) && (!formDate || !formTime)) {
       return 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
     }
 

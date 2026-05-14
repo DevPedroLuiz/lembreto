@@ -226,6 +226,22 @@ function isWorkCategory(value: string): boolean {
   return normalizeCategoryForValidation(value) === 'trabalho';
 }
 
+function requiresWorkScheduleForUpdate(input: {
+  categoryChanged: boolean;
+  dueDateChanged: boolean;
+  endDateChanged: boolean;
+  nextDueDate: unknown;
+  nextEndDate: unknown;
+  nextStatus: unknown;
+}) {
+  const status = String(input.nextStatus ?? 'pending');
+  if (status !== 'pending' && status !== 'overdue') return false;
+  if (input.categoryChanged) return !input.nextDueDate || !input.nextEndDate;
+  if (input.dueDateChanged && !input.nextDueDate) return true;
+  if (input.endDateChanged && !input.nextEndDate) return true;
+  return false;
+}
+
 async function syncTaskCalendarBestEffort(
   context: HandlerContext,
   userId: string,
@@ -623,7 +639,14 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       };
       if (
         isWorkCategory(String(nextValues.category)) &&
-        (!nextValues.dueDate || !nextValues.endDate)
+        requiresWorkScheduleForUpdate({
+          categoryChanged: category !== undefined,
+          dueDateChanged: dueDate !== undefined,
+          endDateChanged: endDate !== undefined,
+          nextDueDate: nextValues.dueDate,
+          nextEndDate: nextValues.endDate,
+          nextStatus: nextValues.status,
+        })
       ) {
         return json(400, { error: WORK_TIME_REQUIRED_MESSAGE });
       }
