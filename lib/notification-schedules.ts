@@ -22,6 +22,8 @@ const OVERDUE_TASK_SCAN_LIMIT = 10;
 const MISSING_SCHEDULE_TASK_SCAN_LIMIT = 10;
 const STUCK_PROCESSING_RECLAIM_LIMIT = 10;
 const MAX_CRON_DURATION_MS = 25000;
+const SCHEDULE_PROCESS_DURATION_MS = 15000;
+const BACKFILL_DURATION_MS = 3000;
 const INITIAL_FLOATING_SCHEDULE_LIMIT = 1;
 const OVERDUE_SCHEDULES_PER_TASK_LIMIT = 1;
 const QUIET_START_HOUR = 22;
@@ -65,6 +67,18 @@ interface ScheduleRow {
   intervalMinutes: number | null;
 }
 
+export interface ScheduleDiagnostics {
+  postgresNow: string | null;
+  oldestPendingNotifyAt: string | null;
+  duePendingCount: number;
+  futurePendingCount: number;
+  pendingByKind: Record<string, number>;
+  dueByKind: Record<string, number>;
+  processingCount: number;
+  failedCount: number;
+  cancelledCount: number;
+}
+
 export interface ProcessNotificationSchedulesSummary {
   detectedOverdueTasks: number;
   backfilledSchedules: number;
@@ -82,6 +96,7 @@ export interface ProcessNotificationSchedulesSummary {
   sent: number;
   failed: number;
   cancelled: number;
+  scheduleDiagnostics: ScheduleDiagnostics;
 }
 
 export interface CleanupExpiredTaskSummary {
@@ -137,6 +152,17 @@ function mapSchedule(row: Record<string, unknown>): ScheduleRow {
     sequenceIndex: typeof row.sequenceIndex === 'number' ? row.sequenceIndex : null,
     intervalMinutes: typeof row.intervalMinutes === 'number' ? row.intervalMinutes : null,
   };
+}
+
+function toCount(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, number> {
+  return Object.fromEntries(rows.map((row) => [String(row.kind), toCount(row.count)]));
 }
 
 function isSchedulableStatus(status: string): boolean {
@@ -711,7 +737,12 @@ async function markTaskOverdueAndSchedule(
   });
 }
 
-async function detectAndScheduleOverdueTasks(sql: SqlClient, limit: number, startedAt: number) {
+async function detectAndScheduleOverdueTasks(
+  sql: SqlClient,
+  limit: number,
+  startedAt: number,
+  maxDurationMs = MAX_CRON_DURATION_MS,
+) {
   const rows = await sql`
     SELECT
       tasks.id,
@@ -761,7 +792,7 @@ async function detectAndScheduleOverdueTasks(sql: SqlClient, limit: number, star
 
   let detected = 0;
   for (const row of rows) {
-    if (Date.now() - startedAt >= MAX_CRON_DURATION_MS) {
+    if (Date.now() - startedAt >= maxDurationMs) {
       logWarn('notification_overdue_detection_stopped_by_time_limit', {
         detected,
         limit,
@@ -782,7 +813,12 @@ async function detectAndScheduleOverdueTasks(sql: SqlClient, limit: number, star
   return { detected, hasMore: rows.length >= limit };
 }
 
-async function backfillMissingPendingTaskSchedules(sql: SqlClient, limit: number, startedAt: number) {
+async function backfillMissingPendingTaskSchedules(
+  sql: SqlClient,
+  limit: number,
+  startedAt: number,
+  maxDurationMs = MAX_CRON_DURATION_MS,
+) {
   const rows = await sql`
     SELECT
       tasks.id,
@@ -809,7 +845,7 @@ async function backfillMissingPendingTaskSchedules(sql: SqlClient, limit: number
   let backfilled = 0;
 
   for (const row of tasks) {
-    if (Date.now() - startedAt >= MAX_CRON_DURATION_MS) {
+    if (Date.now() - startedAt >= maxDurationMs) {
       logWarn('notification_schedule_backfill_stopped_by_time_limit', {
         backfilled,
         limit,
@@ -860,31 +896,90 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
       FROM notification_schedules
       WHERE status = 'pending'
         AND notify_at <= NOW()
+        AND sent_at IS NULL
+        AND cancelled_at IS NULL
       ORDER BY notify_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     )
-    UPDATE notification_schedules
+    UPDATE notification_schedules ns
     SET
       status = 'processing',
       processing_started_at = NOW(),
       updated_at = NOW()
-    WHERE id IN (SELECT id FROM due)
+    FROM due
+    WHERE ns.id = due.id
     RETURNING
-      id,
-      user_id AS "userId",
-      task_id AS "taskId",
-      kind,
-      notify_at AS "notifyAt",
-      title,
-      message,
-      tone,
-      dedupe_key AS "dedupeKey",
-      sequence_index AS "sequenceIndex",
-      interval_minutes AS "intervalMinutes"
+      ns.id,
+      ns.user_id AS "userId",
+      ns.task_id AS "taskId",
+      ns.kind,
+      ns.notify_at AS "notifyAt",
+      ns.title,
+      ns.message,
+      ns.tone,
+      ns.dedupe_key AS "dedupeKey",
+      ns.sequence_index AS "sequenceIndex",
+      ns.interval_minutes AS "intervalMinutes"
   `;
 
   return rows.map(mapSchedule);
+}
+
+async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnostics> {
+  const [overviewRows, pendingKindRows, dueKindRows] = await Promise.all([
+    sql`
+      SELECT
+        NOW() AS "postgresNow",
+        MIN(notify_at) FILTER (WHERE status = 'pending') AS "oldestPendingNotifyAt",
+        COUNT(*) FILTER (
+          WHERE status = 'pending'
+            AND notify_at <= NOW()
+            AND sent_at IS NULL
+            AND cancelled_at IS NULL
+        ) AS "duePendingCount",
+        COUNT(*) FILTER (
+          WHERE status = 'pending'
+            AND notify_at > NOW()
+            AND sent_at IS NULL
+            AND cancelled_at IS NULL
+        ) AS "futurePendingCount",
+        COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
+        COUNT(*) FILTER (WHERE status = 'failed') AS "failedCount",
+        COUNT(*) FILTER (WHERE status = 'cancelled') AS "cancelledCount"
+      FROM notification_schedules
+    `,
+    sql`
+      SELECT kind, COUNT(*) AS count
+      FROM notification_schedules
+      WHERE status = 'pending'
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+    sql`
+      SELECT kind, COUNT(*) AS count
+      FROM notification_schedules
+      WHERE status = 'pending'
+        AND notify_at <= NOW()
+        AND sent_at IS NULL
+        AND cancelled_at IS NULL
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+  ]);
+
+  const overview = overviewRows[0] ?? {};
+  return {
+    postgresNow: toIso(overview.postgresNow),
+    oldestPendingNotifyAt: toIso(overview.oldestPendingNotifyAt),
+    duePendingCount: toCount(overview.duePendingCount),
+    futurePendingCount: toCount(overview.futurePendingCount),
+    pendingByKind: mapCountByKind(pendingKindRows),
+    dueByKind: mapCountByKind(dueKindRows),
+    processingCount: toCount(overview.processingCount),
+    failedCount: toCount(overview.failedCount),
+    cancelledCount: toCount(overview.cancelledCount),
+  };
 }
 
 async function updateScheduleStatus(sql: SqlClient, scheduleId: string, status: NotificationScheduleStatus, errorMessage?: string) {
@@ -1141,71 +1236,106 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   return 'sent' as const;
 }
 
-export async function processNotificationSchedules(sql: SqlClient, limit = PROCESS_LIMIT): Promise<ProcessNotificationSchedulesSummary> {
+function createScheduleSummary(input: {
+  diagnostics: ScheduleDiagnostics;
+  reclaimedSchedules?: number;
+  fetchedSchedules?: number;
+  durationMs?: number;
+  hasMore?: boolean;
+  stoppedByTimeLimit?: boolean;
+}): ProcessNotificationSchedulesSummary {
+  return {
+    detectedOverdueTasks: 0,
+    backfilledSchedules: 0,
+    reclaimedSchedules: input.reclaimedSchedules ?? 0,
+    fetchedSchedules: input.fetchedSchedules ?? 0,
+    processedSchedules: 0,
+    sentSchedules: 0,
+    cancelledSchedules: 0,
+    rescheduledSchedules: 0,
+    failedSchedules: 0,
+    durationMs: input.durationMs ?? 0,
+    hasMore: input.hasMore ?? false,
+    stoppedByTimeLimit: input.stoppedByTimeLimit ?? false,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    cancelled: 0,
+    scheduleDiagnostics: input.diagnostics,
+  };
+}
+
+function finalizeScheduleSummary(summary: ProcessNotificationSchedulesSummary, startedAt: number) {
+  summary.durationMs = Date.now() - startedAt;
+  summary.processed = summary.processedSchedules;
+  summary.sent = summary.sentSchedules;
+  summary.failed = summary.failedSchedules;
+  summary.cancelled = summary.cancelledSchedules;
+  return summary;
+}
+
+export async function processDueNotificationSchedules(
+  sql: SqlClient,
+  limit = PROCESS_LIMIT,
+  maxDurationMs = SCHEDULE_PROCESS_DURATION_MS,
+): Promise<ProcessNotificationSchedulesSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), PROCESS_LIMIT);
   logInfo('cron_notifications_started', {
     processLimit,
-    overdueTaskScanLimit: OVERDUE_TASK_SCAN_LIMIT,
-    missingScheduleTaskScanLimit: MISSING_SCHEDULE_TASK_SCAN_LIMIT,
     stuckProcessingReclaimLimit: STUCK_PROCESSING_RECLAIM_LIMIT,
-    maxDurationMs: MAX_CRON_DURATION_MS,
+    maxDurationMs,
   });
 
   await ensureNotificationSchedulingInfrastructure(sql);
   const reclaimedSchedules = await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
-  const backfill = await backfillMissingPendingTaskSchedules(sql, MISSING_SCHEDULE_TASK_SCAN_LIMIT, startedAt);
-  const overdueDetection = await detectAndScheduleOverdueTasks(sql, OVERDUE_TASK_SCAN_LIMIT, startedAt);
-  const outOfTimeBeforeClaim = Date.now() - startedAt >= MAX_CRON_DURATION_MS;
+  const scheduleDiagnostics = await getScheduleDiagnostics(sql);
+  const outOfTimeBeforeClaim = Date.now() - startedAt >= maxDurationMs;
   if (outOfTimeBeforeClaim) {
     logWarn('cron_notifications_claim_skipped_by_time_limit', {
       durationMs: Date.now() - startedAt,
-      maxDurationMs: MAX_CRON_DURATION_MS,
-      backfilledSchedules: backfill.backfilled,
-      detectedOverdueTasks: overdueDetection.detected,
+      maxDurationMs,
       reclaimedSchedules,
+      scheduleDiagnostics,
     });
   }
 
   const schedules = outOfTimeBeforeClaim
     ? []
     : await claimDueSchedules(sql, processLimit);
-  const summary: ProcessNotificationSchedulesSummary = {
-    detectedOverdueTasks: overdueDetection.detected,
-    backfilledSchedules: backfill.backfilled,
+  const summary = createScheduleSummary({
+    diagnostics: scheduleDiagnostics,
     reclaimedSchedules,
     fetchedSchedules: schedules.length,
-    processedSchedules: 0,
-    sentSchedules: 0,
-    cancelledSchedules: 0,
-    rescheduledSchedules: 0,
-    failedSchedules: 0,
-    durationMs: 0,
-    hasMore: outOfTimeBeforeClaim || backfill.hasMore || overdueDetection.hasMore || reclaimedSchedules >= STUCK_PROCESSING_RECLAIM_LIMIT || schedules.length >= processLimit,
+    hasMore: outOfTimeBeforeClaim || reclaimedSchedules >= STUCK_PROCESSING_RECLAIM_LIMIT || schedules.length >= processLimit,
     stoppedByTimeLimit: outOfTimeBeforeClaim,
-    processed: 0,
-    sent: 0,
-    failed: 0,
-    cancelled: 0,
-  };
+  });
 
   logInfo('cron_notifications_schedules_claimed', {
     fetchedSchedules: schedules.length,
     reclaimedSchedules,
-    backfilledSchedules: backfill.backfilled,
-    detectedOverdueTasks: overdueDetection.detected,
     hasMore: summary.hasMore,
+    scheduleDiagnostics,
   });
 
+  if (scheduleDiagnostics.duePendingCount > 0 && schedules.length === 0) {
+    logError('notification_schedule_due_but_not_fetched', undefined, {
+      scheduleDiagnostics,
+      processLimit,
+      reclaimedSchedules,
+      outOfTimeBeforeClaim,
+    });
+  }
+
   for (const schedule of schedules) {
-    if (Date.now() - startedAt >= MAX_CRON_DURATION_MS) {
+    if (Date.now() - startedAt >= maxDurationMs) {
       summary.hasMore = true;
       summary.stoppedByTimeLimit = true;
       logWarn('cron_notifications_stopped_by_time_limit', {
         processedSchedules: summary.processedSchedules,
         fetchedSchedules: schedules.length,
         durationMs: Date.now() - startedAt,
-        maxDurationMs: MAX_CRON_DURATION_MS,
+        maxDurationMs,
       });
       break;
     }
@@ -1229,11 +1359,7 @@ export async function processNotificationSchedules(sql: SqlClient, limit = PROCE
     }
   }
 
-  summary.durationMs = Date.now() - startedAt;
-  summary.processed = summary.processedSchedules;
-  summary.sent = summary.sentSchedules;
-  summary.failed = summary.failedSchedules;
-  summary.cancelled = summary.cancelledSchedules;
+  finalizeScheduleSummary(summary, startedAt);
   logInfo('cron_notifications_finished', {
     detectedOverdueTasks: summary.detectedOverdueTasks,
     backfilledSchedules: summary.backfilledSchedules,
@@ -1247,9 +1373,53 @@ export async function processNotificationSchedules(sql: SqlClient, limit = PROCE
     durationMs: summary.durationMs,
     hasMore: summary.hasMore,
     stoppedByTimeLimit: summary.stoppedByTimeLimit,
+    scheduleDiagnostics: summary.scheduleDiagnostics,
   });
 
   return summary;
+}
+
+export async function backfillMissingNotificationSchedules(
+  sql: SqlClient,
+  limit = MISSING_SCHEDULE_TASK_SCAN_LIMIT,
+  maxDurationMs = BACKFILL_DURATION_MS,
+) {
+  const startedAt = Date.now();
+  await ensureNotificationSchedulingInfrastructure(sql);
+  const backfill = await backfillMissingPendingTaskSchedules(sql, limit, startedAt, maxDurationMs);
+  return {
+    backfilledSchedules: backfill.backfilled,
+    durationMs: Date.now() - startedAt,
+    hasMore: backfill.hasMore,
+  };
+}
+
+export async function detectOverdueNotificationSchedules(
+  sql: SqlClient,
+  limit = OVERDUE_TASK_SCAN_LIMIT,
+  maxDurationMs = BACKFILL_DURATION_MS,
+) {
+  const startedAt = Date.now();
+  await ensureNotificationSchedulingInfrastructure(sql);
+  const overdueDetection = await detectAndScheduleOverdueTasks(sql, limit, startedAt, maxDurationMs);
+  return {
+    detectedOverdueTasks: overdueDetection.detected,
+    durationMs: Date.now() - startedAt,
+    hasMore: overdueDetection.hasMore,
+  };
+}
+
+export async function processNotificationSchedules(sql: SqlClient, limit = PROCESS_LIMIT): Promise<ProcessNotificationSchedulesSummary> {
+  const startedAt = Date.now();
+  const dueSummary = await processDueNotificationSchedules(sql, limit, SCHEDULE_PROCESS_DURATION_MS);
+  const backfill = await backfillMissingNotificationSchedules(sql, MISSING_SCHEDULE_TASK_SCAN_LIMIT, BACKFILL_DURATION_MS);
+  const overdueDetection = await detectOverdueNotificationSchedules(sql, OVERDUE_TASK_SCAN_LIMIT, BACKFILL_DURATION_MS);
+
+  dueSummary.backfilledSchedules = backfill.backfilledSchedules;
+  dueSummary.detectedOverdueTasks = overdueDetection.detectedOverdueTasks;
+  dueSummary.durationMs = Date.now() - startedAt;
+  dueSummary.hasMore = dueSummary.hasMore || backfill.hasMore || overdueDetection.hasMore;
+  return dueSummary;
 }
 
 export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, scheduleId: string, minutes: number) {

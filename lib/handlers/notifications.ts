@@ -16,8 +16,10 @@ import {
   upsertPushSubscription,
 } from '../notifications.js';
 import {
+  backfillMissingNotificationSchedules,
+  detectOverdueNotificationSchedules,
   dismissAlarmSchedule,
-  processNotificationSchedules,
+  processDueNotificationSchedules,
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
 import { processTaskSideEffects } from '../task-side-effects.js';
@@ -38,6 +40,9 @@ import {
   json,
   methodNotAllowed,
 } from './core.js';
+
+const SIDE_EFFECT_PROCESS_DURATION_MS = 8000;
+const CALENDAR_SYNC_DURATION_MS = 3000;
 
 function isAuthorizedCronRequest(context: HandlerContext): boolean {
   const vercelCronHeader = context.request.headers['x-vercel-cron'];
@@ -337,15 +342,23 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
-    const sideEffects = await processTaskSideEffects(sql);
-    const result = await processNotificationSchedules(sql);
-    const calendarSync = await processPendingCalendarSyncs(sql);
+    const result = await processDueNotificationSchedules(sql);
+    const sideEffects = await processTaskSideEffects(sql, 10, SIDE_EFFECT_PROCESS_DURATION_MS);
+    const backfill = await backfillMissingNotificationSchedules(sql);
+    const calendarSync = await processPendingCalendarSyncs(sql, 5, CALENDAR_SYNC_DURATION_MS);
+    const overdueDetection = await detectOverdueNotificationSchedules(sql);
+
+    result.backfilledSchedules = backfill.backfilledSchedules;
+    result.detectedOverdueTasks = overdueDetection.detectedOverdueTasks;
+    result.hasMore = result.hasMore || sideEffects.hasMore || backfill.hasMore || overdueDetection.hasMore;
     logInfo('cron_notifications_completed', getRequestMeta(request, {
       sideEffects,
       ...result,
+      backfill,
       calendarSync,
+      overdueDetection,
     }));
-    return json(200, { ok: true, sideEffects, ...result, calendarSync });
+    return json(200, { ok: true, sideEffects, ...result, backfill, calendarSync, overdueDetection });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));
     return json(500, { error: 'Erro ao gerar notificações agendadas' });

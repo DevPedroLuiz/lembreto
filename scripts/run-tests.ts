@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import webpush from 'web-push';
+import type { SqlClient } from '../lib/handlers/core.js';
 import {
   buildGoogleOAuthStateCookie,
   buildSessionCookie,
@@ -42,6 +45,206 @@ function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean 
   };
 }
 
+function createNotificationScheduleSqlMock(options?: {
+  future?: boolean;
+  failPushLookup?: boolean;
+}) {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const taskId = '22222222-2222-4222-8222-222222222222';
+  const scheduleId = '33333333-3333-4333-8333-333333333333';
+  const now = new Date('2026-05-14T17:40:36.651Z');
+  const notifyAt = new Date(options?.future ? '2026-05-14T17:50:00.000Z' : '2026-05-14T17:39:00.000Z');
+  const schedule = {
+    id: scheduleId,
+    userId,
+    taskId,
+    kind: 'notification',
+    notifyAt: notifyAt.toISOString(),
+    status: 'pending',
+    title: 'Esta na hora',
+    message: '"Teste" chegou ao horario definido.',
+    tone: 'info',
+    dedupeKey: `user:${userId}:task:${taskId}:notification:2026-05-14-17-39`,
+    sequenceIndex: null,
+    intervalMinutes: null,
+    sentAt: null as string | null,
+    failedAt: null as string | null,
+    cancelledAt: null as string | null,
+    processingStartedAt: null as string | null,
+    errorMessage: null as string | null,
+  };
+  const notifications: Array<Record<string, unknown>> = [];
+
+  const rowForSchedule = () => ({
+    id: schedule.id,
+    userId: schedule.userId,
+    taskId: schedule.taskId,
+    kind: schedule.kind,
+    notifyAt: schedule.notifyAt,
+    title: schedule.title,
+    message: schedule.message,
+    tone: schedule.tone,
+    dedupeKey: schedule.dedupeKey,
+    sequenceIndex: schedule.sequenceIndex,
+    intervalMinutes: schedule.intervalMinutes,
+  });
+
+  const mapNotification = (notification: Record<string, unknown>) => ({
+    id: notification.id,
+    title: notification.title,
+    message: notification.message,
+    createdAt: notification.createdAt,
+    read: notification.read,
+    tone: notification.tone,
+    targetType: notification.targetType,
+    targetTaskId: notification.targetTaskId,
+    dedupeKey: notification.dedupeKey,
+    sourceScheduleId: notification.sourceScheduleId,
+    kind: notification.kind,
+  });
+
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(' ');
+
+    if (query.includes('NOW() AS "postgresNow"')) {
+      const isDue = schedule.status === 'pending' &&
+        new Date(schedule.notifyAt) <= now &&
+        schedule.sentAt === null &&
+        schedule.cancelledAt === null;
+      return [{
+        postgresNow: now.toISOString(),
+        oldestPendingNotifyAt: schedule.status === 'pending' ? schedule.notifyAt : null,
+        duePendingCount: isDue ? 1 : 0,
+        futurePendingCount: schedule.status === 'pending' && !isDue ? 1 : 0,
+        processingCount: schedule.status === 'processing' ? 1 : 0,
+        failedCount: schedule.status === 'failed' ? 1 : 0,
+        cancelledCount: schedule.status === 'cancelled' ? 1 : 0,
+      }];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
+      const isDueQuery = query.includes('notify_at <= NOW()');
+      const isDue = schedule.status === 'pending' &&
+        new Date(schedule.notifyAt) <= now &&
+        schedule.sentAt === null &&
+        schedule.cancelledAt === null;
+      if (schedule.status !== 'pending') return [];
+      if (isDueQuery && !isDue) return [];
+      return [{ kind: schedule.kind, count: 1 }];
+    }
+
+    if (query.includes('WITH stuck AS') && query.includes('UPDATE notification_schedules')) {
+      return [];
+    }
+
+    if (query.includes('WITH due AS') && query.includes('UPDATE notification_schedules ns')) {
+      const isDue = schedule.status === 'pending' &&
+        new Date(schedule.notifyAt) <= now &&
+        schedule.sentAt === null &&
+        schedule.cancelledAt === null;
+      if (!isDue) return [];
+      schedule.status = 'processing';
+      schedule.processingStartedAt = now.toISOString();
+      return [rowForSchedule()];
+    }
+
+    if (query.includes('FROM tasks') && query.includes('INNER JOIN users')) {
+      return [{
+        id: taskId,
+        userId,
+        title: 'Teste',
+        description: '',
+        dueDate: schedule.notifyAt,
+        status: 'pending',
+        createdAt: '2026-05-14T17:00:00.000Z',
+        alarmEnabled: false,
+        reminderMode: 'timed',
+        expiresAt: null,
+        overdueSince: null,
+        overdueExpiresAt: null,
+        deletedAt: null,
+        mutedUntil: null,
+        suppressHolidayNotifications: false,
+        floatingIntervalMinutes: null,
+        notificationsEnabled: true,
+        stateCode: null,
+        cityName: null,
+        holidayRegionCode: null,
+      }];
+    }
+
+    if (query.includes('FROM notifications') && query.includes('WHERE user_id')) {
+      const dedupeKey = values.find((value) => value === schedule.dedupeKey);
+      const sourceScheduleId = values.find((value) => value === schedule.id);
+      const existing = notifications.find((notification) => (
+        notification.dedupeKey === dedupeKey ||
+        notification.sourceScheduleId === sourceScheduleId
+      ));
+      return existing ? [mapNotification(existing)] : [];
+    }
+
+    if (query.includes('INSERT INTO notifications')) {
+      const notification = {
+        id: '44444444-4444-4444-8444-444444444444',
+        userId: values[0],
+        title: values[1],
+        message: values[2],
+        tone: values[3],
+        targetType: values[4],
+        targetTaskId: values[5],
+        dedupeKey: values[6],
+        sourceScheduleId: values[7],
+        kind: values[8],
+        createdAt: now.toISOString(),
+        read: false,
+      };
+      notifications.push(notification);
+      return [mapNotification(notification)];
+    }
+
+    if (query.includes('SELECT notifications_enabled AS "notificationsEnabled"')) {
+      if (options?.failPushLookup) throw new Error('push lookup failed');
+      return [{ notificationsEnabled: true }];
+    }
+
+    if (query.includes('FROM push_subscriptions')) {
+      return [];
+    }
+
+    if (query.includes('UPDATE notification_schedules') && query.includes('sent_at = CASE')) {
+      const status = String(values[0]);
+      schedule.status = status;
+      schedule.sentAt = status === 'sent' ? now.toISOString() : schedule.sentAt;
+      schedule.failedAt = status === 'failed' ? now.toISOString() : schedule.failedAt;
+      schedule.cancelledAt = status === 'cancelled' ? now.toISOString() : schedule.cancelledAt;
+      schedule.errorMessage = typeof values[3] === 'string' ? values[3] : null;
+      return [];
+    }
+
+    if (query.includes('information_schema.columns') || query.includes('to_regclass')) {
+      return [{
+        hasUserSetting: true,
+        hasNotifications: true,
+        hasPushSubscriptions: true,
+        hasNotificationKind: true,
+        hasCreatedIndex: true,
+        hasReadIndex: true,
+        hasDedupeIndex: true,
+        hasSourceScheduleIndex: true,
+        hasPushIndex: true,
+      }];
+    }
+
+    return [];
+  }) as SqlClient;
+
+  return {
+    sql,
+    schedule,
+    notifications,
+  };
+}
+
 async function run(name: string, fn: () => Promise<void> | void) {
   try {
     await fn();
@@ -81,6 +284,9 @@ async function main() {
     handleCalendarIntegrations,
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
+  const {
+    processDueNotificationSchedules,
+  } = await import('../lib/notification-schedules.js');
   const { requiresWorkEndDateForStatus } = await import('../lib/contracts.js');
 
   await run('buildTokenJti composes subject and iat', () => {
@@ -451,6 +657,66 @@ async function main() {
       errors: ['Conecte o Google Calendar antes de sincronizar.'],
     });
     assert.equal(body.integrations.length, 2);
+  });
+
+  await run('processes due notification schedule and marks it sent', async () => {
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock();
+    const result = await processDueNotificationSchedules(sql, 20);
+
+    assert.equal(result.fetchedSchedules, 1);
+    assert.equal(result.processedSchedules, 1);
+    assert.equal(result.sentSchedules, 1);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].sourceScheduleId, schedule.id);
+    assert.equal(schedule.status, 'sent');
+    assert.notEqual(schedule.sentAt, null);
+  });
+
+  await run('does not process future notification schedule', async () => {
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ future: true });
+    const result = await processDueNotificationSchedules(sql, 20);
+
+    assert.equal(result.scheduleDiagnostics.futurePendingCount, 1);
+    assert.equal(result.fetchedSchedules, 0);
+    assert.equal(result.processedSchedules, 0);
+    assert.equal(notifications.length, 0);
+    assert.equal(schedule.status, 'pending');
+    assert.equal(schedule.sentAt, null);
+  });
+
+  await run('push failure does not block central notification or sent schedule', async () => {
+    const previousPublicKey = process.env.VAPID_PUBLIC_KEY;
+    const previousPrivateKey = process.env.VAPID_PRIVATE_KEY;
+    const keys = webpush.generateVAPIDKeys();
+
+    try {
+      process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+      process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+      const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ failPushLookup: true });
+      const result = await processDueNotificationSchedules(sql, 20);
+
+      assert.equal(result.fetchedSchedules, 1);
+      assert.equal(result.sentSchedules, 1);
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0].sourceScheduleId, schedule.id);
+      assert.equal(schedule.status, 'sent');
+      assert.notEqual(schedule.sentAt, null);
+    } finally {
+      if (previousPublicKey === undefined) delete process.env.VAPID_PUBLIC_KEY;
+      else process.env.VAPID_PUBLIC_KEY = previousPublicKey;
+      if (previousPrivateKey === undefined) delete process.env.VAPID_PRIVATE_KEY;
+      else process.env.VAPID_PRIVATE_KEY = previousPrivateKey;
+    }
+  });
+
+  await run('cron processes due schedules before side effects', () => {
+    const cronHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
+    const dueIndex = cronHandler.indexOf('processDueNotificationSchedules(sql)');
+    const sideEffectIndex = cronHandler.indexOf('processTaskSideEffects(sql');
+
+    assert.ok(dueIndex >= 0);
+    assert.ok(sideEffectIndex >= 0);
+    assert.ok(dueIndex < sideEffectIndex);
   });
 
   console.log('PASS all tests');

@@ -724,12 +724,15 @@ function buildImportedHistory(provider: CalendarProvider, eventId: string) {
   }];
 }
 
-export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5): Promise<{
+export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, maxDurationMs = 3000): Promise<{
   scanned: number;
   synced: number;
   skipped: number;
   failed: number;
+  stoppedByTimeLimit: boolean;
+  durationMs: number;
 }> {
+  const startedAt = Date.now();
   await ensureCalendarIntegrationSchema(sql);
   const rows = await sql`
     SELECT id, user_id AS "userId"
@@ -746,8 +749,14 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5): Pr
   let synced = 0;
   let skipped = 0;
   let failed = 0;
+  let stoppedByTimeLimit = false;
 
   for (const row of rows) {
+    if (Date.now() - startedAt >= maxDurationMs) {
+      stoppedByTimeLimit = true;
+      break;
+    }
+
     const result = await syncTaskToExternalCalendar({
       sql,
       userId: String(row.userId),
@@ -768,6 +777,8 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5): Pr
     synced,
     skipped,
     failed,
+    stoppedByTimeLimit,
+    durationMs: Date.now() - startedAt,
   };
 }
 
