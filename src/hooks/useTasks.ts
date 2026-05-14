@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import {
   buildOfflineTask,
@@ -19,22 +19,18 @@ import {
 import type { Priority, Status, Task, TaskTaxonomy, User } from '../types';
 
 type TaskPayload = TaskCreatePayload;
+type InFlightRequest<T> = {
+  key: string;
+  promise: Promise<T>;
+};
 
-function mergeStringLists(primary: string[], secondary: string[]) {
-  return Array.from(new Set([...primary, ...secondary]));
-}
+const SYNC_REFRESH_DEBOUNCE_MS = 3000;
 
-function mergeTaskLists(primary: Task[], secondary: Task[]) {
-  const seen = new Set<string>();
-  const merged: Task[] = [];
-
-  for (const task of [...primary, ...secondary]) {
-    if (seen.has(task.id)) continue;
-    seen.add(task.id);
-    merged.push(task);
-  }
-
-  return merged;
+function normalizeTaxonomy(data: TaskTaxonomy): TaskTaxonomy {
+  return {
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    tags: Array.isArray(data.tags) ? data.tags : [],
+  };
 }
 
 function findOfflineTask(queueId: string, userId: string): Task {
@@ -50,6 +46,11 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   const [pendingOfflineTaskCount, setPendingOfflineTaskCount] = useState(0);
   const [isSyncingOfflineTasks, setIsSyncingOfflineTasks] = useState(false);
   const userId = currentUser?.id ?? null;
+  const tasksFetchInFlightRef = useRef<InFlightRequest<Task[]> | null>(null);
+  const taxonomyFetchInFlightRef = useRef<InFlightRequest<TaskTaxonomy> | null>(null);
+  const offlineSyncInFlightRef = useRef<InFlightRequest<number> | null>(null);
+  const listenerSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastListenerSyncAtRef = useRef(0);
 
   const applyCachedState = useCallback((requestUserId = userId) => {
     if (!requestUserId) {
@@ -73,72 +74,144 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     setPendingOfflineTaskCount(offlineCreates.length);
   }, [userId]);
 
+  const fetchServerTasks = useCallback(async (
+    requestToken: string,
+    requestUserId: string,
+  ): Promise<Task[]> => {
+    while (tasksFetchInFlightRef.current) {
+      const existingRequest = tasksFetchInFlightRef.current;
+      if (existingRequest.key === requestUserId) return existingRequest.promise;
+      await existingRequest.promise.catch(() => undefined);
+    }
+
+    const promise = apiGet<Task[]>('/api/tasks', requestToken)
+      .then((data) => (Array.isArray(data) ? data : []))
+      .finally(() => {
+        if (tasksFetchInFlightRef.current?.promise === promise) {
+          tasksFetchInFlightRef.current = null;
+        }
+      });
+
+    tasksFetchInFlightRef.current = { key: requestUserId, promise };
+    return promise;
+  }, []);
+
+  const fetchServerTaxonomy = useCallback(async (
+    requestToken: string,
+    requestUserId: string,
+  ): Promise<TaskTaxonomy> => {
+    while (taxonomyFetchInFlightRef.current) {
+      const existingRequest = taxonomyFetchInFlightRef.current;
+      if (existingRequest.key === requestUserId) return existingRequest.promise;
+      await existingRequest.promise.catch(() => undefined);
+    }
+
+    const promise = apiGet<TaskTaxonomy>('/api/tasks/metadata', requestToken)
+      .then(normalizeTaxonomy)
+      .finally(() => {
+        if (taxonomyFetchInFlightRef.current?.promise === promise) {
+          taxonomyFetchInFlightRef.current = null;
+        }
+      });
+
+    taxonomyFetchInFlightRef.current = { key: requestUserId, promise };
+    return promise;
+  }, []);
+
+  const refreshTasksAndTaxonomy = useCallback(async (
+    requestToken = token,
+    requestUserId = userId,
+  ) => {
+    if (!requestUserId) {
+      setTasks([]);
+      setCategories([]);
+      setTags([]);
+      setPendingOfflineTaskCount(0);
+      return;
+    }
+
+    if (!requestToken) {
+      applyCachedState(requestUserId);
+      return;
+    }
+
+    const [syncedTasks, syncedTaxonomy] = await Promise.all([
+      fetchServerTasks(requestToken, requestUserId),
+      fetchServerTaxonomy(requestToken, requestUserId),
+    ]);
+    const offlineCreates = loadOfflineTaskCreates(requestUserId);
+
+    saveTaskCache(requestUserId, syncedTasks);
+    saveTaskTaxonomyCache(requestUserId, syncedTaxonomy);
+    setTasks(mergeTasksWithOfflineCreates(syncedTasks, offlineCreates));
+
+    const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, offlineCreates);
+    setCategories(mergedTaxonomy.categories);
+    setTags(mergedTaxonomy.tags);
+    setPendingOfflineTaskCount(offlineCreates.length);
+  }, [applyCachedState, fetchServerTasks, fetchServerTaxonomy, token, userId]);
+
   const syncOfflineTasks = useCallback(async (requestToken = token, requestUserId = userId) => {
     if (!requestToken || !requestUserId) return 0;
 
-    const offlineCreates = loadOfflineTaskCreates(requestUserId);
-    if (offlineCreates.length === 0) {
-      setPendingOfflineTaskCount(0);
-      return 0;
-    }
+    const existingSync = offlineSyncInFlightRef.current;
+    if (existingSync) return existingSync.promise;
 
-    let syncedCount = 0;
-    setIsSyncingOfflineTasks(true);
+    const syncPromise = (async () => {
+      const offlineCreates = loadOfflineTaskCreates(requestUserId);
+      if (offlineCreates.length === 0) {
+        setPendingOfflineTaskCount(0);
+        return 0;
+      }
 
-    try {
-      for (const item of offlineCreates) {
-        try {
-          const created = await apiPost<Task>('/api/tasks', item.payload, requestToken);
-          removeOfflineTaskCreate(item.id);
-          syncedCount += 1;
+      let syncedCount = 0;
+      setIsSyncingOfflineTasks(true);
 
-          const offlineTaskId = buildOfflineTask(item).id;
-          setTasks((prev) => prev.map((task) => (task.id === offlineTaskId ? created : task)));
-          setCategories((prev) => Array.from(new Set([...prev, created.category])));
-          setTags((prev) => Array.from(new Set([...prev, ...(created.tags ?? [])])));
-        } catch (error) {
-          if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      try {
+        for (const item of offlineCreates) {
+          try {
+            const created = await apiPost<Task>('/api/tasks', item.payload, requestToken);
             removeOfflineTaskCreate(item.id);
             syncedCount += 1;
-            continue;
+
+            const offlineTaskId = buildOfflineTask(item).id;
+            setTasks((prev) => prev.map((task) => (task.id === offlineTaskId ? created : task)));
+            setCategories((prev) => Array.from(new Set([...prev, created.category])));
+            setTags((prev) => Array.from(new Set([...prev, ...(created.tags ?? [])])));
+          } catch (error) {
+            if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+              removeOfflineTaskCreate(item.id);
+              syncedCount += 1;
+              continue;
+            }
+
+            if (isOfflineRequestError(error)) break;
+            throw error;
           }
-
-          if (isOfflineRequestError(error)) break;
-          throw error;
         }
+
+        const remainingCreates = loadOfflineTaskCreates(requestUserId);
+        setPendingOfflineTaskCount(remainingCreates.length);
+
+        if (syncedCount > 0) {
+          await refreshTasksAndTaxonomy(requestToken, requestUserId).catch(() => {
+            // Local optimistic state stays available if the follow-up refresh fails.
+          });
+        }
+
+        return syncedCount;
+      } finally {
+        setIsSyncingOfflineTasks(false);
       }
-
-      const remainingCreates = loadOfflineTaskCreates(requestUserId);
-      setPendingOfflineTaskCount(remainingCreates.length);
-
-      if (syncedCount > 0) {
-        const [serverTasks, taxonomy] = await Promise.all([
-          apiGet<Task[]>('/api/tasks', requestToken).catch(() => null),
-          apiGet<TaskTaxonomy>('/api/tasks/metadata', requestToken).catch(() => null),
-        ]);
-
-        if (Array.isArray(serverTasks)) {
-          saveTaskCache(requestUserId, serverTasks);
-          setTasks(mergeTasksWithOfflineCreates(serverTasks, remainingCreates));
-        }
-
-        if (taxonomy) {
-          const syncedTaxonomy = {
-            categories: Array.isArray(taxonomy.categories) ? taxonomy.categories : [],
-            tags: Array.isArray(taxonomy.tags) ? taxonomy.tags : [],
-          };
-          saveTaskTaxonomyCache(requestUserId, syncedTaxonomy);
-          const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, remainingCreates);
-          setCategories(mergedTaxonomy.categories);
-          setTags(mergedTaxonomy.tags);
-        }
+    })().finally(() => {
+      if (offlineSyncInFlightRef.current?.promise === syncPromise) {
+        offlineSyncInFlightRef.current = null;
       }
+    });
 
-      return syncedCount;
-    } finally {
-      setIsSyncingOfflineTasks(false);
-    }
-  }, [token, userId]);
+    offlineSyncInFlightRef.current = { key: requestUserId, promise: syncPromise };
+    return syncPromise;
+  }, [refreshTasksAndTaxonomy, token, userId]);
 
   const refreshTasks = useCallback(async (requestToken = token) => {
     if (!userId) {
@@ -151,11 +224,10 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       return;
     }
 
-    const data = await apiGet<Task[]>('/api/tasks', requestToken);
-    const syncedTasks = Array.isArray(data) ? data : [];
+    const syncedTasks = await fetchServerTasks(requestToken, userId);
     saveTaskCache(userId, syncedTasks);
     setTasks(mergeTasksWithOfflineCreates(syncedTasks, loadOfflineTaskCreates(userId)));
-  }, [token, userId]);
+  }, [fetchServerTasks, token, userId]);
 
   const refreshTaxonomy = useCallback(async (requestToken = token) => {
     if (!userId) {
@@ -174,17 +246,13 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       return;
     }
 
-    const data = await apiGet<TaskTaxonomy>('/api/tasks/metadata', requestToken);
-    const taxonomy = {
-      categories: Array.isArray(data.categories) ? data.categories : [],
-      tags: Array.isArray(data.tags) ? data.tags : [],
-    };
+    const taxonomy = await fetchServerTaxonomy(requestToken, userId);
     saveTaskTaxonomyCache(userId, taxonomy);
 
     const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(taxonomy, loadOfflineTaskCreates(userId));
     setCategories(mergedTaxonomy.categories);
     setTags(mergedTaxonomy.tags);
-  }, [token, userId]);
+  }, [fetchServerTaxonomy, token, userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -196,44 +264,59 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
     if (!token) return;
 
-    void syncOfflineTasks(token, userId).catch(() => {
-      // Keep queued reminders locally when sync is not possible.
-    });
-
-    Promise.all([
-      apiGet<Task[]>('/api/tasks', token),
-      apiGet<TaskTaxonomy>('/api/tasks/metadata', token),
-    ])
-      .then(([taskData, taxonomy]) => {
-        const syncedTasks = Array.isArray(taskData) ? taskData : [];
-        const syncedTaxonomy = {
-          categories: Array.isArray(taxonomy.categories) ? taxonomy.categories : [],
-          tags: Array.isArray(taxonomy.tags) ? taxonomy.tags : [],
-        };
-        const offlineCreates = loadOfflineTaskCreates(userId);
-
-        saveTaskCache(userId, syncedTasks);
-        saveTaskTaxonomyCache(userId, syncedTaxonomy);
-        setTasks((prev) => mergeTasksWithOfflineCreates(mergeTaskLists(syncedTasks, prev), offlineCreates));
-
-        const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, offlineCreates);
-        setCategories((prev) => mergeStringLists(mergedTaxonomy.categories, prev));
-        setTags((prev) => mergeStringLists(mergedTaxonomy.tags, prev));
-        setPendingOfflineTaskCount(offlineCreates.length);
-      })
-      .catch(() => {
+    void (async () => {
+      try {
+        const hasOfflineCreates = loadOfflineTaskCreates(userId).length > 0;
+        const syncedCount = hasOfflineCreates ? await syncOfflineTasks(token, userId) : 0;
+        if (!hasOfflineCreates || syncedCount === 0) {
+          await refreshTasksAndTaxonomy(token, userId);
+        }
+      } catch {
         applyCachedState(userId);
-      });
-  }, [applyCachedState, syncOfflineTasks, token, userId]);
+      }
+    })();
+  }, [applyCachedState, refreshTasksAndTaxonomy, syncOfflineTasks, token, userId]);
 
   useEffect(() => {
     if (!token || !userId) return undefined;
 
     const sync = () => {
       if (document.visibilityState === 'hidden') return;
-      void syncOfflineTasks(token, userId).catch(() => {
-        // Best effort sync when the browser reports connectivity again.
-      });
+      if (
+        offlineSyncInFlightRef.current
+        || tasksFetchInFlightRef.current
+        || taxonomyFetchInFlightRef.current
+      ) {
+        return;
+      }
+
+      if (listenerSyncTimeoutRef.current) return;
+
+      const elapsed = Date.now() - lastListenerSyncAtRef.current;
+      const delay = Math.max(0, SYNC_REFRESH_DEBOUNCE_MS - elapsed);
+      const run = () => {
+        listenerSyncTimeoutRef.current = null;
+        if (
+          document.visibilityState === 'hidden'
+          || offlineSyncInFlightRef.current
+          || tasksFetchInFlightRef.current
+          || taxonomyFetchInFlightRef.current
+        ) {
+          return;
+        }
+
+        lastListenerSyncAtRef.current = Date.now();
+        void syncOfflineTasks(token, userId).catch(() => {
+          // Best effort sync when the browser reports connectivity again.
+        });
+      };
+
+      if (delay > 0) {
+        listenerSyncTimeoutRef.current = setTimeout(run, delay);
+        return;
+      }
+
+      run();
     };
 
     window.addEventListener('online', sync);
@@ -244,6 +327,10 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       window.removeEventListener('online', sync);
       window.removeEventListener('focus', sync);
       document.removeEventListener('visibilitychange', sync);
+      if (listenerSyncTimeoutRef.current) {
+        clearTimeout(listenerSyncTimeoutRef.current);
+        listenerSyncTimeoutRef.current = null;
+      }
     };
   }, [syncOfflineTasks, token, userId]);
 
@@ -410,8 +497,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!normalized) return;
 
     await apiDelete(`/api/tasks/categories?name=${encodeURIComponent(normalized)}`, token);
-    await Promise.all([refreshTasks(token), refreshTaxonomy(token)]);
-  }, [refreshTasks, refreshTaxonomy, token]);
+    await refreshTasksAndTaxonomy(token, userId);
+  }, [refreshTasksAndTaxonomy, token, userId]);
 
   const deleteTag = useCallback(async (name: string) => {
     if (!token) throw new Error('Nao autenticado');
@@ -420,8 +507,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!normalized) return;
 
     await apiDelete(`/api/tasks/tags?name=${encodeURIComponent(normalized)}`, token);
-    await Promise.all([refreshTasks(token), refreshTaxonomy(token)]);
-  }, [refreshTasks, refreshTaxonomy, token]);
+    await refreshTasksAndTaxonomy(token, userId);
+  }, [refreshTasksAndTaxonomy, token, userId]);
 
   const clearTasks = useCallback(() => {
     setTasks([]);
