@@ -370,7 +370,9 @@ function createTaskSideEffectsSqlMock(options?: {
     }
 
     if (query.includes('WITH due AS') && query.includes('UPDATE task_side_effects tse')) {
-      const limit = Number(values[0] ?? 10);
+      const notificationSchedulesOnly = values.some((value) => value === true);
+      const limitValue = values.find((value) => typeof value === 'number');
+      const limit = Number(limitValue ?? 10);
       const priority = (kind: string) => {
         if (kind === 'sync_notification_schedules') return 1;
         if (kind === 'cancel_notification_schedules') return 2;
@@ -379,7 +381,12 @@ function createTaskSideEffectsSqlMock(options?: {
         return 5;
       };
       const claimed = jobs
-        .filter((job) => job.status === 'pending' && new Date(job.availableAt) <= now && job.cancelledAt === null)
+        .filter((job) => (
+          job.status === 'pending' &&
+          new Date(job.availableAt) <= now &&
+          job.cancelledAt === null &&
+          (!notificationSchedulesOnly || job.kind === 'sync_notification_schedules' || job.kind === 'cancel_notification_schedules')
+        ))
         .sort((a, b) => (
           priority(a.kind) - priority(b.kind) ||
           a.availableAt.localeCompare(b.availableAt) ||
@@ -491,6 +498,95 @@ function createTaskSideEffectsSqlMock(options?: {
     task,
     schedules,
   };
+}
+
+function createCronHealthSqlMock(options?: {
+  neverNow?: boolean;
+  taskSideEffectsPending?: number;
+  taskSideEffectsDue?: number;
+  schedulesPending?: number;
+  schedulesDue?: number;
+  tasksPending?: number;
+}) {
+  const now = new Date('2026-05-14T21:30:00.000Z');
+  const sql = (async (strings: TemplateStringsArray) => {
+    const query = strings.join(' ');
+
+    if (query.includes('SELECT NOW() AS now')) {
+      if (options?.neverNow) {
+        return new Promise<Array<Record<string, unknown>>>(() => undefined);
+      }
+      return [{ now: now.toISOString() }];
+    }
+
+    if (query.includes('NOW() AS "postgresNow"') && query.includes('FROM notification_schedules')) {
+      return [{
+        postgresNow: now.toISOString(),
+        oldestPendingNotifyAt: options?.schedulesPending ? now.toISOString() : null,
+        duePendingCount: options?.schedulesDue ?? 0,
+        futurePendingCount: Math.max(0, (options?.schedulesPending ?? 0) - (options?.schedulesDue ?? 0)),
+        processingCount: 0,
+        failedCount: 0,
+        cancelledCount: 0,
+      }];
+    }
+
+    if (query.includes('NOW() AS "postgresNow"') && query.includes('FROM task_side_effects')) {
+      return [{
+        postgresNow: now.toISOString(),
+        oldestPendingAvailableAt: options?.taskSideEffectsPending ? now.toISOString() : null,
+        duePendingCount: options?.taskSideEffectsDue ?? 0,
+        processingCount: 0,
+        failedCount: 0,
+        doneCount: 0,
+        oldestPendingAgeSeconds: 0,
+      }];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
+      const dueOnly = query.includes('notify_at <= NOW()');
+      const count = dueOnly ? options?.schedulesDue ?? 0 : options?.schedulesPending ?? 0;
+      return count > 0 ? [{ kind: 'notification', count }] : [];
+    }
+
+    if (query.includes('FROM task_side_effects') && query.includes('GROUP BY kind')) {
+      const dueOnly = query.includes('available_at <= NOW()');
+      const count = dueOnly ? options?.taskSideEffectsDue ?? 0 : options?.taskSideEffectsPending ?? 0;
+      return count > 0 ? [{ kind: 'sync_notification_schedules', count }] : [];
+    }
+
+    if (query.includes('FROM task_side_effects') && query.includes('available_at <= NOW()')) {
+      return [{ count: options?.taskSideEffectsDue ?? 0 }];
+    }
+
+    if (query.includes('FROM task_side_effects')) {
+      return [{ count: options?.taskSideEffectsPending ?? 0 }];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('notify_at <= NOW()')) {
+      return [{ count: options?.schedulesDue ?? 0 }];
+    }
+
+    if (query.includes('FROM notification_schedules')) {
+      return [{ count: options?.schedulesPending ?? 0 }];
+    }
+
+    if (query.includes('FROM tasks')) {
+      return [{ count: options?.tasksPending ?? 0 }];
+    }
+
+    if (query.includes('FROM pg_stat_activity')) {
+      return [{ longRunningActive: 0, waitingOnLock: 0 }];
+    }
+
+    if (query.includes('FROM pg_locks')) {
+      return [{ waitingLocksOnReminderTables: 0, grantedLocksOnReminderTables: 0 }];
+    }
+
+    return [];
+  }) as SqlClient;
+
+  return sql;
 }
 
 async function run(name: string, fn: () => Promise<void> | void) {
@@ -1109,7 +1205,7 @@ async function main() {
     assert.ok(cronHandler.includes('return json(200, {'));
     assert.ok(cronHandler.includes('schedules,'));
     assert.ok(cronHandler.includes('processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false })'));
-    assert.ok(cronHandler.includes('processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, { ensureInfrastructure: false })'));
+    assert.ok(cronHandler.includes('notificationSchedulesOnly: true'));
     assert.ok(cronHandler.includes('backfillDiagnostics'));
   });
 
@@ -1123,13 +1219,127 @@ async function main() {
     assert.ok(scheduleIndex < calendarIndex);
   });
 
+  await run('cron health endpoint returns lightweight db timings', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const { handleCronHealth } = await import('../lib/handlers/notifications.js');
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      const response = await handleCronHealth({
+        sql: createCronHealthSqlMock({
+          taskSideEffectsPending: 2,
+          taskSideEffectsDue: 1,
+          schedulesPending: 3,
+          schedulesDue: 1,
+          tasksPending: 4,
+        }),
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const body = response.body as {
+        ok?: boolean;
+        db?: { nowMs?: number | null; taskSideEffectsPendingMs?: number | null; schedulesDueMs?: number | null };
+        counts?: { taskSideEffectsPending?: number | null; schedulesDue?: number | null; tasksPending?: number | null };
+      };
+      assert.equal(body.ok, true);
+      assert.equal(typeof body.db?.nowMs, 'number');
+      assert.equal(typeof body.db?.taskSideEffectsPendingMs, 'number');
+      assert.equal(typeof body.db?.schedulesDueMs, 'number');
+      assert.equal(body.counts?.taskSideEffectsPending, 2);
+      assert.equal(body.counts?.schedulesDue, 1);
+      assert.equal(body.counts?.tasksPending, 4);
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+    }
+  });
+
+  await run('cron health endpoint times out quickly when first query hangs', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const previousHealthTimeout = process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS;
+    const { handleCronHealth } = await import('../lib/handlers/notifications.js');
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS = '30';
+      const startedAt = Date.now();
+      const response = await handleCronHealth({
+        sql: createCronHealthSqlMock({ neverNow: true }),
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+      const durationMs = Date.now() - startedAt;
+
+      assert.equal(response.status, 200);
+      assert.ok(durationMs < 200, `expected health timeout before 200ms, got ${durationMs}ms`);
+      const body = response.body as { ok?: boolean; steps?: { now?: { ok?: boolean; error?: string } } };
+      assert.equal(body.ok, false);
+      assert.equal(body.steps?.now?.ok, false);
+      assert.match(body.steps?.now?.error ?? '', /timeout/);
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      if (previousHealthTimeout === undefined) delete process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS;
+      else process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS = previousHealthTimeout;
+    }
+  });
+
+  await run('cron returns preliminary diagnostics when processing stages have no rows', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const previousMaintenance = process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+    const { handleNotificationsCron } = await import('../lib/handlers/notifications.js');
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      const response = await handleNotificationsCron({
+        sql: createCronHealthSqlMock({
+          taskSideEffectsPending: 2,
+          taskSideEffectsDue: 1,
+          schedulesPending: 3,
+          schedulesDue: 1,
+          tasksPending: 4,
+        }),
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const body = response.body as {
+        scheduleDiagnostics?: { duePendingCount?: number };
+        sideEffectDiagnostics?: { duePendingCount?: number };
+        backfill?: { skippedReason?: string };
+        calendarSync?: { skippedReason?: string };
+      };
+      assert.equal(body.scheduleDiagnostics?.duePendingCount, 1);
+      assert.equal(body.sideEffectDiagnostics?.duePendingCount, 1);
+      assert.equal(body.backfill?.skippedReason, 'disabled_in_notification_cron');
+      assert.equal(body.calendarSync?.skippedReason, 'disabled_in_notification_cron');
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      if (previousMaintenance === undefined) delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      else process.env.CRON_ENABLE_MAINTENANCE_STAGES = previousMaintenance;
+    }
+  });
+
   await run('cron handler returns JSON when a stage never resolves', async () => {
     const previousSecret = process.env.CRON_SECRET;
     const previousBudget = process.env.CRON_MAX_RESPONSE_MS;
+    const previousHealthTimeout = process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS;
 
     try {
       process.env.CRON_SECRET = 'test-cron-secret';
       process.env.CRON_MAX_RESPONSE_MS = '1000';
+      process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS = '30';
       const { handleNotificationsCron } = await import('../lib/handlers/notifications.js');
       const neverSql = (() => new Promise<Array<Record<string, unknown>>>(() => undefined)) as SqlClient;
       const startedAt = Date.now();
@@ -1143,24 +1353,28 @@ async function main() {
       const durationMs = Date.now() - startedAt;
 
       assert.equal(response.status, 200);
-      assert.ok(durationMs < 1500, `expected cron timeout fallback before 1500ms, got ${durationMs}ms`);
+      assert.ok(durationMs < 300, `expected cron db-health fallback before 300ms, got ${durationMs}ms`);
       const body = response.body as {
         ok?: boolean;
         stoppedByTimeLimit?: boolean;
         hasMore?: boolean;
+        skippedByDbHealth?: boolean;
         schedules?: { fetched?: number; sent?: number; stoppedByTimeLimit?: boolean };
       };
       assert.equal(body.ok, true);
-      assert.equal(body.stoppedByTimeLimit, true);
+      assert.equal(body.stoppedByTimeLimit, false);
       assert.equal(body.hasMore, true);
+      assert.equal(body.skippedByDbHealth, true);
       assert.equal(body.schedules?.fetched, 0);
       assert.equal(body.schedules?.sent, 0);
-      assert.equal(body.schedules?.stoppedByTimeLimit, true);
+      assert.equal(body.schedules?.stoppedByTimeLimit, false);
     } finally {
       if (previousSecret === undefined) delete process.env.CRON_SECRET;
       else process.env.CRON_SECRET = previousSecret;
       if (previousBudget === undefined) delete process.env.CRON_MAX_RESPONSE_MS;
       else process.env.CRON_MAX_RESPONSE_MS = previousBudget;
+      if (previousHealthTimeout === undefined) delete process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS;
+      else process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS = previousHealthTimeout;
     }
   });
 

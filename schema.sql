@@ -106,6 +106,12 @@ CREATE INDEX IF NOT EXISTS idx_tasks_external_calendar
 CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status
   ON tasks(user_id, deleted_at, status);
 
+CREATE INDEX IF NOT EXISTS idx_tasks_user_status_deleted
+  ON tasks(user_id, status, deleted_at);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status_due_date
+  ON tasks(status, due_date);
+
 CREATE TABLE IF NOT EXISTS calendar_integrations (
   id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id                 UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,

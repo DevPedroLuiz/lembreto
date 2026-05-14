@@ -1157,6 +1157,7 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
     sourceScheduleId: schedule.id,
     kind: 'alarm',
     sendPush: false,
+    ensureInfrastructure: false,
   });
 
   if (!result.created) {
@@ -1315,6 +1316,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
       sourceScheduleId: schedule.id,
       kind: schedule.kind,
       sendPush: false,
+      ensureInfrastructure: false,
     });
 
     if (!result.created) {

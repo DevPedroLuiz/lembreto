@@ -279,7 +279,7 @@ async function reclaimStuckProcessingSideEffects(sql: SqlClient, limit: number) 
   return rows.length;
 }
 
-async function claimDueSideEffects(sql: SqlClient, limit: number) {
+async function claimDueSideEffects(sql: SqlClient, limit: number, options: { notificationSchedulesOnly?: boolean } = {}) {
   const rows = await sql`
     WITH due AS (
       SELECT id
@@ -287,6 +287,10 @@ async function claimDueSideEffects(sql: SqlClient, limit: number) {
       WHERE status = 'pending'
         AND available_at <= NOW()
         AND cancelled_at IS NULL
+        AND (
+          ${Boolean(options.notificationSchedulesOnly)} = FALSE
+          OR kind IN ('sync_notification_schedules', 'cancel_notification_schedules')
+        )
       ORDER BY
         CASE kind
           WHEN 'sync_notification_schedules' THEN 1
@@ -457,7 +461,7 @@ export async function processTaskSideEffects(
   sql: SqlClient,
   limit = TASK_SIDE_EFFECT_LIMIT,
   maxDurationMs = MAX_SIDE_EFFECT_DURATION_MS,
-  options: { ensureInfrastructure?: boolean } = {},
+  options: { ensureInfrastructure?: boolean; notificationSchedulesOnly?: boolean } = {},
 ): Promise<ProcessTaskSideEffectsSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), TASK_SIDE_EFFECT_LIMIT);
@@ -472,7 +476,9 @@ export async function processTaskSideEffects(
   }
 
   const sideEffectDiagnostics = await getSideEffectDiagnostics(sql);
-  const jobs = await claimDueSideEffects(sql, processLimit);
+  const jobs = await claimDueSideEffects(sql, processLimit, {
+    notificationSchedulesOnly: options.notificationSchedulesOnly,
+  });
   const summary: ProcessTaskSideEffectsSummary = {
     fetched: jobs.length,
     processed: 0,

@@ -75,6 +75,7 @@ export interface CreateNotificationInput {
   sourceScheduleId?: string | null;
   kind?: NotificationScheduleKind;
   sendPush?: boolean;
+  ensureInfrastructure?: boolean;
 }
 
 export interface CreateNotificationResult {
@@ -553,7 +554,9 @@ export async function createNotification(
   sql: SqlClient,
   input: CreateNotificationInput,
 ): Promise<CreateNotificationResult> {
-  await ensureNotificationsInfrastructure(sql);
+  if (input.ensureInfrastructure !== false) {
+    await ensureNotificationsInfrastructure(sql);
+  }
 
   const targetType = input.target?.type ?? null;
   const targetTaskId = input.target?.type === 'task' ? input.target.taskId : null;

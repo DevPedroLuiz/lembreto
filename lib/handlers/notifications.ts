@@ -1,4 +1,5 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
+import { getDatabaseConnectionMetadata } from '../db.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import { processPendingCalendarSyncs } from '../calendar/calendarSync.js';
 import {
@@ -59,6 +60,8 @@ const CALENDAR_SYNC_LIMIT = 1;
 const OVERDUE_LIMIT = 3;
 const OVERDUE_DURATION_MS = 3000;
 const CRON_DEADLINE_GUARD_MS = 500;
+const DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS = 3000;
+const DB_HEALTH_SLOW_THRESHOLD_MS = 1000;
 
 type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
@@ -66,6 +69,44 @@ type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSche
 type CalendarSyncSummary = Awaited<ReturnType<typeof processPendingCalendarSyncs>>;
 type OverdueDetectionSummary = Awaited<ReturnType<typeof detectOverdueNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
+};
+type MeasuredQueryStep = {
+  ok: boolean;
+  durationMs: number;
+  error?: string;
+  skipped?: boolean;
+};
+
+type CronDbHealth = {
+  ok: boolean;
+  slow: boolean;
+  connection: ReturnType<typeof getDatabaseConnectionMetadata>;
+  db: {
+    nowMs: number | null;
+    taskSideEffectsPendingMs: number | null;
+    taskSideEffectsDueMs: number | null;
+    schedulesPendingMs: number | null;
+    schedulesDueMs: number | null;
+    tasksPendingMs: number | null;
+  };
+  counts: {
+    taskSideEffectsPending: number | null;
+    taskSideEffectsDue: number | null;
+    schedulesPending: number | null;
+    schedulesDue: number | null;
+    tasksPending: number | null;
+  };
+  steps: Record<string, MeasuredQueryStep>;
+};
+
+type LockDiagnostics = {
+  ok: boolean;
+  durationMs: number;
+  longRunningActive: number | null;
+  waitingOnLock: number | null;
+  waitingLocksOnReminderTables: number | null;
+  grantedLocksOnReminderTables: number | null;
+  error?: string;
 };
 
 const EMPTY_SCHEDULE_DIAGNOSTICS: ScheduleDiagnostics = {
@@ -103,6 +144,11 @@ function hasCronBudget(deadline: number) {
 function getCronResponseBudgetMs() {
   const configured = Number(process.env.CRON_MAX_RESPONSE_MS ?? MAX_CRON_RESPONSE_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : MAX_CRON_RESPONSE_MS;
+}
+
+function getDbHealthQueryTimeoutMs() {
+  const configured = Number(process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS ?? DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS;
 }
 
 function timeoutFallback<T>(fallback: T, stage: string, timeoutMs: number): T {
@@ -476,6 +522,305 @@ export async function handleAlarmSnooze(context: HandlerContext): Promise<Handle
   }
 }
 
+function isAuthorizedCronSecretRequest(context: HandlerContext): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+
+  const authHeader = context.request.headers.authorization;
+  return authHeader === `Bearer ${secret}`;
+}
+
+function toCount(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'unknown_error';
+}
+
+async function measureQuery(
+  stage: string,
+  query: () => Promise<Array<Record<string, unknown>>>,
+  timeoutMs = getDbHealthQueryTimeoutMs(),
+) {
+  const startedAt = Date.now();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const queryPromise = query()
+    .then((rows) => ({
+      step: {
+        ok: true,
+        durationMs: Date.now() - startedAt,
+      },
+      rows,
+    }))
+    .catch((error) => ({
+      step: {
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        error: errorMessage(error),
+      },
+      rows: [] as Array<Record<string, unknown>>,
+    }));
+
+  const timeoutPromise = new Promise<{
+    step: MeasuredQueryStep;
+    rows: Array<Record<string, unknown>>;
+  }>((resolve) => {
+    timeout = setTimeout(() => {
+      resolve({
+        step: {
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          error: `${stage}_timeout`,
+        },
+        rows: [],
+      });
+    }, timeoutMs);
+  });
+
+  return Promise.race([queryPromise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+function skippedStep(): MeasuredQueryStep {
+  return { ok: false, durationMs: 0, skipped: true, error: 'skipped_after_db_connect_failure' };
+}
+
+async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLocks?: boolean } = {}): Promise<CronDbHealth & {
+  locks?: LockDiagnostics;
+}> {
+  const connection = getDatabaseConnectionMetadata();
+  const steps: Record<string, MeasuredQueryStep> = {};
+  const counts: CronDbHealth['counts'] = {
+    taskSideEffectsPending: null,
+    taskSideEffectsDue: null,
+    schedulesPending: null,
+    schedulesDue: null,
+    tasksPending: null,
+  };
+  const db: CronDbHealth['db'] = {
+    nowMs: null,
+    taskSideEffectsPendingMs: null,
+    taskSideEffectsDueMs: null,
+    schedulesPendingMs: null,
+    schedulesDueMs: null,
+    tasksPendingMs: null,
+  };
+
+  const now = await measureQuery('db_now', () => sql`SELECT NOW() AS now`);
+  steps.now = now.step;
+  db.nowMs = now.step.durationMs;
+
+  const shouldSkipCounts = !now.step.ok;
+  if (shouldSkipCounts) {
+    steps.taskSideEffectsPending = skippedStep();
+    steps.taskSideEffectsDue = skippedStep();
+    steps.schedulesPending = skippedStep();
+    steps.schedulesDue = skippedStep();
+    steps.tasksPending = skippedStep();
+    return {
+      ok: false,
+      slow: true,
+      connection,
+      db,
+      counts,
+      steps,
+      ...(options.includeLocks ? { locks: await getLockDiagnostics(sql) } : {}),
+    };
+  }
+
+  const taskSideEffectsPending = await measureQuery(
+    'task_side_effects_pending',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+    `,
+  );
+  steps.taskSideEffectsPending = taskSideEffectsPending.step;
+  db.taskSideEffectsPendingMs = taskSideEffectsPending.step.durationMs;
+  counts.taskSideEffectsPending = taskSideEffectsPending.step.ok ? toCount(taskSideEffectsPending.rows[0]?.count) : null;
+
+  const taskSideEffectsDue = await measureQuery(
+    'task_side_effects_due',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+        AND available_at <= NOW()
+        AND cancelled_at IS NULL
+    `,
+  );
+  steps.taskSideEffectsDue = taskSideEffectsDue.step;
+  db.taskSideEffectsDueMs = taskSideEffectsDue.step.durationMs;
+  counts.taskSideEffectsDue = taskSideEffectsDue.step.ok ? toCount(taskSideEffectsDue.rows[0]?.count) : null;
+
+  const schedulesPending = await measureQuery(
+    'notification_schedules_pending',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM notification_schedules
+      WHERE status = 'pending'
+    `,
+  );
+  steps.schedulesPending = schedulesPending.step;
+  db.schedulesPendingMs = schedulesPending.step.durationMs;
+  counts.schedulesPending = schedulesPending.step.ok ? toCount(schedulesPending.rows[0]?.count) : null;
+
+  const schedulesDue = await measureQuery(
+    'notification_schedules_due',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM notification_schedules
+      WHERE status = 'pending'
+        AND notify_at <= NOW()
+        AND sent_at IS NULL
+        AND cancelled_at IS NULL
+    `,
+  );
+  steps.schedulesDue = schedulesDue.step;
+  db.schedulesDueMs = schedulesDue.step.durationMs;
+  counts.schedulesDue = schedulesDue.step.ok ? toCount(schedulesDue.rows[0]?.count) : null;
+
+  const tasksPending = await measureQuery(
+    'tasks_pending',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM tasks
+      WHERE status = 'pending'
+        AND deleted_at IS NULL
+    `,
+  );
+  steps.tasksPending = tasksPending.step;
+  db.tasksPendingMs = tasksPending.step.durationMs;
+  counts.tasksPending = tasksPending.step.ok ? toCount(tasksPending.rows[0]?.count) : null;
+
+  const ok = Object.values(steps).every((step) => step.ok);
+  return {
+    ok,
+    slow: !ok || (db.nowMs ?? Number.POSITIVE_INFINITY) > DB_HEALTH_SLOW_THRESHOLD_MS,
+    connection,
+    db,
+    counts,
+    steps,
+    ...(options.includeLocks ? { locks: await getLockDiagnostics(sql) } : {}),
+  };
+}
+
+async function getLockDiagnostics(sql: HandlerContext['sql']): Promise<LockDiagnostics> {
+  const startedAt = Date.now();
+  const activity = await measureQuery(
+    'pg_stat_activity_summary',
+    () => sql`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE state = 'active'
+            AND query_start < NOW() - INTERVAL '5 seconds'
+        ) AS "longRunningActive",
+        COUNT(*) FILTER (WHERE wait_event_type = 'Lock') AS "waitingOnLock"
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+    `,
+    getDbHealthQueryTimeoutMs(),
+  );
+
+  const locks = await measureQuery(
+    'pg_locks_summary',
+    () => sql`
+      SELECT
+        COUNT(*) FILTER (WHERE NOT granted) AS "waitingLocksOnReminderTables",
+        COUNT(*) FILTER (WHERE granted) AS "grantedLocksOnReminderTables"
+      FROM pg_locks locks
+      LEFT JOIN pg_class rel ON rel.oid = locks.relation
+      WHERE rel.relname IN ('notification_schedules', 'task_side_effects', 'tasks')
+    `,
+    getDbHealthQueryTimeoutMs(),
+  );
+
+  const ok = activity.step.ok && locks.step.ok;
+  const activityError = 'error' in activity.step ? activity.step.error : undefined;
+  const locksError = 'error' in locks.step ? locks.step.error : undefined;
+  return {
+    ok,
+    durationMs: Date.now() - startedAt,
+    longRunningActive: activity.step.ok ? toCount(activity.rows[0]?.longRunningActive) : null,
+    waitingOnLock: activity.step.ok ? toCount(activity.rows[0]?.waitingOnLock) : null,
+    waitingLocksOnReminderTables: locks.step.ok ? toCount(locks.rows[0]?.waitingLocksOnReminderTables) : null,
+    grantedLocksOnReminderTables: locks.step.ok ? toCount(locks.rows[0]?.grantedLocksOnReminderTables) : null,
+    ...(!ok ? { error: activityError ?? locksError ?? 'lock_diagnostics_failed' } : {}),
+  };
+}
+
+function buildPreliminaryScheduleDiagnostics(dbHealth: CronDbHealth): ScheduleDiagnostics {
+  const pending = dbHealth.counts.schedulesPending ?? 0;
+  const due = dbHealth.counts.schedulesDue ?? 0;
+  return {
+    postgresNow: dbHealth.steps.now.ok ? new Date().toISOString() : null,
+    oldestPendingNotifyAt: null,
+    duePendingCount: due,
+    futurePendingCount: Math.max(0, pending - due),
+    pendingByKind: {},
+    dueByKind: {},
+    processingCount: 0,
+    failedCount: 0,
+    cancelledCount: 0,
+  };
+}
+
+function buildPreliminarySideEffectDiagnostics(dbHealth: CronDbHealth): SideEffectDiagnostics {
+  return {
+    postgresNow: dbHealth.steps.now.ok ? new Date().toISOString() : null,
+    oldestPendingAvailableAt: null,
+    duePendingCount: dbHealth.counts.taskSideEffectsDue ?? 0,
+    pendingByKind: {},
+    dueByKind: {},
+    processingCount: 0,
+    failedCount: 0,
+    doneCount: 0,
+    oldestPendingAgeSeconds: null,
+  };
+}
+
+function shouldUsePreliminaryScheduleDiagnostics(diagnostics: ScheduleDiagnostics) {
+  return diagnostics.postgresNow === null && diagnostics.duePendingCount === 0 && diagnostics.futurePendingCount === 0;
+}
+
+function shouldUsePreliminarySideEffectDiagnostics(diagnostics: SideEffectDiagnostics) {
+  return diagnostics.postgresNow === null && diagnostics.duePendingCount === 0;
+}
+
+function calendarSyncDisabledSummary(): CalendarSyncSummary & { skippedReason: string } {
+  return {
+    scanned: 0,
+    synced: 0,
+    skipped: 0,
+    failed: 0,
+    stoppedByTimeLimit: false,
+    durationMs: 0,
+    skippedReason: 'disabled_in_notification_cron',
+  };
+}
+
+function maintenanceStageDisabledSummary(durationMs = 0) {
+  return {
+    backfilledSchedules: 0,
+    durationMs,
+    hasMore: false,
+    stoppedByTimeLimit: false,
+    skippedReason: 'disabled_in_notification_cron',
+    backfillDiagnostics: {
+      scannedTasks: 0,
+      missingSchedules: 0,
+      backfilledSchedules: 0,
+      skippedReasons: { disabled_in_notification_cron: 1 },
+    },
+  };
+}
+
 export async function handleAlarmDismiss(context: HandlerContext): Promise<HandlerResult> {
   const auth = await requireNotificationAuth(context);
   if ('status' in auth) return auth;
@@ -498,6 +843,28 @@ export async function handleAlarmDismiss(context: HandlerContext): Promise<Handl
   }
 }
 
+export async function handleCronHealth(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+  const startedAt = Date.now();
+
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  if (!isAuthorizedCronSecretRequest(context)) {
+    return json(401, { error: 'NÃ£o autorizado' });
+  }
+
+  const dbHealth = await runCronDbHealth(sql, { includeLocks: true });
+  return json(200, {
+    ok: dbHealth.ok,
+    durationMs: Date.now() - startedAt,
+    db: dbHealth.db,
+    counts: dbHealth.counts,
+    steps: dbHealth.steps,
+    connection: dbHealth.connection,
+    locks: dbHealth.locks,
+  });
+}
+
 export async function handleNotificationsCron(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
   const startedAt = Date.now();
@@ -510,6 +877,71 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
+    const dbHealth = await runCronDbHealth(sql);
+    const preliminaryScheduleDiagnostics = buildPreliminaryScheduleDiagnostics(dbHealth);
+    const preliminarySideEffectDiagnostics = buildPreliminarySideEffectDiagnostics(dbHealth);
+
+    if (dbHealth.slow) {
+      const durationMs = Date.now() - startedAt;
+      const schedules = {
+        fetched: 0,
+        processed: 0,
+        sent: 0,
+        failed: 0,
+        cancelled: 0,
+        rescheduled: 0,
+        reclaimed: 0,
+        durationMs: 0,
+        stoppedByTimeLimit: false,
+        hasMore: true,
+        skippedReason: 'db_health_slow',
+      };
+      const sideEffects = {
+        ...fallbackSideEffects(0),
+        hasMore: true,
+        stoppedByTimeLimit: false,
+        sideEffectDiagnostics: preliminarySideEffectDiagnostics,
+        skippedReason: 'db_health_slow',
+      };
+      const backfill = {
+        ...fallbackBackfill(0),
+        hasMore: false,
+        stoppedByTimeLimit: false,
+        skippedReason: 'db_health_slow',
+      };
+      const calendarSync = calendarSyncDisabledSummary();
+      const overdueDetection = {
+        ...fallbackOverdueDetection(0),
+        hasMore: false,
+        stoppedByTimeLimit: false,
+        skippedReason: 'db_health_slow',
+      };
+
+      logWarn('cron_notifications_skipped_by_db_health', getRequestMeta(request, {
+        durationMs,
+        dbHealth,
+        scheduleDiagnostics: preliminaryScheduleDiagnostics,
+        sideEffectDiagnostics: preliminarySideEffectDiagnostics,
+      }));
+
+      return json(200, {
+        ok: true,
+        durationMs,
+        stoppedByTimeLimit: false,
+        hasMore: true,
+        skippedByDbHealth: true,
+        dbHealth,
+        schedules,
+        sideEffects,
+        backfill,
+        calendarSync,
+        overdueDetection,
+        scheduleDiagnostics: preliminaryScheduleDiagnostics,
+        sideEffectDiagnostics: preliminarySideEffectDiagnostics,
+        backfillDiagnostics: backfill.backfillDiagnostics,
+      });
+    }
+
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
     const result = await withTimeout(
       processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
@@ -521,14 +953,18 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
           return withTimeout(
-            processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, { ensureInfrastructure: false }),
+            processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, {
+              ensureInfrastructure: false,
+              notificationSchedulesOnly: true,
+            }),
             budgetMs,
             fallbackSideEffects(budgetMs),
             'processTaskSideEffects',
           );
         })()
       : fallbackSideEffects();
-    const backfill = hasCronBudget(deadline)
+    const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true';
+    const backfill = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, BACKFILL_DURATION_MS);
           return withTimeout(
@@ -538,8 +974,8 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'backfillMissingNotificationSchedules',
           );
         })()
-      : fallbackBackfill();
-    const calendarSync = hasCronBudget(deadline)
+      : maintenanceStageDisabledSummary();
+    const calendarSync = process.env.CRON_ENABLE_CALENDAR_SYNC === 'true' && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS);
           return withTimeout(
@@ -549,8 +985,8 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'processPendingCalendarSyncs',
           );
         })()
-      : fallbackCalendarSync();
-    const overdueDetection = hasCronBudget(deadline)
+      : calendarSyncDisabledSummary();
+    const overdueDetection = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
           return withTimeout(
@@ -560,10 +996,23 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'detectOverdueNotificationSchedules',
           );
         })()
-      : fallbackOverdueDetection();
+      : {
+          ...fallbackOverdueDetection(0),
+          hasMore: false,
+          stoppedByTimeLimit: false,
+          skippedReason: 'disabled_in_notification_cron',
+        };
 
     result.backfilledSchedules = backfill.backfilledSchedules;
     result.detectedOverdueTasks = overdueDetection.detectedOverdueTasks;
+    const effectiveScheduleDiagnostics = shouldUsePreliminaryScheduleDiagnostics(result.scheduleDiagnostics)
+      ? preliminaryScheduleDiagnostics
+      : result.scheduleDiagnostics;
+    const effectiveSideEffectDiagnostics = shouldUsePreliminarySideEffectDiagnostics(sideEffects.sideEffectDiagnostics)
+      ? preliminarySideEffectDiagnostics
+      : sideEffects.sideEffectDiagnostics;
+    result.scheduleDiagnostics = effectiveScheduleDiagnostics;
+    sideEffects.sideEffectDiagnostics = effectiveSideEffectDiagnostics;
     const scheduleDurationMs = result.durationMs;
     const scheduleStoppedByTimeLimit = result.stoppedByTimeLimit;
     const scheduleHasMore = result.hasMore;
@@ -602,8 +1051,9 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       hasMore,
       sideEffects,
       schedules,
-      scheduleDiagnostics: result.scheduleDiagnostics,
-      sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
+      dbHealth,
+      scheduleDiagnostics: effectiveScheduleDiagnostics,
+      sideEffectDiagnostics: effectiveSideEffectDiagnostics,
       backfillDiagnostics: backfill.backfillDiagnostics,
       backfill,
       calendarSync,
@@ -619,8 +1069,9 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       backfill,
       calendarSync,
       overdueDetection,
-      scheduleDiagnostics: result.scheduleDiagnostics,
-      sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
+      dbHealth,
+      scheduleDiagnostics: effectiveScheduleDiagnostics,
+      sideEffectDiagnostics: effectiveSideEffectDiagnostics,
       backfillDiagnostics: backfill.backfillDiagnostics,
       ...result,
     });

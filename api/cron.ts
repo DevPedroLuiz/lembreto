@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import { handleCleanupCron } from '../lib/handlers/cron.js';
-import { handleNotificationsCron } from '../lib/handlers/notifications.js';
+import { handleCronHealth, handleNotificationsCron } from '../lib/handlers/notifications.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveJob(req: VercelRequest): string | null {
@@ -21,6 +21,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return handleCleanupCron({ sql, request });
       case 'notifications':
         return handleNotificationsCron({ sql, request });
+      case 'health':
+        return handleCronHealth({ sql, request });
       default:
         return {
           status: 404,
