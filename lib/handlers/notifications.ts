@@ -950,13 +950,39 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       }));
     }
 
+    const hasDueSchedules = preliminaryScheduleDiagnostics.duePendingCount > 0;
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
-    const result = await withTimeout(
-      processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
-      scheduleBudgetMs,
-      fallbackSchedules(scheduleBudgetMs),
-      'processDueNotificationSchedules',
-    );
+    const result = hasDueSchedules
+      ? await withTimeout(
+          processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
+          scheduleBudgetMs,
+          fallbackSchedules(scheduleBudgetMs),
+          'processDueNotificationSchedules',
+        )
+      : {
+          detectedOverdueTasks: 0,
+          backfilledSchedules: 0,
+          reclaimedSchedules: 0,
+          fetchedSchedules: 0,
+          processedSchedules: 0,
+          sentSchedules: 0,
+          cancelledSchedules: 0,
+          rescheduledSchedules: 0,
+          failedSchedules: 0,
+          durationMs: 0,
+          hasMore: false,
+          stoppedByTimeLimit: false,
+          processed: 0,
+          sent: 0,
+          failed: 0,
+          cancelled: 0,
+          scheduleDiagnostics: preliminaryScheduleDiagnostics,
+        };
+    if (!hasDueSchedules) {
+      logInfo('cron_notifications_schedules_skipped_no_due', getRequestMeta(request, {
+        scheduleDiagnostics: preliminaryScheduleDiagnostics,
+      }));
+    }
     const sideEffects = hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
