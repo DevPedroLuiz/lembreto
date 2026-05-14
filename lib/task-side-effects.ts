@@ -477,7 +477,9 @@ export async function processTaskSideEffects(
     await ensureTaskSideEffectsInfrastructure(sql);
     await ensureNotificationSchedulingInfrastructure(sql);
   }
-  const reclaimed = await reclaimStuckProcessingSideEffects(sql, STUCK_SIDE_EFFECT_RECLAIM_LIMIT);
+  const reclaimed = options.notificationSchedulesOnly
+    ? 0
+    : await reclaimStuckProcessingSideEffects(sql, STUCK_SIDE_EFFECT_RECLAIM_LIMIT);
   if (reclaimed > 0) {
     logWarn('task_side_effects_reclaimed', { reclaimed });
   }
