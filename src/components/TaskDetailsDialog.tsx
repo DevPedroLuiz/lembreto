@@ -64,6 +64,8 @@ interface TaskDetailsDialogProps {
 }
 
 function formatDueDate(task: Task): string {
+  if (!task.dueDate) return 'Sem início';
+
   try {
     return format(parseISO(task.dueDate), "EEEE, dd 'de' MMMM", { locale: ptBR });
   } catch {

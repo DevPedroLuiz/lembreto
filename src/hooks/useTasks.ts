@@ -51,6 +51,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   const offlineSyncInFlightRef = useRef<InFlightRequest<number> | null>(null);
   const listenerSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastListenerSyncAtRef = useRef(0);
+  const tasksMutationVersionRef = useRef(0);
+  const taxonomyMutationVersionRef = useRef(0);
 
   const applyCachedState = useCallback((requestUserId = userId) => {
     if (!requestUserId) {
@@ -135,19 +137,25 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       return;
     }
 
+    const startedTasksMutationVersion = tasksMutationVersionRef.current;
+    const startedTaxonomyMutationVersion = taxonomyMutationVersionRef.current;
     const [syncedTasks, syncedTaxonomy] = await Promise.all([
       fetchServerTasks(requestToken, requestUserId),
       fetchServerTaxonomy(requestToken, requestUserId),
     ]);
     const offlineCreates = loadOfflineTaskCreates(requestUserId);
 
-    saveTaskCache(requestUserId, syncedTasks);
-    saveTaskTaxonomyCache(requestUserId, syncedTaxonomy);
-    setTasks(mergeTasksWithOfflineCreates(syncedTasks, offlineCreates));
+    if (tasksMutationVersionRef.current === startedTasksMutationVersion) {
+      saveTaskCache(requestUserId, syncedTasks);
+      setTasks(mergeTasksWithOfflineCreates(syncedTasks, offlineCreates));
+    }
 
-    const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, offlineCreates);
-    setCategories(mergedTaxonomy.categories);
-    setTags(mergedTaxonomy.tags);
+    if (taxonomyMutationVersionRef.current === startedTaxonomyMutationVersion) {
+      saveTaskTaxonomyCache(requestUserId, syncedTaxonomy);
+      const mergedTaxonomy = mergeTaxonomyWithOfflineCreates(syncedTaxonomy, offlineCreates);
+      setCategories(mergedTaxonomy.categories);
+      setTags(mergedTaxonomy.tags);
+    }
     setPendingOfflineTaskCount(offlineCreates.length);
   }, [applyCachedState, fetchServerTasks, fetchServerTaxonomy, token, userId]);
 
@@ -353,6 +361,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
     try {
       const created = await apiPost<Task>('/api/tasks', payload, token);
+      tasksMutationVersionRef.current += 1;
+      taxonomyMutationVersionRef.current += 1;
       setTasks((prev) => [created, ...prev]);
       setCategories((prev) => Array.from(new Set([...prev, created.category])));
       setTags((prev) => Array.from(new Set([...prev, ...(created.tags ?? [])])));
@@ -396,6 +406,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!token) throw new Error('Nao autenticado');
 
     const updated = await apiPut<Task>(`/api/tasks/${id}`, payload, token);
+    tasksMutationVersionRef.current += 1;
+    taxonomyMutationVersionRef.current += 1;
     setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
     setCategories((prev) => Array.from(new Set([...prev, updated.category])));
     setTags((prev) => Array.from(new Set([...prev, ...(updated.tags ?? [])])));
@@ -415,6 +427,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!token) throw new Error('Nao autenticado');
 
     let snapshot: Task[] = [];
+    tasksMutationVersionRef.current += 1;
     setTasks((prev) => {
       snapshot = prev;
       return prev.filter((task) => task.id !== id);
@@ -444,6 +457,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
     const newStatus: Status = task.status === 'pending' || task.status === 'overdue' ? 'completed' : 'pending';
 
+    tasksMutationVersionRef.current += 1;
     setTasks((prev) =>
       prev.map((currentTask) => (
         currentTask.id === task.id
@@ -478,6 +492,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!token) throw new Error('Nao autenticado');
 
     const created = await apiPost<{ category: string }>('/api/tasks/categories', { name }, token);
+    taxonomyMutationVersionRef.current += 1;
     setCategories((prev) => Array.from(new Set([...prev, created.category])));
     return created.category;
   }, [token]);
@@ -486,6 +501,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!token) throw new Error('Nao autenticado');
 
     const created = await apiPost<{ tag: string }>('/api/tasks/tags', { name }, token);
+    taxonomyMutationVersionRef.current += 1;
     setTags((prev) => Array.from(new Set([...prev, created.tag])));
     return created.tag;
   }, [token]);
@@ -497,6 +513,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!normalized) return;
 
     await apiDelete(`/api/tasks/categories?name=${encodeURIComponent(normalized)}`, token);
+    taxonomyMutationVersionRef.current += 1;
     await refreshTasksAndTaxonomy(token, userId);
   }, [refreshTasksAndTaxonomy, token, userId]);
 
@@ -507,6 +524,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     if (!normalized) return;
 
     await apiDelete(`/api/tasks/tags?name=${encodeURIComponent(normalized)}`, token);
+    taxonomyMutationVersionRef.current += 1;
     await refreshTasksAndTaxonomy(token, userId);
   }, [refreshTasksAndTaxonomy, token, userId]);
 

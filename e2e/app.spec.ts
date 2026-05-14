@@ -142,7 +142,14 @@ async function createTask(page: Page, title: string, options?: { time?: string }
   }
   await page.getByTestId('task-priority-select').selectOption('high');
   await page.getByTestId('task-category-select').selectOption('Geral');
+  const createResponsePromise = page.waitForResponse((response) =>
+    response.url().includes('/api/tasks') &&
+    response.request().method() === 'POST',
+  );
   await page.getByTestId('task-submit-button').click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.ok()).toBeTruthy();
+  await expect(page.getByTestId('task-drawer')).toHaveCount(0);
 }
 
 function taskCard(page: Page, title: string) {
@@ -219,6 +226,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('dashboard-create-first-task').click();
       await page.getByTestId('task-title-input').fill('Validar prazo visual');
       await page.getByTestId('task-date-input').fill(formatDateLocal(yesterday));
+      await page.getByTestId('task-time-input').fill('09:00');
 
       await expect(page.getByTestId('task-date-help')).toHaveText('Escolha uma data de hoje em diante.');
       await expect(page.getByTestId('task-submit-button')).toBeDisabled();
@@ -227,7 +235,7 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
-  test('uses the configured default time when a reminder is saved without time', async ({ page }) => {
+  test('saves a reminder without initial time as floating', async ({ page }) => {
     const user = buildE2ETestUser();
 
     await cleanupUsersByEmail([user.email]);
@@ -241,9 +249,10 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('settings-no-time-minutes-input').fill('30');
       await page.getByRole('button', { name: /fechar configura/i }).click();
 
-      await createTask(page, 'Sem horário usa padrão');
-      const task = taskCard(page, 'Sem horário usa padrão');
-      await expect(task.getByTestId('task-time-badge')).toHaveText('02:30');
+      await createTask(page, 'Sem início fica floating');
+      const task = taskCard(page, 'Sem início fica floating');
+      await expect(task.getByTestId('task-due-badge')).toContainText('Sem início');
+      await expect(task.getByTestId('task-time-badge')).toHaveCount(0);
       await expect(task.getByTestId('task-all-day-badge')).toHaveCount(0);
     } finally {
       await cleanupUsersByEmail([user.email]);
@@ -334,7 +343,12 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-title-input').fill(title);
       await page.getByTestId('task-description-input').fill('Ainda vou revisar antes de publicar.');
       await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      const createDraftResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks') &&
+        response.request().method() === 'POST',
+      );
       await page.getByTestId('task-save-draft-button').click();
+      expect((await createDraftResponsePromise).ok()).toBeTruthy();
 
       await expect(page.getByTestId('task-view-drafts')).toHaveAttribute('aria-pressed', 'true');
       const pendingDraft = taskCard(page, title);
@@ -350,9 +364,20 @@ test.describe('Lembreto critical flows', () => {
 
       await page.getByTestId('draft-edit-button').click();
       await page.getByTestId('task-description-input').fill('Rascunho revisado antes de virar lembrete.');
+      const updateDraftResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/') &&
+        response.request().method() === 'PUT',
+      );
       await page.getByTestId('task-save-draft-button').click();
+      expect((await updateDraftResponsePromise).ok()).toBeTruthy();
+      await expect(page.getByTestId('task-drawer')).toHaveCount(0);
 
+      const promoteDraftResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/') &&
+        response.request().method() === 'PUT',
+      );
       await page.getByTestId('draft-promote-button').click();
+      expect((await promoteDraftResponsePromise).ok()).toBeTruthy();
 
       await expect(page.getByTestId('task-view-agenda')).toHaveAttribute('aria-pressed', 'true');
       const promotedTask = taskCard(page, title);
@@ -378,10 +403,16 @@ test.describe('Lembreto critical flows', () => {
       await expect(task).toHaveAttribute('data-task-status', 'pending');
 
       await task.getByTestId('task-actions-button').click();
+      const deactivateResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/') &&
+        response.request().method() === 'PUT',
+      );
       await page.getByTestId('task-activation-toggle').click();
+      expect((await deactivateResponsePromise).ok()).toBeTruthy();
       await expect(task).toHaveAttribute('data-task-status', 'inactive');
       await expect(task).toContainText('Desativado');
 
+      await page.waitForTimeout(300);
       await task.click();
       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
       await page.getByTestId('task-details-activation-toggle').click();
@@ -436,6 +467,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-title-input').fill('Rotina recorrente');
       await page.getByTestId('task-description-input').fill('Criado em série para validar repetição.');
       await page.getByTestId('task-date-input').fill(formatDateLocal(nextMonday));
+      await page.getByTestId('task-time-input').fill('09:00');
       await page.getByTestId('task-tab-recurrence').click();
       await page.getByTestId('task-recurrence-toggle').check();
       await page.getByTestId('task-holiday-notification-toggle').check();
@@ -537,10 +569,20 @@ test.describe('Lembreto critical flows', () => {
 
       await page.getByTestId('sidebar-settings-button').click();
       await page.getByTestId('settings-nav-organization').click();
+      const createCategoryResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/categories') &&
+        response.request().method() === 'POST',
+      );
       await page.getByTestId('settings-category-create-input').fill('Referencias');
       await page.getByTestId('settings-category-create-button').click();
+      expect((await createCategoryResponsePromise).ok()).toBeTruthy();
+      const createTagResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/tags') &&
+        response.request().method() === 'POST',
+      );
       await page.getByTestId('settings-tag-create-input').fill('Ata');
       await page.getByTestId('settings-tag-create-button').click();
+      expect((await createTagResponsePromise).ok()).toBeTruthy();
       await page.getByRole('button', { name: /fechar configura/i }).click();
 
       await createTask(page, 'Reuniao com cliente');
@@ -560,7 +602,12 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('note-tag-input').fill('Ata');
       await page.getByTestId('note-tag-add-button').click();
       await expect(page.getByTestId('note-tag-chip')).toContainText('Ata');
+      const createNoteResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/notes') &&
+        response.request().method() === 'POST',
+      );
       await page.getByTestId('note-submit-button').click();
+      expect((await createNoteResponsePromise).ok()).toBeTruthy();
       await expect(page.getByRole('dialog', { name: /nova nota/i })).toHaveCount(0);
 
       const linkedNoteCard = page.getByTestId('task-details-dialog').getByTestId('note-card').first();
@@ -752,12 +799,20 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-details-duplicate').click();
       await expect(page.getByTestId('task-title-input')).toHaveValue(new RegExp(`${initialTaskTitle} \\(c.pia\\)$`, 'i'));
       await page.getByRole('button', { name: /Fechar formul/i }).click();
-      await createdTask.click();
-      await expect(taskDetailsDialog).toBeVisible();
+      await expect(page.getByTestId('task-drawer')).toHaveCount(0);
+      await expect(createdTask).toBeVisible();
+      await createdTask.click({ force: true });
+      await expect(taskDetailsDialog).toBeVisible({ timeout: 15000 });
+      await page.waitForTimeout(300);
       await page.getByTestId('task-details-edit').click();
       await page.getByTestId('task-title-input').fill(updatedTaskTitle);
       await page.getByTestId('task-category-select').selectOption('Estudos');
+      const updateTaskResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks/') &&
+        response.request().method() === 'PUT',
+      );
       await page.getByTestId('task-submit-button').click();
+      expect((await updateTaskResponsePromise).ok()).toBeTruthy();
 
       const updatedTask = taskCard(page, updatedTaskTitle);
       await expect(updatedTask).toBeVisible();
@@ -825,7 +880,8 @@ test.describe('Lembreto critical flows', () => {
       await createTask(page, 'Validar token rotacionado');
       const rotatedTokenTask = taskCard(page, 'Validar token rotacionado');
       await expect(rotatedTokenTask).toBeVisible();
-      await expect(rotatedTokenTask.getByTestId('task-time-badge')).toHaveText('01:00');
+      await expect(rotatedTokenTask.getByTestId('task-due-badge')).toContainText('Sem início');
+      await expect(rotatedTokenTask.getByTestId('task-time-badge')).toHaveCount(0);
       await expect(rotatedTokenTask.getByTestId('task-all-day-badge')).toHaveCount(0);
 
       await page.getByTestId('sidebar-logout').click();

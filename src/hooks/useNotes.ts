@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import type { Note, NoteMode, Priority } from '../types';
 
@@ -14,6 +14,7 @@ type NotePayload = {
 
 export function useNotes(token: string | null) {
   const [notes, setNotes] = useState<Note[]>([]);
+  const mutationVersionRef = useRef(0);
 
   const refreshNotes = useCallback(async (requestToken = token) => {
     if (!requestToken) {
@@ -21,8 +22,13 @@ export function useNotes(token: string | null) {
       return;
     }
 
+    const startedAtMutationVersion = mutationVersionRef.current;
     const data = await apiGet<Note[]>('/api/tasks/notes', requestToken);
-    setNotes(Array.isArray(data) ? data : []);
+    setNotes((current) => (
+      mutationVersionRef.current === startedAtMutationVersion
+        ? Array.isArray(data) ? data : []
+        : current
+    ));
   }, [token]);
 
   useEffect(() => {
@@ -40,6 +46,7 @@ export function useNotes(token: string | null) {
     if (!token) throw new Error('Não autenticado');
 
     const created = await apiPost<Note>('/api/tasks/notes', payload, token);
+    mutationVersionRef.current += 1;
     setNotes((prev) => [created, ...prev]);
     return created;
   }, [token]);
@@ -51,6 +58,7 @@ export function useNotes(token: string | null) {
     if (!token) throw new Error('Não autenticado');
 
     const updated = await apiPut<Note>(`/api/tasks/notes/${id}`, payload, token);
+    mutationVersionRef.current += 1;
     setNotes((prev) => prev.map((note) => (note.id === id ? updated : note)));
     return updated;
   }, [token]);
@@ -66,6 +74,7 @@ export function useNotes(token: string | null) {
 
     try {
       await apiDelete(`/api/tasks/notes/${id}`, token);
+      mutationVersionRef.current += 1;
     } catch (error) {
       setNotes(snapshot);
       throw error;

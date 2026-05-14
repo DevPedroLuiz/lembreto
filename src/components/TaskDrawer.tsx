@@ -329,10 +329,11 @@ export function TaskDrawer({
   }, [alarmEnabled, date, setAlarmEnabled, time]);
 
   const titleCount = title.trim().length;
-  const summaryDue = date || 'Defina a data';
+  const hasStart = Boolean(date && time);
+  const summaryDue = hasStart ? date : 'Sem início';
   const summaryTime = endTime
-    ? `${time || noTimeReminderFallbackTime} - ${endTime}`
-    : time || noTimeReminderFallbackTime;
+    ? `${time} - ${endTime}`
+    : hasStart ? time : 'Sem início';
   const summaryPriority = PRIORITY_LABELS[priority];
   const availableTagSuggestions = React.useMemo(
     () => tagOptions.filter((item) => (
@@ -423,6 +424,7 @@ export function TaskDrawer({
 
           <div className="fixed inset-0 z-[101] flex items-end justify-center p-1.5 sm:items-center sm:p-5">
             <motion.div
+              data-testid="task-drawer"
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -627,8 +629,12 @@ export function TaskDrawer({
                                   <button
                                     type="button"
                                     data-testid="task-time-clear"
-                                    disabled={isSubmitting || !time}
-                                    onClick={() => setTime('')}
+                                    disabled={isSubmitting || (!date && !time)}
+                                    onClick={() => {
+                                      setDate('');
+                                      setTime('');
+                                      setEndTime('');
+                                    }}
                                     className="action-ghost h-10 w-full justify-center rounded-xl border border-slate-200/70 px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
                                   >
                                     Sem início
@@ -653,7 +659,7 @@ export function TaskDrawer({
                               )}
                               data-testid="task-date-help"
                             >
-                              {dueDateError || endTimeError || `Sem horário inicial, o lembrete usa o padrão das configurações: ${noTimeReminderFallbackTime}.`}
+                              {dueDateError || endTimeError || `Sem horário inicial, o lembrete fica sem início e usa o intervalo das configurações: ${noTimeReminderFallbackTime}.`}
                             </p>
                           </div>
 
@@ -1033,7 +1039,7 @@ export function TaskDrawer({
                         type="button"
                         data-testid="task-save-draft-button"
                         onClick={onSaveDraft}
-                        disabled={isSubmitting || !title.trim() || !date}
+                        disabled={isSubmitting || !title.trim()}
                         className="action-secondary w-full justify-center rounded-2xl py-3.5 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:py-4"
                       >
                         {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : null}

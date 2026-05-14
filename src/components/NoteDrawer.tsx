@@ -39,6 +39,7 @@ interface NoteDrawerProps {
   setTaskId: (value: string | null) => void;
   tasks: Task[];
   lockedTask?: Task | null;
+  lockedTaskId?: string | null;
 }
 
 function normalizeTaxonomyValue(value: string) {
@@ -69,6 +70,7 @@ export function NoteDrawer({
   setTaskId,
   tasks,
   lockedTask = null,
+  lockedTaskId = null,
 }: NoteDrawerProps) {
   const [tagDraft, setTagDraft] = React.useState('');
   const [tagFeedback, setTagFeedback] = React.useState('');
@@ -121,7 +123,10 @@ export function NoteDrawer({
 
   const isEditing = Boolean(editingNote);
   const titleCount = title.trim().length;
+  const lockedTaskValue = lockedTask?.id ?? lockedTaskId ?? null;
+  const isTaskLocked = Boolean(lockedTaskValue);
   const linkedTask = lockedTask ?? availableTasks.find((task) => task.id === taskId) ?? null;
+  const linkedTaskLabel = linkedTask?.title ?? (lockedTaskValue ? 'Lembrete vinculado' : 'Sem vínculo');
 
   return (
     <AnimatePresence>
@@ -202,7 +207,7 @@ export function NoteDrawer({
                       <Link2 size={13} />
                       Vínculo
                     </div>
-                    <p className="mt-1 truncate text-[12px] font-semibold sm:mt-2 sm:text-sm">{linkedTask ? linkedTask.title : 'Sem vínculo'}</p>
+                    <p className="mt-1 truncate text-[12px] font-semibold sm:mt-2 sm:text-sm">{linkedTaskLabel}</p>
                   </div>
                 </div>
               </div>
@@ -361,12 +366,15 @@ export function NoteDrawer({
                           Vincular ao lembrete
                         </label>
                         <select
-                          value={linkedTask ? linkedTask.id : taskId ?? ''}
-                          disabled={Boolean(lockedTask)}
+                          value={lockedTaskValue ?? (linkedTask ? linkedTask.id : taskId ?? '')}
+                          disabled={isTaskLocked}
                           data-testid="note-task-select"
                           onChange={(event) => setTaskId(event.target.value || null)}
                           className="field-control cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                         >
+                          {lockedTaskValue && !availableTasks.some((task) => task.id === lockedTaskValue) && (
+                            <option value={lockedTaskValue}>{lockedTask?.title ?? 'Lembrete vinculado'}</option>
+                          )}
                           <option value="">Sem vínculo</option>
                           {availableTasks.map((task) => (
                             <option key={task.id} value={task.id}>

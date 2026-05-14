@@ -440,14 +440,17 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       noTimeReminderMinutes,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
+    const effectiveDueDate = dueDate || null;
+    const effectiveEndDate = effectiveDueDate ? endDate || null : null;
+    const effectiveAlarmEnabled = Boolean(effectiveDueDate && alarmEnabled);
     const history = jsonbParameter(sql, [
       buildCreatedHistoryEntry({
-        dueDate,
-        endDate,
+        dueDate: effectiveDueDate,
+        endDate: effectiveEndDate,
         priority,
         category,
         tags,
-        alarmEnabled,
+        alarmEnabled: effectiveAlarmEnabled,
         status,
       }),
     ]);
@@ -477,19 +480,19 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${user.id},
           ${title},
           ${description},
-          ${dueDate || null},
-          ${endDate || null},
+          ${effectiveDueDate},
+          ${effectiveEndDate},
           ${priority},
           ${category},
           ${tags},
           ${suppressHolidayNotifications},
-          ${alarmEnabled},
-          ${dueDate ? 'timed' : 'floating'},
-          ${dueDate ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)},
+          ${effectiveAlarmEnabled},
+          ${effectiveDueDate ? 'timed' : 'floating'},
+          ${effectiveDueDate ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)},
           ${mutedUntil || null},
-          ${dueDate ? null : noTimeReminderMinutes ?? 60},
+          ${effectiveDueDate ? null : noTimeReminderMinutes ?? 60},
           ${status},
-          ${dueDate && status === 'pending' ? 'pending' : 'idle'},
+          ${effectiveDueDate && status === 'pending' ? 'pending' : 'idle'},
           ${history}::jsonb
         )
         RETURNING
@@ -525,7 +528,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       `;
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), category, tags);
-      await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+      void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
         floatingIntervalMinutes: noTimeReminderMinutes ?? null,
       });
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
@@ -617,6 +620,10 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           : cur.floating_interval_minutes,
         status: status !== undefined ? status : cur.status,
       };
+      if (!nextValues.dueDate) {
+        nextValues.endDate = null;
+        nextValues.alarmEnabled = false;
+      }
       if (
         isWorkCategory(String(nextValues.category)) &&
         requiresWorkScheduleForUpdate({
@@ -720,10 +727,13 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       `;
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), categoryValue, tagsValue);
-      if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled' || String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
+      if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled') {
         await cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id);
+      } else if (String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
+        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id)
+          .catch((error) => logError('task_schedule_cancel_failed', error, { userId: user.id, taskId: String(rows[0].id) }));
       } else {
-        await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+        void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
           floatingIntervalMinutes: noTimeReminderMinutes ?? null,
         });
       }

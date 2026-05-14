@@ -3,7 +3,7 @@ import type { Priority, Status, Task, TaskTaxonomy } from '../types';
 export type TaskCreatePayload = {
   title: string;
   description: string;
-  dueDate: string;
+  dueDate: string | null;
   endDate?: string | null;
   priority: Priority;
   category: string;

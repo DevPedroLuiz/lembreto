@@ -75,6 +75,8 @@ function formatDateKey(date: Date): string {
 }
 
 function parseTaskDate(task: Task): Date | null {
+  if (!task.dueDate) return null;
+
   try {
     const date = parseISO(task.dueDate);
     return Number.isNaN(date.getTime()) ? null : date;

@@ -80,7 +80,7 @@ function withRequestMeta(req: express.Request, res: express.Response, next: expr
     logInfo('http_request', {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: req.path,
       status: res.statusCode,
       durationMs: Date.now() - startedAt,
     });

@@ -69,6 +69,8 @@ const PRIORITY_WEIGHT: Record<Priority, number> = {
 };
 
 function getTaskSortValue(task: Task): Date {
+  if (!task.dueDate) return new Date(8640000000000000);
+
   try {
     return parseISO(task.dueDate);
   } catch {
@@ -77,6 +79,8 @@ function getTaskSortValue(task: Task): Date {
 }
 
 function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
+  if (!task.dueDate) return 'upcoming';
+
   try {
     const dueDate = parseISO(task.dueDate);
     if (isPast(dueDate)) return 'overdue';
@@ -138,7 +142,9 @@ export function DashboardPage({
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
-    ? format(getTaskSortValue(assistantTask), "dd 'de' MMMM", { locale: ptBR })
+    ? assistantTask.dueDate
+      ? format(getTaskSortValue(assistantTask), "dd 'de' MMMM", { locale: ptBR })
+      : 'Sem início'
     : '';
   const assistantTimeLabel = assistantTask ? getTaskTimeLabel(assistantTask.dueDate) : null;
   const assistantPrimaryCopy = assistantContext === 'overdue'

@@ -15,7 +15,11 @@ export function formatTimeInputValue(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
-export function parseDueDateToForm(isoDate: string): { date: string; time: string } {
+export function parseDueDateToForm(isoDate: string | null | undefined): { date: string; time: string } {
+  if (!isoDate) {
+    return { date: '', time: '' };
+  }
+
   const parsedDate = new Date(isoDate);
 
   if (Number.isNaN(parsedDate.getTime())) {
@@ -77,7 +81,9 @@ export function buildDueDateFromForm(
   return new Date(year, month - 1, day, hours, minutes, 0, 0).toISOString();
 }
 
-export function getTaskTimeLabel(isoDate: string): string | null {
+export function getTaskTimeLabel(isoDate: string | null | undefined): string | null {
+  if (!isoDate) return null;
+
   const parsedDate = new Date(isoDate);
 
   if (Number.isNaN(parsedDate.getTime())) {
@@ -88,7 +94,9 @@ export function getTaskTimeLabel(isoDate: string): string | null {
   return time === DATE_ONLY_SENTINEL_TIME ? null : time;
 }
 
-export function getTaskTimeDescription(isoDate: string): string {
+export function getTaskTimeDescription(isoDate: string | null | undefined): string {
+  if (!isoDate) return 'Sem início';
+
   const timeLabel = getTaskTimeLabel(isoDate);
   return timeLabel ? `Horário: ${timeLabel}` : 'Dia todo';
 }

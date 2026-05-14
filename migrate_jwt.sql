@@ -1,6 +1,6 @@
 -- ============================================================
 -- MIGRAÇÃO: Tabela de blacklist de tokens JWT
--- Execute no SQL Editor do Neon ANTES de fazer deploy.
+-- Execute no SQL Editor do Supabase/Postgres ANTES de fazer deploy.
 -- ============================================================
 
 -- Tabela para invalidar tokens via logout antes de expirarem

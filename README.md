@@ -7,7 +7,7 @@ Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação
 - Frontend: React 19 + TypeScript + Vite
 - Estilo: Tailwind CSS v4 + Motion
 - API: Vercel Functions + servidor Express para desenvolvimento local
-- Banco: Neon Postgres
+- Banco: Supabase Postgres via `DATABASE_URL`
 - Autenticação: JWT + cookie HttpOnly para restauração de sessão
 
 ## Funcionalidades
@@ -47,6 +47,7 @@ CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
 Notas:
 
 - `JWT_SECRET` é obrigatória em desenvolvimento e produção.
+- `DATABASE_URL` deve apontar para a connection string do Supabase/Postgres com SSL habilitado.
 - `RESEND_API_KEY` é necessária para envio real do e-mail de recuperação.
 - `APP_URL` deve apontar para a URL pública do app em produção.
 - `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botão "Entrar com Google".
@@ -57,6 +58,7 @@ Notas:
 - `CALENDAR_TOKEN_ENCRYPTION_KEY` é opcional, mas recomendada em produção; se ausente, o app deriva a chave de criptografia a partir de `JWT_SECRET`.
 - `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha. Em produção, `RECAPTCHA_SITE_KEY` pode ser usada como fallback runtime pela rota `/api/auth/config`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
+- Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no frontend; o app usa somente `DATABASE_URL` no backend.
 
 ## Setup local
 
@@ -74,6 +76,7 @@ npm install
 - `migrate_google_oauth.sql`
 - `migrate_auth_rate_limit_recover.sql`
 - `migrate_calendar_integrations.sql`
+- `migrate_supabase_indexes.sql`
 - `migrate_passwords.sql` quando fizer a migração de senhas legadas
 
 3. Inicie o servidor local:
@@ -170,7 +173,6 @@ Servicos que podem chamar esse endpoint:
 - EasyCron
 - UptimeRobot
 - GitHub Actions scheduled workflow
-- Supabase pg_cron, se disponivel
 
 ### Secrets necessários
 

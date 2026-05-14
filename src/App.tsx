@@ -170,10 +170,11 @@ function buildAlarmInstanceKey(input: {
   scheduleId?: string;
   dedupeKey?: string;
   taskId: string;
-  dueDate: string;
+  dueDate: string | null;
 }) {
   if (input.dedupeKey) return input.dedupeKey;
   if (input.scheduleId) return `schedule:${input.scheduleId}`;
+  if (!input.dueDate) return `${input.taskId}:floating`;
   const dueDate = parseISO(input.dueDate);
   return `${input.taskId}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`;
 }
@@ -192,14 +193,16 @@ function fallbackCopyText(text: string) {
 }
 
 function buildTaskShareMessage(task: Task): string {
-  let dueLabel = 'Data indisponível';
+  let dueLabel = task.dueDate ? 'Data indisponível' : 'Sem início';
 
-  try {
-    dueLabel = format(parseISO(task.dueDate), "dd 'de' MMMM 'de' yyyy", {
-      locale: ptBR,
-    });
-  } catch {
-    // keep fallback
+  if (task.dueDate) {
+    try {
+      dueLabel = format(parseISO(task.dueDate), "dd 'de' MMMM 'de' yyyy", {
+        locale: ptBR,
+      });
+    } catch {
+      // keep fallback
+    }
   }
 
   const timeLabel = getTaskTimeLabel(task.dueDate);
@@ -248,7 +251,7 @@ function buildQuickRescheduleDate(task: Task, preset: QuickReschedulePreset): st
 
   if (preset === 'nextWeek') {
     const nextWeek = addDays(new Date(), 7);
-    return buildDueDateFromForm(formatDateInputValue(nextWeek), dueDateForm.time);
+    return buildDueDateFromForm(formatDateInputValue(nextWeek), dueDateForm.time || '09:00');
   }
 
   const laterToday = roundToNextHalfHour(addHours(new Date(), 2));
@@ -461,7 +464,7 @@ export default function App() {
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
-    () => (categories.length > 0 ? categories : [...DEFAULT_CATEGORIES]),
+    () => Array.from(new Set([...DEFAULT_CATEGORIES, ...categories])),
     [categories],
   );
   const tagOptions = useMemo(() => {
@@ -1436,22 +1439,30 @@ export default function App() {
       return 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
     }
 
-    if (!formDate) return '';
+    if (formTime && !formDate) {
+      return 'Escolha uma data para usar o horário inicial.';
+    }
 
-    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime));
+    if (!formDate || !formTime) return '';
+
+    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime));
     if (isPast(dueDateValue) && !isToday(dueDateValue)) {
       return 'Escolha uma data de hoje em diante.';
     }
 
     return '';
-  }, [formCategory, formDate, formTime, noTimeReminderFallbackTime]);
+  }, [formCategory, formDate, formTime]);
 
   const taskEndTimeError = useMemo(() => {
     if (isWorkCategory(formCategory) && (!formDate || !formTime)) {
       return 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
     }
 
-    if (!formDate) return '';
+    if (formEndTime && (!formDate || !formTime)) {
+      return 'Defina o horário inicial antes do horário final.';
+    }
+
+    if (!formDate || !formTime) return '';
 
     const requiresEndTime = isWorkCategory(formCategory);
     if (requiresEndTime && !formEndTime) {
@@ -1460,7 +1471,7 @@ export default function App() {
 
     if (!formEndTime) return '';
 
-    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime));
+    const dueDateValue = new Date(buildDueDateFromForm(formDate, formTime));
     const endDateValue = new Date(buildDueDateFromForm(formDate, formEndTime));
 
     if (endDateValue.getTime() <= dueDateValue.getTime()) {
@@ -1468,7 +1479,7 @@ export default function App() {
     }
 
     return '';
-  }, [formCategory, formDate, formEndTime, formTime, noTimeReminderFallbackTime]);
+  }, [formCategory, formDate, formEndTime, formTime]);
 
   const recurringDates = useMemo(() => {
     if (!formRecurrenceEnabled || !formDate || !formRecurrenceUntil) return [];
@@ -1627,8 +1638,6 @@ export default function App() {
       return;
     }
 
-    if (!formDate) return;
-
     if (taskEndTimeError) {
       emitNotification('Horário final inválido', taskEndTimeError, 'warning');
       return;
@@ -1639,13 +1648,20 @@ export default function App() {
       return;
     }
 
-    if (formAlarmEnabled && !formTime) {
+    const hasStart = Boolean(formDate && formTime);
+
+    if (formRecurrenceEnabled && !hasStart) {
+      emitNotification('Repetição inválida', 'Defina data e horário inicial para criar lembretes recorrentes.', 'warning');
+      return;
+    }
+
+    if (formAlarmEnabled && !hasStart) {
       emitNotification('Horário obrigatório', 'Informe o horário inicial para ativar o alarme sonoro.', 'warning');
       return;
     }
 
-    const dueDate = buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime);
-    const endDate = formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
+    const dueDate = hasStart ? buildDueDateFromForm(formDate, formTime) : null;
+    const endDate = hasStart && formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
 
     const payload = {
       title: formTitle,
@@ -1656,7 +1672,7 @@ export default function App() {
       category: formCategory,
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
-      alarmEnabled: formAlarmEnabled,
+      alarmEnabled: hasStart && formAlarmEnabled,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       ...(editingTask?.status === 'draft' ? { status: 'pending' as const } : {}),
     };
@@ -1683,7 +1699,7 @@ export default function App() {
             for (const dateValue of recurringDates) {
               const created = await createTask({
                 ...payload,
-                dueDate: buildDueDateFromForm(dateValue, formTime, noTimeReminderFallbackTime),
+                dueDate: buildDueDateFromForm(dateValue, formTime),
                 endDate: formEndTime ? buildDueDateFromForm(dateValue, formEndTime) : null,
               });
               if (created.syncStatus === 'pending') offlineCount += 1;
@@ -1761,8 +1777,8 @@ export default function App() {
   ]);
 
   const handleSaveTaskDraft = useCallback(async () => {
-    if (!formTitle.trim() || !formDate || isTaskSubmitting) {
-      emitNotification('Rascunho incompleto', 'Informe pelo menos título e data para salvar o rascunho.', 'warning');
+    if (!formTitle.trim() || isTaskSubmitting) {
+      emitNotification('Rascunho incompleto', 'Informe pelo menos o título para salvar o rascunho.', 'warning');
       return;
     }
 
@@ -1776,15 +1792,17 @@ export default function App() {
       return;
     }
 
-    if (formAlarmEnabled && !formTime) {
+    const hasStart = Boolean(formDate && formTime);
+
+    if (formAlarmEnabled && !hasStart) {
       emitNotification('Horário obrigatório', 'Informe o horário inicial para salvar o rascunho com alarme.', 'warning');
       return;
     }
 
-    const dueDate = buildDueDateFromForm(formDate, formTime, noTimeReminderFallbackTime);
-    const endDate = formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
+    const dueDate = hasStart ? buildDueDateFromForm(formDate, formTime) : null;
+    const endDate = hasStart && formEndTime ? buildDueDateFromForm(formDate, formEndTime) : null;
 
-    if (endDate && Date.parse(endDate) <= Date.parse(dueDate)) {
+    if (dueDate && endDate && Date.parse(endDate) <= Date.parse(dueDate)) {
       emitNotification('Horário final inválido', 'O horário final precisa ser depois do horário inicial.', 'warning');
       return;
     }
@@ -1798,7 +1816,7 @@ export default function App() {
       category: formCategory,
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
-      alarmEnabled: formAlarmEnabled,
+      alarmEnabled: hasStart && formAlarmEnabled,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       status: 'draft' as const,
     };
@@ -1944,10 +1962,10 @@ export default function App() {
   const handlePromoteDraft = useCallback(async (task: Task) => {
     if (task.status !== 'draft' || promotingDraftIds.has(task.id)) return;
 
-    if (task.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' && !task.endDate) {
+    if (isWorkCategory(task.category) && (!task.dueDate || !task.endDate)) {
       emitNotification(
-        'Horário final obrigatório',
-        'Edite o rascunho e informe o horário final antes de adicionar como lembrete.',
+        'Horário obrigatório',
+        'Edite o rascunho e informe início e fim antes de adicionar um lembrete de Trabalho.',
         'warning',
       );
       openEditTask(task);
@@ -1979,12 +1997,12 @@ export default function App() {
 
     if (
       nextStatus === 'pending' &&
-      task.category.trim().toLocaleLowerCase('pt-BR') === 'trabalho' &&
-      !task.endDate
+      isWorkCategory(task.category) &&
+      (!task.dueDate || !task.endDate)
     ) {
       emitNotification(
-        'Horário final obrigatório',
-        'Informe o horário final antes de ativar este lembrete de Trabalho.',
+        'Horário obrigatório',
+        'Informe início e fim antes de ativar este lembrete de Trabalho.',
         'warning',
       );
       openEditTask(task);
@@ -3637,6 +3655,7 @@ export default function App() {
         setTaskId={setNoteTaskId}
         tasks={tasks}
         lockedTask={noteContextTask}
+        lockedTaskId={noteContextTaskId}
       />
 
       <ProfileDrawer

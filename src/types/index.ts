@@ -25,7 +25,7 @@ export interface Task {
   userId: string;
   title: string;
   description: string;
-  dueDate: string;
+  dueDate: string | null;
   endDate?: string | null;
   priority: Priority;
   category: string;

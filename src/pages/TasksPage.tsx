@@ -284,6 +284,7 @@ function formatMonthLabel(date: Date): string {
 
 function matchesDateFilter(task: Task, range: { start: string; end: string } | null): boolean {
   if (!range) return true;
+  if (!task.dueDate) return false;
 
   const dueDate = new Date(task.dueDate);
   if (Number.isNaN(dueDate.getTime())) return false;

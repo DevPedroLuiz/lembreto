@@ -1,6 +1,6 @@
 -- ============================================================
 -- MIGRAÇÃO: Tabela de tokens para recuperação de senha
--- Execute no SQL Editor do Neon ANTES de fazer deploy.
+-- Execute no SQL Editor do Supabase/Postgres ANTES de fazer deploy.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (

@@ -1,4 +1,7 @@
-# Migracao Neon para Supabase PostgreSQL
+# Historico de migracao Neon para Supabase PostgreSQL
+
+> Documento historico. O sistema atual usa Supabase/Postgres via `DATABASE_URL`.
+> Nao use este arquivo como guia de configuracao atual e nao reintroduza Neon.
 
 Este documento descreve o plano seguro para migrar o banco do Lembreto de Neon PostgreSQL para Supabase PostgreSQL. Ele nao deve conter secrets reais, dumps, backups ou dados de producao.
 

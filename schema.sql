@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS tasks (
 -- Índices para consultas frequentes
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_due_date
+  ON tasks(user_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_created
+  ON tasks(user_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id
   ON users(google_id)
   WHERE google_id IS NOT NULL;
@@ -310,6 +314,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_seen
   ON push_subscriptions(user_id, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+  ON push_subscriptions(user_id);
 
 -- ============================================================
 -- Limpeza periódica (rode manualmente ou via cron na Vercel)

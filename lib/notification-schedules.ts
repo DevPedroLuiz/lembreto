@@ -1208,6 +1208,7 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
 
   const rows = await sql`
     SELECT
+      tasks.id AS "taskId",
       tasks.title AS "taskTitle"
     FROM tasks
     WHERE tasks.id = ${String(claimed.taskId)}
@@ -1220,7 +1221,7 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
   if (!row) return null;
   const notifyAt = addMinutes(new Date(), minutes);
   const task: TaskForScheduling = {
-    id: String(row.taskId),
+    id: String(row.taskId ?? claimed.taskId),
     userId,
     title: String(row.taskTitle ?? ''),
     description: '',

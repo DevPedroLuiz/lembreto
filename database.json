@@ -1,5 +1,5 @@
 {
-  "_comment": "Este arquivo é apenas um exemplo de estrutura. NÃO armazene dados reais aqui. Use o banco Neon configurado em DATABASE_URL.",
+  "_comment": "Este arquivo e apenas um exemplo de estrutura. NAO armazene dados reais aqui. Use o Supabase/Postgres configurado em DATABASE_URL.",
   "tasks": [],
   "users": []
 }

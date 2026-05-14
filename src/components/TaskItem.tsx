@@ -81,17 +81,19 @@ function TaskItemComponent({
   const [actionsOpen, setActionsOpen] = React.useState(false);
 
   const safeDate = () => {
+    if (!task.dueDate) return null;
+
     try {
       return parseISO(task.dueDate);
     } catch {
-      return new Date();
+      return null;
     }
   };
 
   const date = safeDate();
   const isDraft = task.status === 'draft';
   const isInactive = task.status === 'inactive';
-  const isOverdue = isPast(date) && task.status === 'pending';
+  const isOverdue = Boolean(date) && isPast(date) && task.status === 'pending';
   const isCompleted = task.status === 'completed';
   const isBusy = isDeleting || isToggling || isTogglingActive;
   const canToggleActive = Boolean(onToggleActive) && !isDraft && !isCompleted;
@@ -126,6 +128,8 @@ function TaskItemComponent({
         : 'border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-50/88 dark:border-white/10 dark:from-slate-950/78 dark:via-slate-950/68 dark:to-white/[0.035]';
 
   const formatDate = () => {
+    if (!date) return 'Sem início';
+
     try {
       if (isToday(date)) return 'Hoje';
       if (isTomorrow(date)) return 'Amanhã';
