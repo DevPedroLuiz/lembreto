@@ -24,7 +24,11 @@ import {
   type ScheduleDiagnostics,
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
-import { processTaskSideEffects, type ProcessTaskSideEffectsSummary } from '../task-side-effects.js';
+import {
+  processTaskSideEffects,
+  type ProcessTaskSideEffectsSummary,
+  type SideEffectDiagnostics,
+} from '../task-side-effects.js';
 import {
   createNotificationSchema,
   deletePushSubscriptionSchema,
@@ -47,7 +51,7 @@ const SIDE_EFFECT_PROCESS_DURATION_MS = 8000;
 const CALENDAR_SYNC_DURATION_MS = 3000;
 const MAX_CRON_RESPONSE_MS = 20000;
 const DUE_SCHEDULE_LIMIT = 5;
-const DUE_SCHEDULE_DURATION_MS = 10000;
+const DUE_SCHEDULE_DURATION_MS = 8000;
 const SIDE_EFFECT_LIMIT = 3;
 const BACKFILL_LIMIT = 3;
 const BACKFILL_DURATION_MS = 3000;
@@ -74,6 +78,17 @@ const EMPTY_SCHEDULE_DIAGNOSTICS: ScheduleDiagnostics = {
   processingCount: 0,
   failedCount: 0,
   cancelledCount: 0,
+};
+
+const EMPTY_SIDE_EFFECT_DIAGNOSTICS: SideEffectDiagnostics = {
+  postgresNow: null,
+  oldestPendingAvailableAt: null,
+  duePendingCount: 0,
+  pendingByKind: {},
+  dueByKind: {},
+  processingCount: 0,
+  failedCount: 0,
+  doneCount: 0,
 };
 
 function remainingBudgetMs(deadline: number, maxStepDurationMs: number) {
@@ -155,6 +170,7 @@ function fallbackSideEffects(durationMs = 0): ProcessTaskSideEffectsSummary {
     durationMs,
     hasMore: true,
     stoppedByTimeLimit: true,
+    sideEffectDiagnostics: EMPTY_SIDE_EFFECT_DIAGNOSTICS,
   };
 }
 
@@ -580,6 +596,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       sideEffects,
       schedules,
       scheduleDiagnostics: result.scheduleDiagnostics,
+      sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
       backfill,
       calendarSync,
       overdueDetection,
@@ -595,6 +612,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       calendarSync,
       overdueDetection,
       scheduleDiagnostics: result.scheduleDiagnostics,
+      sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
       ...result,
     });
   } catch (error) {

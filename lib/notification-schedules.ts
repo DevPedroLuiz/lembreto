@@ -515,21 +515,23 @@ async function scheduleTimedTask(
   now: Date,
   options: { maxOverdueSchedules?: number; overdueNotBefore?: Date } = {},
 ) {
-  if (!task.dueDate) return;
+  if (!task.dueDate) return 0;
   const dueDate = new Date(task.dueDate);
-  if (Number.isNaN(dueDate.getTime())) return;
+  if (Number.isNaN(dueDate.getTime())) return 0;
+  let created = 0;
 
   const preNoticeAt = addMinutes(dueDate, -PRE_NOTICE_MINUTES);
   if (preNoticeAt > now) {
     const preNotice = applyScheduleSuppression(task, 'pre_notice', preNoticeAt);
     if (preNotice.action === 'send' && preNotice.notifyAt < dueDate) {
-      await insertSchedule(sql, task, {
+      const inserted = await insertSchedule(sql, task, {
         kind: 'pre_notice',
         notifyAt: preNotice.notifyAt,
         title: 'Lembrete em 15 minutos',
         message: `"${task.title}" começa em breve.`,
         tone: 'info',
       });
+      if (inserted) created += 1;
     } else if (preNotice.holiday) {
       logInfo('notification_schedule_holiday_cancelled', {
         userId: task.userId,
@@ -546,7 +548,7 @@ async function scheduleTimedTask(
     const kind: NotificationScheduleKind = task.alarmEnabled ? 'alarm' : 'notification';
     const adjusted = applyScheduleSuppression(task, kind, dueDate);
     if (kind === 'alarm' || adjusted.action === 'send') {
-      await insertSchedule(sql, task, {
+      const inserted = await insertSchedule(sql, task, {
         kind,
         notifyAt: adjusted.notifyAt,
         title: kind === 'alarm' ? 'Alarme' : 'Está na hora',
@@ -555,6 +557,7 @@ async function scheduleTimedTask(
           : `"${task.title}" chegou ao horário definido.`,
         tone: kind === 'alarm' ? 'warning' : 'info',
       });
+      if (inserted) created += 1;
     } else if (adjusted.holiday) {
       logInfo('notification_schedule_holiday_cancelled', {
         userId: task.userId,
@@ -565,10 +568,10 @@ async function scheduleTimedTask(
         holidayScope: adjusted.holiday.scope,
       });
     }
-    return;
+    return created;
   }
 
-  await markTaskOverdueAndSchedule(sql, task, dueDate, {
+  return markTaskOverdueAndSchedule(sql, task, dueDate, {
     maxOverdueSchedules: options.maxOverdueSchedules,
     overdueNotBefore: options.overdueNotBefore,
   });
@@ -629,7 +632,7 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
     await ensureNotificationSchedulingInfrastructure(sql);
   }
   const task = await fetchTaskForScheduling(sql, userId, taskId);
-  if (!task) return;
+  if (!task) return 0;
 
   const reminderMode = task.dueDate ? 'timed' : 'floating';
   const floatingIntervalMinutes = options?.floatingIntervalMinutes ?? task.floatingIntervalMinutes ?? DEFAULT_FLOATING_INTERVAL_MINUTES;
@@ -644,15 +647,14 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
 
   await cancelPendingNotificationSchedulesForTask(sql, task.id, task.userId, { ensureInfrastructure: false });
 
-  if (!isSchedulableStatus(task.status) || task.deletedAt || task.status === 'cancelled') return;
+  if (!isSchedulableStatus(task.status) || task.deletedAt || task.status === 'cancelled') return 0;
   if (reminderMode === 'floating') {
-    await scheduleFloatingTask(sql, { ...task, reminderMode, floatingIntervalMinutes }, new Date(), {
+    return scheduleFloatingTask(sql, { ...task, reminderMode, floatingIntervalMinutes }, new Date(), {
       maxSchedules: options?.maxFloatingSchedules ?? INITIAL_FLOATING_SCHEDULE_LIMIT,
     });
-    return;
   }
 
-  await scheduleTimedTask(sql, { ...task, reminderMode }, new Date(), {
+  return scheduleTimedTask(sql, { ...task, reminderMode }, new Date(), {
     maxOverdueSchedules: options?.maxOverdueSchedules ?? OVERDUE_SCHEDULES_PER_TASK_LIMIT,
     overdueNotBefore: new Date(),
   });

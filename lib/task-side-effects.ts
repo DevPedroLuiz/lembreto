@@ -27,6 +27,17 @@ interface TaskSideEffectJob {
   dedupeKey: string;
 }
 
+export interface SideEffectDiagnostics {
+  postgresNow: string | null;
+  oldestPendingAvailableAt: string | null;
+  duePendingCount: number;
+  pendingByKind: Record<string, number>;
+  dueByKind: Record<string, number>;
+  processingCount: number;
+  failedCount: number;
+  doneCount: number;
+}
+
 export interface ProcessTaskSideEffectsSummary {
   fetched: number;
   processed: number;
@@ -37,6 +48,7 @@ export interface ProcessTaskSideEffectsSummary {
   durationMs: number;
   hasMore: boolean;
   stoppedByTimeLimit: boolean;
+  sideEffectDiagnostics: SideEffectDiagnostics;
 }
 
 const TASK_SIDE_EFFECT_LIMIT = 10;
@@ -171,6 +183,70 @@ function mapJob(row: Record<string, unknown>): TaskSideEffectJob {
   };
 }
 
+function toIso(value: unknown): string | null {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function toCount(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, number> {
+  return Object.fromEntries(rows.map((row) => [String(row.kind), toCount(row.count)]));
+}
+
+async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagnostics> {
+  const [overviewRows, pendingKindRows, dueKindRows] = await Promise.all([
+    sql`
+      SELECT
+        NOW() AS "postgresNow",
+        MIN(available_at) FILTER (WHERE status = 'pending') AS "oldestPendingAvailableAt",
+        COUNT(*) FILTER (
+          WHERE status = 'pending'
+            AND available_at <= NOW()
+            AND cancelled_at IS NULL
+        ) AS "duePendingCount",
+        COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
+        COUNT(*) FILTER (WHERE status = 'failed') AS "failedCount",
+        COUNT(*) FILTER (WHERE status = 'done') AS "doneCount"
+      FROM task_side_effects
+    `,
+    sql`
+      SELECT kind, COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+    sql`
+      SELECT kind, COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+        AND available_at <= NOW()
+        AND cancelled_at IS NULL
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+  ]);
+
+  const overview = overviewRows[0] ?? {};
+  return {
+    postgresNow: toIso(overview.postgresNow),
+    oldestPendingAvailableAt: toIso(overview.oldestPendingAvailableAt),
+    duePendingCount: toCount(overview.duePendingCount),
+    pendingByKind: mapCountByKind(pendingKindRows),
+    dueByKind: mapCountByKind(dueKindRows),
+    processingCount: toCount(overview.processingCount),
+    failedCount: toCount(overview.failedCount),
+    doneCount: toCount(overview.doneCount),
+  };
+}
+
 async function reclaimStuckProcessingSideEffects(sql: SqlClient, limit: number) {
   const rows = await sql`
     WITH stuck AS (
@@ -203,23 +279,34 @@ async function claimDueSideEffects(sql: SqlClient, limit: number) {
       FROM task_side_effects
       WHERE status = 'pending'
         AND available_at <= NOW()
-      ORDER BY available_at ASC, created_at ASC
+        AND cancelled_at IS NULL
+      ORDER BY
+        CASE kind
+          WHEN 'sync_notification_schedules' THEN 1
+          WHEN 'cancel_notification_schedules' THEN 2
+          WHEN 'sync_external_calendar' THEN 3
+          WHEN 'delete_external_calendar_event' THEN 4
+          ELSE 5
+        END ASC,
+        available_at ASC,
+        created_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     )
-    UPDATE task_side_effects
+    UPDATE task_side_effects tse
     SET
       status = 'processing',
       processing_started_at = NOW(),
       updated_at = NOW()
-    WHERE id IN (SELECT id FROM due)
+    FROM due
+    WHERE tse.id = due.id
     RETURNING
-      id,
-      user_id AS "userId",
-      task_id AS "taskId",
-      kind,
-      attempts,
-      dedupe_key AS "dedupeKey"
+      tse.id,
+      tse.user_id AS "userId",
+      tse.task_id AS "taskId",
+      tse.kind,
+      tse.attempts,
+      tse.dedupe_key AS "dedupeKey"
   `;
 
   return rows.map(mapJob);
@@ -277,23 +364,65 @@ async function taskExists(sql: SqlClient, userId: string, taskId: string) {
   return rows.length > 0;
 }
 
-async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob) {
+async function countActiveNotificationSchedules(sql: SqlClient, userId: string, taskId: string) {
+  const rows = await sql`
+    SELECT COUNT(*) AS count
+    FROM notification_schedules
+    WHERE user_id = ${userId}
+      AND task_id = ${taskId}
+      AND status IN ('pending', 'processing')
+      AND cancelled_at IS NULL
+  `;
+  return toCount(rows[0]?.count);
+}
+
+async function getTaskScheduleSkipReason(sql: SqlClient, userId: string, taskId: string) {
+  const rows = await sql`
+    SELECT
+      status,
+      due_date AS "dueDate",
+      deleted_at AS "deletedAt",
+      completed_at AS "completedAt",
+      reminder_mode AS "reminderMode"
+    FROM tasks
+    WHERE id = ${taskId}
+      AND user_id = ${userId}
+    LIMIT 1
+  `;
+
+  const row = rows[0];
+  if (!row) return 'skipped:task_not_found';
+  if (row.deletedAt) return 'skipped:task_deleted';
+  if (row.completedAt || row.status === 'completed') return 'skipped:task_completed';
+  if (row.status === 'cancelled') return 'skipped:task_cancelled';
+  if (row.status !== 'pending' && row.status !== 'overdue') return `skipped:task_status_${String(row.status)}`;
+  if (!row.dueDate && row.reminderMode === 'timed') return 'skipped:timed_task_without_due_date';
+  return null;
+}
+
+async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob): Promise<string | undefined> {
   if (job.kind === 'sync_notification_schedules') {
     await syncTaskNotificationSchedulesLightweight(sql, job.userId, job.taskId, {
       ensureInfrastructure: false,
     });
-    return;
+    const activeSchedules = await countActiveNotificationSchedules(sql, job.userId, job.taskId);
+    if (activeSchedules > 0) return undefined;
+
+    const skipReason = await getTaskScheduleSkipReason(sql, job.userId, job.taskId);
+    if (skipReason) return skipReason;
+
+    throw new Error('sync_notification_schedules_created_no_active_schedules');
   }
 
   if (job.kind === 'cancel_notification_schedules') {
-    await cancelPendingNotificationSchedulesForTask(sql, job.taskId, job.userId, {
+    const cancelled = await cancelPendingNotificationSchedulesForTask(sql, job.taskId, job.userId, {
       ensureInfrastructure: false,
     });
-    return;
+    return `cancelled_schedules:${cancelled}`;
   }
 
   if (!(await taskExists(sql, job.userId, job.taskId))) {
-    return;
+    return 'skipped:task_not_found';
   }
 
   if (job.kind === 'sync_external_calendar') {
@@ -330,6 +459,7 @@ export async function processTaskSideEffects(
     logWarn('task_side_effects_reclaimed', { reclaimed });
   }
 
+  const sideEffectDiagnostics = await getSideEffectDiagnostics(sql);
   const jobs = await claimDueSideEffects(sql, processLimit);
   const summary: ProcessTaskSideEffectsSummary = {
     fetched: jobs.length,
@@ -341,7 +471,16 @@ export async function processTaskSideEffects(
     durationMs: 0,
     hasMore: reclaimed >= STUCK_SIDE_EFFECT_RECLAIM_LIMIT || jobs.length >= processLimit,
     stoppedByTimeLimit: false,
+    sideEffectDiagnostics,
   };
+
+  if (sideEffectDiagnostics.duePendingCount > 0 && jobs.length === 0) {
+    logError('task_side_effect_due_but_not_fetched', undefined, {
+      sideEffectDiagnostics,
+      processLimit,
+      reclaimed,
+    });
+  }
 
   for (const job of jobs) {
     const elapsedMs = Date.now() - startedAt;
@@ -354,12 +493,12 @@ export async function processTaskSideEffects(
     }
 
     try {
-      await withTimeout(
+      const message = await withTimeout(
         processSingleSideEffect(sql, job),
         Math.min(remainingMs, SIDE_EFFECT_JOB_TIMEOUT_MS),
         'side_effect_job_timeout',
       );
-      await updateJobStatus(sql, job.id, 'done');
+      await updateJobStatus(sql, job.id, 'done', message);
       summary.done += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -394,6 +533,7 @@ export async function processTaskSideEffects(
     durationMs: summary.durationMs,
     hasMore: summary.hasMore,
     stoppedByTimeLimit: summary.stoppedByTimeLimit,
+    sideEffectDiagnostics: summary.sideEffectDiagnostics,
   });
   logInfo('side-effects:duration-ms', { durationMs: summary.durationMs });
 

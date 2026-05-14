@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import webpush from 'web-push';
 import type { SqlClient } from '../lib/handlers/core.js';
@@ -250,6 +251,237 @@ function createNotificationScheduleSqlMock(options?: {
   };
 }
 
+function createTaskSideEffectsSqlMock(options?: {
+  alarmEnabled?: boolean;
+  dueMinutesFromNow?: number;
+  includeExternalCalendarJob?: boolean;
+  externalFirst?: boolean;
+}) {
+  const now = new Date();
+  const userId = '55555555-5555-4555-8555-555555555555';
+  const taskId = '66666666-6666-4666-8666-666666666666';
+  const dueDate = new Date(now.getTime() + (options?.dueMinutesFromNow ?? 5) * 60_000);
+  const jobs = [
+    ...(options?.includeExternalCalendarJob
+      ? [{
+          id: '77777777-7777-4777-8777-777777777777',
+          userId,
+          taskId,
+          kind: 'sync_external_calendar',
+          status: 'pending',
+          attempts: 0,
+          dedupeKey: `user:${userId}:task:${taskId}:sync-calendar`,
+          availableAt: new Date(now.getTime() - (options.externalFirst ? 60_000 : 0)).toISOString(),
+          createdAt: new Date(now.getTime() - (options.externalFirst ? 60_000 : 0)).toISOString(),
+          processingStartedAt: null as string | null,
+          doneAt: null as string | null,
+          failedAt: null as string | null,
+          cancelledAt: null as string | null,
+          errorMessage: null as string | null,
+        }]
+      : []),
+    {
+      id: '88888888-8888-4888-8888-888888888888',
+      userId,
+      taskId,
+      kind: 'sync_notification_schedules',
+      status: 'pending',
+      attempts: 0,
+      dedupeKey: `user:${userId}:task:${taskId}:sync-schedules`,
+      availableAt: now.toISOString(),
+      createdAt: now.toISOString(),
+      processingStartedAt: null as string | null,
+      doneAt: null as string | null,
+      failedAt: null as string | null,
+      cancelledAt: null as string | null,
+      errorMessage: null as string | null,
+    },
+  ];
+  const task = {
+    id: taskId,
+    userId,
+    title: 'Teste side effect',
+    description: '',
+    dueDate: dueDate.toISOString(),
+    status: 'pending',
+    createdAt: new Date(now.getTime() - 60_000).toISOString(),
+    alarmEnabled: Boolean(options?.alarmEnabled),
+    reminderMode: 'timed',
+    expiresAt: null,
+    overdueSince: null,
+    overdueExpiresAt: null,
+    deletedAt: null,
+    completedAt: null,
+    mutedUntil: null,
+    suppressHolidayNotifications: false,
+    floatingIntervalMinutes: null,
+    notificationsEnabled: true,
+    stateCode: null,
+    cityName: null,
+    holidayRegionCode: null,
+  };
+  const schedules: Array<Record<string, unknown>> = [];
+
+  const jobRow = (job: typeof jobs[number]) => ({
+    id: job.id,
+    userId: job.userId,
+    taskId: job.taskId,
+    kind: job.kind,
+    attempts: job.attempts,
+    dedupeKey: job.dedupeKey,
+  });
+
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(' ');
+
+    if (query.includes('FROM task_side_effects') && query.includes('NOW() AS "postgresNow"')) {
+      const dueJobs = jobs.filter((job) => (
+        job.status === 'pending' &&
+        new Date(job.availableAt) <= now &&
+        job.cancelledAt === null
+      ));
+      return [{
+        postgresNow: now.toISOString(),
+        oldestPendingAvailableAt: jobs
+          .filter((job) => job.status === 'pending')
+          .map((job) => job.availableAt)
+          .sort()[0] ?? null,
+        duePendingCount: dueJobs.length,
+        processingCount: jobs.filter((job) => job.status === 'processing').length,
+        failedCount: jobs.filter((job) => job.status === 'failed').length,
+        doneCount: jobs.filter((job) => job.status === 'done').length,
+      }];
+    }
+
+    if (query.includes('FROM task_side_effects') && query.includes('GROUP BY kind')) {
+      const dueOnly = query.includes('available_at <= NOW()');
+      const counts = new Map<string, number>();
+      for (const job of jobs) {
+        if (job.status !== 'pending') continue;
+        if (dueOnly && (new Date(job.availableAt) > now || job.cancelledAt !== null)) continue;
+        counts.set(job.kind, (counts.get(job.kind) ?? 0) + 1);
+      }
+      return Array.from(counts.entries()).map(([kind, count]) => ({ kind, count }));
+    }
+
+    if (query.includes('WITH stuck AS') && query.includes('UPDATE task_side_effects')) {
+      return [];
+    }
+
+    if (query.includes('WITH due AS') && query.includes('UPDATE task_side_effects tse')) {
+      const limit = Number(values[0] ?? 10);
+      const priority = (kind: string) => {
+        if (kind === 'sync_notification_schedules') return 1;
+        if (kind === 'cancel_notification_schedules') return 2;
+        if (kind === 'sync_external_calendar') return 3;
+        if (kind === 'delete_external_calendar_event') return 4;
+        return 5;
+      };
+      const claimed = jobs
+        .filter((job) => job.status === 'pending' && new Date(job.availableAt) <= now && job.cancelledAt === null)
+        .sort((a, b) => (
+          priority(a.kind) - priority(b.kind) ||
+          a.availableAt.localeCompare(b.availableAt) ||
+          a.createdAt.localeCompare(b.createdAt)
+        ))
+        .slice(0, limit);
+
+      for (const job of claimed) {
+        job.status = 'processing';
+        job.processingStartedAt = now.toISOString();
+      }
+      return claimed.map(jobRow);
+    }
+
+    if (query.includes('FROM tasks') && query.includes('INNER JOIN users')) {
+      return [{
+        id: task.id,
+        userId: task.userId,
+        title: task.title,
+        description: task.description,
+        dueDate: task.dueDate,
+        status: task.status,
+        createdAt: task.createdAt,
+        alarmEnabled: task.alarmEnabled,
+        reminderMode: task.reminderMode,
+        expiresAt: task.expiresAt,
+        overdueSince: task.overdueSince,
+        overdueExpiresAt: task.overdueExpiresAt,
+        deletedAt: task.deletedAt,
+        mutedUntil: task.mutedUntil,
+        suppressHolidayNotifications: task.suppressHolidayNotifications,
+        floatingIntervalMinutes: task.floatingIntervalMinutes,
+        notificationsEnabled: task.notificationsEnabled,
+        stateCode: task.stateCode,
+        cityName: task.cityName,
+        holidayRegionCode: task.holidayRegionCode,
+      }];
+    }
+
+    if (query.includes('UPDATE tasks') && query.includes('reminder_mode')) {
+      task.reminderMode = String(values[0]);
+      return [];
+    }
+
+    if (query.includes('UPDATE notification_schedules') && query.includes("status = 'cancelled'")) {
+      return [];
+    }
+
+    if (query.includes('INSERT INTO notification_schedules')) {
+      const schedule = {
+        id: crypto.randomUUID(),
+        userId: values[0],
+        taskId: values[1],
+        kind: values[2],
+        notifyAt: values[3] instanceof Date ? values[3].toISOString() : String(values[3]),
+        title: values[4],
+        message: values[5],
+        tone: values[6],
+        dedupeKey: values[7],
+        status: 'pending',
+      };
+      if (!schedules.some((item) => item.dedupeKey === schedule.dedupeKey && item.userId === schedule.userId)) {
+        schedules.push(schedule);
+        return [{ id: schedule.id }];
+      }
+      return [];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count') && query.includes('FROM notification_schedules')) {
+      return [{ count: schedules.filter((schedule) => (
+        schedule.userId === values[0] &&
+        schedule.taskId === values[1] &&
+        (schedule.status === 'pending' || schedule.status === 'processing')
+      )).length }];
+    }
+
+    if (query.includes('UPDATE task_side_effects') && query.includes('done_at = CASE')) {
+      const status = String(values[0]);
+      const errorMessage = typeof values[7] === 'string' ? values[7] : null;
+      const jobId = String(values[8]);
+      const job = jobs.find((item) => item.id === jobId);
+      if (job && job.status === 'processing') {
+        job.status = status;
+        job.processingStartedAt = status === 'processing' ? job.processingStartedAt : null;
+        job.doneAt = status === 'done' ? now.toISOString() : job.doneAt;
+        job.failedAt = status === 'failed' ? now.toISOString() : job.failedAt;
+        job.cancelledAt = status === 'cancelled' ? now.toISOString() : job.cancelledAt;
+        job.errorMessage = errorMessage;
+      }
+      return [];
+    }
+
+    return [];
+  }) as SqlClient;
+
+  return {
+    sql,
+    jobs,
+    task,
+    schedules,
+  };
+}
+
 async function run(name: string, fn: () => Promise<void> | void) {
   try {
     await fn();
@@ -292,6 +524,9 @@ async function main() {
   const {
     processDueNotificationSchedules,
   } = await import('../lib/notification-schedules.js');
+  const {
+    processTaskSideEffects,
+  } = await import('../lib/task-side-effects.js');
   const { requiresWorkEndDateForStatus } = await import('../lib/contracts.js');
 
   await run('buildTokenJti composes subject and iat', () => {
@@ -744,6 +979,63 @@ async function main() {
       if (previousPushTimeout === undefined) delete process.env.PUSH_SEND_TIMEOUT_MS;
       else process.env.PUSH_SEND_TIMEOUT_MS = previousPushTimeout;
     }
+  });
+
+  await run('side effect sync creates notification schedule for timed task', async () => {
+    const { sql, jobs, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 5 });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.sideEffectDiagnostics.duePendingCount, 1);
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.equal(jobs.find((job) => job.kind === 'sync_notification_schedules')?.status, 'done');
+    assert.ok(schedules.some((schedule) => (
+      schedule.taskId === task.id &&
+      schedule.kind === 'notification' &&
+      schedule.status === 'pending'
+    )));
+  });
+
+  await run('side effect sync creates alarm schedule when alarm is enabled', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({
+      alarmEnabled: true,
+      dueMinutesFromNow: 5,
+    });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.ok(schedules.some((schedule) => (
+      schedule.taskId === task.id &&
+      schedule.kind === 'alarm' &&
+      schedule.status === 'pending'
+    )));
+  });
+
+  await run('side effect sync creates pre notice when there is enough time', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 30 });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'));
+    assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
+  });
+
+  await run('calendar side effect does not outrank notification schedule sync', async () => {
+    const { sql, jobs, schedules } = createTaskSideEffectsSqlMock({
+      includeExternalCalendarJob: true,
+      externalFirst: true,
+      dueMinutesFromNow: 5,
+    });
+    const result = await processTaskSideEffects(sql, 1, 8000);
+
+    assert.equal(result.sideEffectDiagnostics.duePendingCount, 2);
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.equal(jobs.find((job) => job.kind === 'sync_notification_schedules')?.status, 'done');
+    assert.equal(jobs.find((job) => job.kind === 'sync_external_calendar')?.status, 'pending');
+    assert.ok(schedules.some((schedule) => schedule.kind === 'notification'));
   });
 
   await run('cron processes due schedules before side effects', () => {
