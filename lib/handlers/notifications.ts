@@ -793,7 +793,7 @@ function shouldUsePreliminarySideEffectDiagnostics(diagnostics: SideEffectDiagno
   return diagnostics.postgresNow === null && diagnostics.duePendingCount === 0;
 }
 
-function calendarSyncDisabledSummary(): CalendarSyncSummary & { skippedReason: string } {
+function calendarSyncDisabledSummary(reason = 'disabled_in_notification_cron'): CalendarSyncSummary & { skippedReason: string } {
   return {
     scanned: 0,
     synced: 0,
@@ -801,22 +801,22 @@ function calendarSyncDisabledSummary(): CalendarSyncSummary & { skippedReason: s
     failed: 0,
     stoppedByTimeLimit: false,
     durationMs: 0,
-    skippedReason: 'disabled_in_notification_cron',
+    skippedReason: reason,
   };
 }
 
-function maintenanceStageDisabledSummary(durationMs = 0) {
+function maintenanceStageDisabledSummary(durationMs = 0, reason = 'disabled_in_notification_cron') {
   return {
     backfilledSchedules: 0,
     durationMs,
     hasMore: false,
     stoppedByTimeLimit: false,
-    skippedReason: 'disabled_in_notification_cron',
+    skippedReason: reason,
     backfillDiagnostics: {
       scannedTasks: 0,
       missingSchedules: 0,
       backfilledSchedules: 0,
-      skippedReasons: { disabled_in_notification_cron: 1 },
+      skippedReasons: { [reason]: 1 },
     },
   };
 }
@@ -881,7 +881,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
     const preliminaryScheduleDiagnostics = buildPreliminaryScheduleDiagnostics(dbHealth);
     const preliminarySideEffectDiagnostics = buildPreliminarySideEffectDiagnostics(dbHealth);
 
-    if (dbHealth.slow) {
+    if (!dbHealth.steps.now.ok) {
       const durationMs = Date.now() - startedAt;
       const schedules = {
         fetched: 0,
@@ -894,30 +894,30 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
         durationMs: 0,
         stoppedByTimeLimit: false,
         hasMore: true,
-        skippedReason: 'db_health_slow',
+        skippedReason: 'db_health_unavailable',
       };
       const sideEffects = {
         ...fallbackSideEffects(0),
         hasMore: true,
         stoppedByTimeLimit: false,
         sideEffectDiagnostics: preliminarySideEffectDiagnostics,
-        skippedReason: 'db_health_slow',
+        skippedReason: 'db_health_unavailable',
       };
       const backfill = {
         ...fallbackBackfill(0),
         hasMore: false,
         stoppedByTimeLimit: false,
-        skippedReason: 'db_health_slow',
+        skippedReason: 'db_health_unavailable',
       };
       const calendarSync = calendarSyncDisabledSummary();
       const overdueDetection = {
         ...fallbackOverdueDetection(0),
         hasMore: false,
         stoppedByTimeLimit: false,
-        skippedReason: 'db_health_slow',
+        skippedReason: 'db_health_unavailable',
       };
 
-      logWarn('cron_notifications_skipped_by_db_health', getRequestMeta(request, {
+      logWarn('cron_notifications_skipped_by_db_health_unavailable', getRequestMeta(request, {
         durationMs,
         dbHealth,
         scheduleDiagnostics: preliminaryScheduleDiagnostics,
@@ -942,6 +942,14 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       });
     }
 
+    if (dbHealth.slow) {
+      logWarn('cron_notifications_db_health_slow', getRequestMeta(request, {
+        dbHealth,
+        scheduleDiagnostics: preliminaryScheduleDiagnostics,
+        sideEffectDiagnostics: preliminarySideEffectDiagnostics,
+      }));
+    }
+
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
     const result = await withTimeout(
       processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
@@ -963,7 +971,8 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           );
         })()
       : fallbackSideEffects();
-    const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true';
+    const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' && !dbHealth.slow;
+    const dbHealthMaintenanceSkipReason = dbHealth.slow ? 'db_health_slow' : 'disabled_in_notification_cron';
     const backfill = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, BACKFILL_DURATION_MS);
@@ -974,8 +983,8 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'backfillMissingNotificationSchedules',
           );
         })()
-      : maintenanceStageDisabledSummary();
-    const calendarSync = process.env.CRON_ENABLE_CALENDAR_SYNC === 'true' && hasCronBudget(deadline)
+      : maintenanceStageDisabledSummary(0, dbHealthMaintenanceSkipReason);
+    const calendarSync = process.env.CRON_ENABLE_CALENDAR_SYNC === 'true' && !dbHealth.slow && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS);
           return withTimeout(
@@ -985,7 +994,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'processPendingCalendarSyncs',
           );
         })()
-      : calendarSyncDisabledSummary();
+      : calendarSyncDisabledSummary(dbHealthMaintenanceSkipReason);
     const overdueDetection = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
@@ -1000,7 +1009,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           ...fallbackOverdueDetection(0),
           hasMore: false,
           stoppedByTimeLimit: false,
-          skippedReason: 'disabled_in_notification_cron',
+          skippedReason: dbHealthMaintenanceSkipReason,
         };
 
     result.backfilledSchedules = backfill.backfilledSchedules;
