@@ -13,7 +13,6 @@ import { logError, logInfo } from '../logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
   ensureNotificationSchedulingInfrastructure,
-  syncTaskNotificationSchedulesLightweight,
 } from '../notification-schedules.js';
 import {
   createTaskCategorySchema,
@@ -32,6 +31,11 @@ import {
   upsertUserCategory,
   upsertUserTags,
 } from '../task-taxonomy.js';
+import {
+  enqueueTaskSideEffect,
+  ensureTaskSideEffectsInfrastructure,
+  userHasActiveExternalCalendarSync,
+} from '../task-side-effects.js';
 import { signCalendarFeedToken, verifyCalendarFeedToken } from '../jwt.js';
 import {
   type HandlerContext,
@@ -66,6 +70,7 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
   taskInfrastructureReady ??= (async () => {
     await ensureTaskTaxonomySchema(sql);
     await ensureCalendarIntegrationSchema(sql);
+    await ensureTaskSideEffectsInfrastructure(sql);
   })().catch((error) => {
     taskInfrastructureReady = null;
     throw error;
@@ -155,30 +160,36 @@ async function syncTaskTaxonomyBestEffort(
   }
 }
 
-async function syncTaskNotificationSchedulesBestEffort(
-  context: HandlerContext,
-  userId: string,
-  taskId: string,
-  options?: { floatingIntervalMinutes: number | null },
-) {
-  try {
-    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, {
-      ...options,
-      ensureInfrastructure: false,
-    });
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'message' in error &&
-      typeof error.message === 'string' &&
-      error.message.includes('notification_schedules_user_id_fkey')
-    ) {
-      return;
-    }
+async function enqueueScheduleSync(sql: HandlerContext['sql'], userId: string, taskId: string) {
+  await enqueueTaskSideEffect(sql, {
+    userId,
+    taskId,
+    kind: 'sync_notification_schedules',
+  });
+}
 
-    logError('task_notification_schedule_sync_failed', error, getRequestMeta(context.request, { userId, taskId }));
-  }
+async function enqueueScheduleCancel(sql: HandlerContext['sql'], userId: string, taskId: string) {
+  await enqueueTaskSideEffect(sql, {
+    userId,
+    taskId,
+    kind: 'cancel_notification_schedules',
+  });
+}
+
+async function enqueueCalendarSync(sql: HandlerContext['sql'], userId: string, taskId: string) {
+  await enqueueTaskSideEffect(sql, {
+    userId,
+    taskId,
+    kind: 'sync_external_calendar',
+  });
+}
+
+async function enqueueCalendarDelete(sql: HandlerContext['sql'], userId: string, taskId: string) {
+  await enqueueTaskSideEffect(sql, {
+    userId,
+    taskId,
+    kind: 'delete_external_calendar_event',
+  });
 }
 
 function createHistoryEntry(
@@ -457,7 +468,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       }),
     ]);
 
+    const totalStartedAt = Date.now();
     try {
+      const dbStartedAt = Date.now();
       const rows = await sql`
         INSERT INTO tasks (
           user_id,
@@ -528,12 +541,22 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           external_calendar_last_error AS "externalCalendarLastError",
           external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
+      const dbMs = Date.now() - dbStartedAt;
 
-      void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), category, tags);
-      await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
-        floatingIntervalMinutes: noTimeReminderMinutes ?? null,
-      });
-      logInfo('task_created', getRequestMeta(request, { userId: user.id }));
+      const taskId = String(rows[0].id);
+      const enqueueStartedAt = Date.now();
+      await enqueueScheduleSync(sql, user.id, taskId);
+      if (effectiveDueDate && status === 'pending' && await userHasActiveExternalCalendarSync(sql, user.id)) {
+        await enqueueCalendarSync(sql, user.id, taskId);
+      }
+      const enqueueMs = Date.now() - enqueueStartedAt;
+
+      await syncTaskTaxonomyBestEffort(context, user.id, taskId, category, tags);
+      const totalMs = Date.now() - totalStartedAt;
+      logInfo('tasks:create:db-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: dbMs }));
+      logInfo('tasks:create:enqueue-side-effects-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: enqueueMs }));
+      logInfo('tasks:create:total-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: totalMs }));
+      logInfo('task_created', getRequestMeta(request, { userId: user.id, taskId }));
       return json(201, rows[0]);
     } catch (error) {
       logError('task_create_failed', error, getRequestMeta(request, { userId: user.id }));
@@ -579,6 +602,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       } = parsed.data;
       const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
 
+      const totalStartedAt = Date.now();
       try {
         const current = await sql`
         SELECT
@@ -594,6 +618,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           suppress_holiday_notifications,
           muted_until,
           floating_interval_minutes,
+          external_calendar_event_id,
           history
         FROM tasks WHERE id = ${id} AND user_id = ${user.id}
       `;
@@ -676,7 +701,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
             ELSE completed_at
           END,
           completion_source = CASE
-            WHEN ${nextValues.status} = 'completed' THEN COALESCE(completion_source, 'user')
+            WHEN ${nextValues.status} = 'completed' THEN 'user'
             WHEN ${nextValues.status} IN ('pending', 'overdue') THEN NULL
             ELSE completion_source
           END,
@@ -728,20 +753,37 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_synced_at AS "externalCalendarSyncedAt"
       `;
 
-      void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), categoryValue, tagsValue);
-      if (
-        String(nextValues.status) === 'completed' ||
-        String(nextValues.status) === 'cancelled' ||
-        String(nextValues.status) === 'inactive' ||
-        String(nextValues.status) === 'draft'
-      ) {
-        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id, { ensureInfrastructure: false })
-          .catch((error) => logError('task_schedule_cancel_failed', error, { userId: user.id, taskId: String(rows[0].id) }));
+      const taskId = String(rows[0].id);
+      const nextStatus = String(nextValues.status);
+      const shouldCancelSchedules =
+        nextStatus === 'completed' ||
+        nextStatus === 'cancelled' ||
+        nextStatus === 'inactive' ||
+        nextStatus === 'draft';
+      const existingExternalEventId = typeof cur.external_calendar_event_id === 'string'
+        ? cur.external_calendar_event_id
+        : null;
+
+      if (shouldCancelSchedules) {
+        await cancelPendingNotificationSchedulesForTask(sql, taskId, user.id, { ensureInfrastructure: false });
+        await enqueueScheduleCancel(sql, user.id, taskId);
       } else {
-        await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
-          floatingIntervalMinutes: noTimeReminderMinutes ?? null,
-        });
+        await enqueueScheduleSync(sql, user.id, taskId);
       }
+
+      if (shouldCancelSchedules && existingExternalEventId) {
+        await enqueueCalendarDelete(sql, user.id, taskId);
+      } else if (
+        nextStatus === 'pending' &&
+        nextValues.dueDate &&
+        (existingExternalEventId || await userHasActiveExternalCalendarSync(sql, user.id))
+      ) {
+        await enqueueCalendarSync(sql, user.id, taskId);
+      }
+
+      await syncTaskTaxonomyBestEffort(context, user.id, taskId, categoryValue, tagsValue);
+      const totalMs = Date.now() - totalStartedAt;
+      logInfo('tasks:update:total-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: totalMs }));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
       return json(200, rows[0]);
     } catch (error) {
@@ -751,8 +793,9 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
   }
 
   if (request.method === 'DELETE') {
+    const totalStartedAt = Date.now();
     try {
-      await sql`
+      const rows = await sql`
         UPDATE tasks
         SET
           status = 'cancelled',
@@ -767,9 +810,22 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           END
         WHERE id = ${id}
           AND user_id = ${user.id}
+        RETURNING
+          id,
+          external_calendar_event_id AS "externalCalendarEventId"
       `;
-      void cancelPendingNotificationSchedulesForTask(sql, id, user.id, { ensureInfrastructure: false })
-        .catch((error) => logError('task_schedule_cancel_failed', error, { userId: user.id, taskId: id }));
+      if (rows[0]) {
+        await cancelPendingNotificationSchedulesForTask(sql, id, user.id, { ensureInfrastructure: false });
+        await enqueueScheduleCancel(sql, user.id, id);
+        if (typeof rows[0].externalCalendarEventId === 'string') {
+          await enqueueCalendarDelete(sql, user.id, id);
+        }
+      }
+      logInfo('tasks:delete:total-ms', getRequestMeta(request, {
+        userId: user.id,
+        taskId: id,
+        durationMs: Date.now() - totalStartedAt,
+      }));
       logInfo('task_deleted', getRequestMeta(request, { userId: user.id, taskId: id }));
       return { status: 204 };
     } catch (error) {

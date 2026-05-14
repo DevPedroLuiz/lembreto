@@ -20,6 +20,7 @@ import {
   processNotificationSchedules,
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
+import { processTaskSideEffects } from '../task-side-effects.js';
 import {
   createNotificationSchema,
   deletePushSubscriptionSchema,
@@ -336,13 +337,15 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
+    const sideEffects = await processTaskSideEffects(sql);
     const result = await processNotificationSchedules(sql);
     const calendarSync = await processPendingCalendarSyncs(sql);
     logInfo('cron_notifications_completed', getRequestMeta(request, {
+      sideEffects,
       ...result,
       calendarSync,
     }));
-    return json(200, { ok: true, ...result, calendarSync });
+    return json(200, { ok: true, sideEffects, ...result, calendarSync });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));
     return json(500, { error: 'Erro ao gerar notificações agendadas' });
