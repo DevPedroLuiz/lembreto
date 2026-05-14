@@ -85,6 +85,7 @@ type CronDbHealth = {
     nowMs: number | null;
     taskSideEffectsPendingMs: number | null;
     taskSideEffectsDueMs: number | null;
+    taskSideEffectsNotificationDueMs: number | null;
     schedulesPendingMs: number | null;
     schedulesDueMs: number | null;
     tasksPendingMs: number | null;
@@ -92,6 +93,7 @@ type CronDbHealth = {
   counts: {
     taskSideEffectsPending: number | null;
     taskSideEffectsDue: number | null;
+    taskSideEffectsNotificationDue: number | null;
     schedulesPending: number | null;
     schedulesDue: number | null;
     tasksPending: number | null;
@@ -598,6 +600,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   const counts: CronDbHealth['counts'] = {
     taskSideEffectsPending: null,
     taskSideEffectsDue: null,
+    taskSideEffectsNotificationDue: null,
     schedulesPending: null,
     schedulesDue: null,
     tasksPending: null,
@@ -606,6 +609,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     nowMs: null,
     taskSideEffectsPendingMs: null,
     taskSideEffectsDueMs: null,
+    taskSideEffectsNotificationDueMs: null,
     schedulesPendingMs: null,
     schedulesDueMs: null,
     tasksPendingMs: null,
@@ -619,6 +623,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   if (shouldSkipCounts) {
     steps.taskSideEffectsPending = skippedStep();
     steps.taskSideEffectsDue = skippedStep();
+    steps.taskSideEffectsNotificationDue = skippedStep();
     steps.schedulesPending = skippedStep();
     steps.schedulesDue = skippedStep();
     steps.tasksPending = skippedStep();
@@ -658,6 +663,23 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   steps.taskSideEffectsDue = taskSideEffectsDue.step;
   db.taskSideEffectsDueMs = taskSideEffectsDue.step.durationMs;
   counts.taskSideEffectsDue = taskSideEffectsDue.step.ok ? toCount(taskSideEffectsDue.rows[0]?.count) : null;
+
+  const taskSideEffectsNotificationDue = await measureQuery(
+    'task_side_effects_notification_due',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+        AND available_at <= NOW()
+        AND cancelled_at IS NULL
+        AND kind IN ('sync_notification_schedules', 'cancel_notification_schedules')
+    `,
+  );
+  steps.taskSideEffectsNotificationDue = taskSideEffectsNotificationDue.step;
+  db.taskSideEffectsNotificationDueMs = taskSideEffectsNotificationDue.step.durationMs;
+  counts.taskSideEffectsNotificationDue = taskSideEffectsNotificationDue.step.ok
+    ? toCount(taskSideEffectsNotificationDue.rows[0]?.count)
+    : null;
 
   const schedulesPending = await measureQuery(
     'notification_schedules_pending',
@@ -983,7 +1005,8 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
         scheduleDiagnostics: preliminaryScheduleDiagnostics,
       }));
     }
-    const sideEffects = hasCronBudget(deadline)
+    const hasDueNotificationSideEffects = (dbHealth.counts.taskSideEffectsNotificationDue ?? 0) > 0;
+    const sideEffects = hasDueNotificationSideEffects && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
           return withTimeout(
@@ -997,7 +1020,13 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
             'processTaskSideEffects',
           );
         })()
-      : fallbackSideEffects();
+      : {
+          ...fallbackSideEffects(0),
+          hasMore: false,
+          stoppedByTimeLimit: false,
+          sideEffectDiagnostics: preliminarySideEffectDiagnostics,
+          skippedReason: hasDueNotificationSideEffects ? 'time_limit' : 'no_notification_side_effects_due',
+        };
     const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' && !dbHealth.slow;
     const dbHealthMaintenanceSkipReason = dbHealth.slow ? 'db_health_slow' : 'disabled_in_notification_cron';
     const backfill = maintenanceStagesEnabled && hasCronBudget(deadline)
