@@ -2544,12 +2544,12 @@ export default function App() {
   }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedPendingTasks]);
 
   useEffect(() => {
-    if (isOnline || !notificationsEnabled || timedPendingTasks.length === 0 || activeAlarm) return;
+    if (!notificationsEnabled || timedPendingTasks.length === 0 || activeAlarm) return;
 
     const now = new Date(notificationClock).getTime();
 
     for (const task of timedPendingTasks) {
-      if (!task.alarmEnabled || shouldSuppressHolidayNotification(task)) continue;
+      if (!task.alarmEnabled) continue;
 
       const dueTime = parseISO(task.dueDate).getTime();
       if (Number.isNaN(dueTime)) continue;
@@ -2580,10 +2580,8 @@ export default function App() {
     }
   }, [
     activeAlarm,
-    isOnline,
     notificationClock,
     notificationsEnabled,
-    shouldSuppressHolidayNotification,
     startAlarmSound,
     stopAlarmSound,
     timedPendingTasks,

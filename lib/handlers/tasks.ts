@@ -66,7 +66,6 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
   taskInfrastructureReady ??= (async () => {
     await ensureTaskTaxonomySchema(sql);
     await ensureCalendarIntegrationSchema(sql);
-    await ensureNotificationSchedulingInfrastructure(sql);
   })().catch((error) => {
     taskInfrastructureReady = null;
     throw error;
@@ -163,7 +162,10 @@ async function syncTaskNotificationSchedulesBestEffort(
   options?: { floatingIntervalMinutes: number | null },
 ) {
   try {
-    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, options);
+    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, {
+      ...options,
+      ensureInfrastructure: false,
+    });
   } catch (error) {
     if (
       error &&
@@ -528,7 +530,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       `;
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), category, tags);
-      void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+      await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
         floatingIntervalMinutes: noTimeReminderMinutes ?? null,
       });
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
@@ -727,13 +729,16 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       `;
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), categoryValue, tagsValue);
-      if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled') {
-        await cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id);
-      } else if (String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
-        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id)
+      if (
+        String(nextValues.status) === 'completed' ||
+        String(nextValues.status) === 'cancelled' ||
+        String(nextValues.status) === 'inactive' ||
+        String(nextValues.status) === 'draft'
+      ) {
+        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id, { ensureInfrastructure: false })
           .catch((error) => logError('task_schedule_cancel_failed', error, { userId: user.id, taskId: String(rows[0].id) }));
       } else {
-        void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+        await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
           floatingIntervalMinutes: noTimeReminderMinutes ?? null,
         });
       }
@@ -763,7 +768,8 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         WHERE id = ${id}
           AND user_id = ${user.id}
       `;
-      await cancelPendingNotificationSchedulesForTask(sql, id, user.id);
+      void cancelPendingNotificationSchedulesForTask(sql, id, user.id, { ensureInfrastructure: false })
+        .catch((error) => logError('task_schedule_cancel_failed', error, { userId: user.id, taskId: id }));
       logInfo('task_deleted', getRequestMeta(request, { userId: user.id, taskId: id }));
       return { status: 204 };
     } catch (error) {
