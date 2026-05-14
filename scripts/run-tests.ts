@@ -350,6 +350,7 @@ function createTaskSideEffectsSqlMock(options?: {
         processingCount: jobs.filter((job) => job.status === 'processing').length,
         failedCount: jobs.filter((job) => job.status === 'failed').length,
         doneCount: jobs.filter((job) => job.status === 'done').length,
+        oldestPendingAgeSeconds: dueJobs.length > 0 ? 0 : null,
       }];
     }
 
@@ -416,6 +417,16 @@ function createTaskSideEffectsSqlMock(options?: {
         cityName: task.cityName,
         holidayRegionCode: task.holidayRegionCode,
       }];
+    }
+
+    if (query.includes('FROM tasks') && query.includes('NOT EXISTS') && query.includes('notification_schedules')) {
+      const activeSchedules = schedules.filter((schedule) => (
+        schedule.userId === task.userId &&
+        schedule.taskId === task.id &&
+        (schedule.status === 'pending' || schedule.status === 'processing')
+      ));
+      if (task.status !== 'pending' || task.deletedAt || activeSchedules.length > 0) return [];
+      return [{ id: task.id, userId: task.userId }];
     }
 
     if (query.includes('UPDATE tasks') && query.includes('reminder_mode')) {
@@ -522,6 +533,7 @@ async function main() {
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
   const {
+    backfillMissingNotificationSchedules,
     processDueNotificationSchedules,
   } = await import('../lib/notification-schedules.js');
   const {
@@ -1010,6 +1022,11 @@ async function main() {
       schedule.kind === 'alarm' &&
       schedule.status === 'pending'
     )));
+    assert.equal(schedules.some((schedule) => (
+      schedule.taskId === task.id &&
+      schedule.kind === 'notification' &&
+      schedule.notifyAt === task.dueDate
+    )), false);
   });
 
   await run('side effect sync creates pre notice when there is enough time', async () => {
@@ -1018,6 +1035,36 @@ async function main() {
 
     assert.equal(result.fetched, 1);
     assert.equal(result.done, 1);
+    assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'));
+    assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
+  });
+
+  await run('side effect sync skips pre notice when due date is too close', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 5 });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.equal(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'), false);
+    assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
+  });
+
+  await run('side effect diagnostics expose due pending age', async () => {
+    const { sql } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 5 });
+    const result = await processTaskSideEffects(sql, 1, 8000);
+
+    assert.equal(result.sideEffectDiagnostics.duePendingCount, 1);
+    assert.equal(result.sideEffectDiagnostics.dueByKind.sync_notification_schedules, 1);
+    assert.equal(result.sideEffectDiagnostics.oldestPendingAgeSeconds, 0);
+  });
+
+  await run('backfill creates schedule for pending timed task without active schedules', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 20 });
+    const result = await backfillMissingNotificationSchedules(sql, 3, 8000, { ensureInfrastructure: false });
+
+    assert.equal(result.backfilledSchedules, 2);
+    assert.equal(result.backfillDiagnostics.scannedTasks, 1);
+    assert.equal(result.backfillDiagnostics.missingSchedules, 1);
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'));
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
   });
@@ -1061,6 +1108,19 @@ async function main() {
     assert.ok(cronHandler.includes('const schedules = {'));
     assert.ok(cronHandler.includes('return json(200, {'));
     assert.ok(cronHandler.includes('schedules,'));
+    assert.ok(cronHandler.includes('processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false })'));
+    assert.ok(cronHandler.includes('processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, { ensureInfrastructure: false })'));
+    assert.ok(cronHandler.includes('backfillDiagnostics'));
+  });
+
+  await run('task creation enqueues notification schedule side effect before calendar sync', () => {
+    const taskHandler = readFileSync(new URL('../lib/handlers/tasks.ts', import.meta.url), 'utf8');
+    const scheduleIndex = taskHandler.indexOf('await enqueueScheduleSync(sql, user.id, taskId)');
+    const calendarIndex = taskHandler.indexOf('await enqueueCalendarSync(sql, user.id, taskId)');
+
+    assert.ok(scheduleIndex >= 0);
+    assert.ok(calendarIndex >= 0);
+    assert.ok(scheduleIndex < calendarIndex);
   });
 
   await run('cron handler returns JSON when a stage never resolves', async () => {

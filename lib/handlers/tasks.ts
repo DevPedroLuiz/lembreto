@@ -770,7 +770,12 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         : null;
 
       if (shouldCancelSchedules) {
-        await cancelPendingNotificationSchedulesForTask(sql, taskId, user.id, { ensureInfrastructure: false });
+        await cancelPendingNotificationSchedulesForTask(sql, taskId, user.id, {
+          ensureInfrastructure: false,
+          reason: `task_status_${nextStatus}`,
+          caller: 'handleTaskById:update',
+          taskStatus: nextStatus,
+        });
         await enqueueScheduleCancel(sql, user.id, taskId);
       } else {
         await enqueueScheduleSync(sql, user.id, taskId);
@@ -820,7 +825,12 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_event_id AS "externalCalendarEventId"
       `;
       if (rows[0]) {
-        await cancelPendingNotificationSchedulesForTask(sql, id, user.id, { ensureInfrastructure: false });
+        await cancelPendingNotificationSchedulesForTask(sql, id, user.id, {
+          ensureInfrastructure: false,
+          reason: 'task_deleted',
+          caller: 'handleTaskById:delete',
+          taskStatus: 'cancelled',
+        });
         await enqueueScheduleCancel(sql, user.id, id);
         if (typeof rows[0].externalCalendarEventId === 'string') {
           await enqueueCalendarDelete(sql, user.id, id);

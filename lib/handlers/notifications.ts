@@ -89,6 +89,7 @@ const EMPTY_SIDE_EFFECT_DIAGNOSTICS: SideEffectDiagnostics = {
   processingCount: 0,
   failedCount: 0,
   doneCount: 0,
+  oldestPendingAgeSeconds: null,
 };
 
 function remainingBudgetMs(deadline: number, maxStepDurationMs: number) {
@@ -180,6 +181,12 @@ function fallbackBackfill(durationMs = 0): BackfillSummary {
     durationMs,
     hasMore: true,
     stoppedByTimeLimit: true,
+    backfillDiagnostics: {
+      scannedTasks: 0,
+      missingSchedules: 0,
+      backfilledSchedules: 0,
+      skippedReasons: { time_limit: 1 },
+    },
   };
 }
 
@@ -505,7 +512,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   try {
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
     const result = await withTimeout(
-      processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs),
+      processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
       scheduleBudgetMs,
       fallbackSchedules(scheduleBudgetMs),
       'processDueNotificationSchedules',
@@ -514,7 +521,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
           return withTimeout(
-            processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs),
+            processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs, { ensureInfrastructure: false }),
             budgetMs,
             fallbackSideEffects(budgetMs),
             'processTaskSideEffects',
@@ -525,7 +532,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, BACKFILL_DURATION_MS);
           return withTimeout(
-            backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, budgetMs),
+            backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, budgetMs, { ensureInfrastructure: false }),
             budgetMs,
             fallbackBackfill(budgetMs),
             'backfillMissingNotificationSchedules',
@@ -547,7 +554,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
           return withTimeout(
-            detectOverdueNotificationSchedules(sql, OVERDUE_LIMIT, budgetMs),
+            detectOverdueNotificationSchedules(sql, OVERDUE_LIMIT, budgetMs, { ensureInfrastructure: false }),
             budgetMs,
             fallbackOverdueDetection(budgetMs),
             'detectOverdueNotificationSchedules',
@@ -597,6 +604,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       schedules,
       scheduleDiagnostics: result.scheduleDiagnostics,
       sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
+      backfillDiagnostics: backfill.backfillDiagnostics,
       backfill,
       calendarSync,
       overdueDetection,
@@ -613,6 +621,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       overdueDetection,
       scheduleDiagnostics: result.scheduleDiagnostics,
       sideEffectDiagnostics: sideEffects.sideEffectDiagnostics,
+      backfillDiagnostics: backfill.backfillDiagnostics,
       ...result,
     });
   } catch (error) {

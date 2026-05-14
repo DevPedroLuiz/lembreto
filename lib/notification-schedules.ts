@@ -100,6 +100,13 @@ export interface ProcessNotificationSchedulesSummary {
   scheduleDiagnostics: ScheduleDiagnostics;
 }
 
+export interface BackfillDiagnostics {
+  scannedTasks: number;
+  missingSchedules: number;
+  backfilledSchedules: number;
+  skippedReasons: Record<string, number>;
+}
+
 export interface CleanupExpiredTaskSummary {
   floatingTasks: number;
   overdueTasks: number;
@@ -440,7 +447,12 @@ export async function cancelPendingNotificationSchedulesForTask(
   sql: SqlClient,
   taskId: string,
   userId?: string,
-  options: { ensureInfrastructure?: boolean } = {},
+  options: {
+    ensureInfrastructure?: boolean;
+    reason?: string;
+    caller?: string;
+    taskStatus?: string | null;
+  } = {},
 ) {
   if (options.ensureInfrastructure !== false) {
     await ensureNotificationSchedulingInfrastructure(sql);
@@ -461,6 +473,16 @@ export async function cancelPendingNotificationSchedulesForTask(
           AND status IN ('pending', 'processing')
         RETURNING id
       `;
+  if (rows.length > 0) {
+    logInfo('schedule_cancel_requested', {
+      reason: options.reason ?? 'unspecified',
+      caller: options.caller ?? 'unknown',
+      taskId,
+      userId,
+      taskStatus: options.taskStatus ?? null,
+      scheduleCount: rows.length,
+    });
+  }
   return rows.length;
 }
 
@@ -645,7 +667,12 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
       AND user_id = ${task.userId}
   `;
 
-  await cancelPendingNotificationSchedulesForTask(sql, task.id, task.userId, { ensureInfrastructure: false });
+  await cancelPendingNotificationSchedulesForTask(sql, task.id, task.userId, {
+    ensureInfrastructure: false,
+    reason: 'replace_task_schedules',
+    caller: 'syncTaskNotificationSchedules',
+    taskStatus: task.status,
+  });
 
   if (!isSchedulableStatus(task.status) || task.deletedAt || task.status === 'cancelled') return 0;
   if (reminderMode === 'floating') {
@@ -846,6 +873,11 @@ async function backfillMissingPendingTaskSchedules(
 
   const tasks = rows.slice(0, limit);
   let backfilled = 0;
+  const skippedReasons: Record<string, number> = {};
+
+  const addSkip = (reason: string) => {
+    skippedReasons[reason] = (skippedReasons[reason] ?? 0) + 1;
+  };
 
   for (const row of tasks) {
     if (Date.now() - startedAt >= maxDurationMs) {
@@ -854,18 +886,41 @@ async function backfillMissingPendingTaskSchedules(
         limit,
         durationMs: Date.now() - startedAt,
       });
-      return { backfilled, hasMore: true };
+      addSkip('time_limit');
+      return {
+        backfilled,
+        hasMore: true,
+        diagnostics: {
+          scannedTasks: tasks.length,
+          missingSchedules: tasks.length,
+          backfilledSchedules: backfilled,
+          skippedReasons,
+        },
+      };
     }
 
-    await syncTaskNotificationSchedules(sql, String(row.userId), String(row.id), {
+    const created = await syncTaskNotificationSchedules(sql, String(row.userId), String(row.id), {
       maxFloatingSchedules: INITIAL_FLOATING_SCHEDULE_LIMIT,
       maxOverdueSchedules: OVERDUE_SCHEDULES_PER_TASK_LIMIT,
       ensureInfrastructure: false,
     });
-    backfilled += 1;
+    if (created > 0) {
+      backfilled += created;
+    } else {
+      addSkip('no_schedule_created');
+    }
   }
 
-  return { backfilled, hasMore: rows.length > limit };
+  return {
+    backfilled,
+    hasMore: rows.length > limit,
+    diagnostics: {
+      scannedTasks: tasks.length,
+      missingSchedules: tasks.length,
+      backfilledSchedules: backfilled,
+      skippedReasons,
+    },
+  };
 }
 
 async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number) {
@@ -1184,7 +1239,22 @@ async function sendSchedulePush(
 async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   const task = await fetchTaskForSchedule(sql, schedule);
   if (!task || task.deletedAt || !isSchedulableStatus(task.status)) {
-    await updateScheduleStatus(sql, schedule.id, 'cancelled');
+    const reason = !task
+      ? 'task_not_found'
+      : task.deletedAt
+        ? 'task_deleted'
+        : `task_status_${task.status}`;
+    logInfo('schedule_cancel_requested', {
+      reason,
+      caller: 'processSingleSchedule',
+      taskId: schedule.taskId,
+      userId: schedule.userId,
+      taskStatus: task?.status ?? null,
+      scheduleCount: 1,
+      scheduleId: schedule.id,
+      kind: schedule.kind,
+    });
+    await updateScheduleStatus(sql, schedule.id, 'cancelled', reason);
     return 'cancelled' as const;
   }
 
@@ -1211,7 +1281,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
         holidayScope: suppression.holiday.scope,
       });
     }
-    await updateScheduleStatus(sql, schedule.id, 'cancelled');
+    await updateScheduleStatus(sql, schedule.id, 'cancelled', 'holiday');
     return 'cancelled' as const;
   }
 
@@ -1350,6 +1420,7 @@ export async function processDueNotificationSchedules(
   sql: SqlClient,
   limit = PROCESS_LIMIT,
   maxDurationMs = SCHEDULE_PROCESS_DURATION_MS,
+  options: { ensureInfrastructure?: boolean } = {},
 ): Promise<ProcessNotificationSchedulesSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), PROCESS_LIMIT);
@@ -1359,7 +1430,9 @@ export async function processDueNotificationSchedules(
     maxDurationMs,
   });
 
-  await ensureNotificationSchedulingInfrastructure(sql);
+  if (options.ensureInfrastructure !== false) {
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
   const reclaimedSchedules = await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
   const scheduleDiagnostics = await getScheduleDiagnostics(sql);
   const outOfTimeBeforeClaim = Date.now() - startedAt >= maxDurationMs;
@@ -1455,14 +1528,18 @@ export async function backfillMissingNotificationSchedules(
   sql: SqlClient,
   limit = MISSING_SCHEDULE_TASK_SCAN_LIMIT,
   maxDurationMs = BACKFILL_DURATION_MS,
+  options: { ensureInfrastructure?: boolean } = {},
 ) {
   const startedAt = Date.now();
-  await ensureNotificationSchedulingInfrastructure(sql);
+  if (options.ensureInfrastructure !== false) {
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
   const backfill = await backfillMissingPendingTaskSchedules(sql, limit, startedAt, maxDurationMs);
   return {
     backfilledSchedules: backfill.backfilled,
     durationMs: Date.now() - startedAt,
     hasMore: backfill.hasMore,
+    backfillDiagnostics: backfill.diagnostics,
   };
 }
 
@@ -1470,9 +1547,12 @@ export async function detectOverdueNotificationSchedules(
   sql: SqlClient,
   limit = OVERDUE_TASK_SCAN_LIMIT,
   maxDurationMs = BACKFILL_DURATION_MS,
+  options: { ensureInfrastructure?: boolean } = {},
 ) {
   const startedAt = Date.now();
-  await ensureNotificationSchedulingInfrastructure(sql);
+  if (options.ensureInfrastructure !== false) {
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
   const overdueDetection = await detectAndScheduleOverdueTasks(sql, limit, startedAt, maxDurationMs);
   return {
     detectedOverdueTasks: overdueDetection.detected,
@@ -1612,7 +1692,11 @@ export async function cleanupExpiredFloatingTasks(sql: SqlClient) {
 
   let cancelledSchedules = 0;
   for (const row of rows) {
-    cancelledSchedules += await cancelPendingNotificationSchedulesForTask(sql, String(row.id), String(row.userId));
+    cancelledSchedules += await cancelPendingNotificationSchedulesForTask(sql, String(row.id), String(row.userId), {
+      reason: 'floating_expired',
+      caller: 'cleanupExpiredFloatingTasks',
+      taskStatus: 'cancelled',
+    });
   }
 
   return { tasks: rows.length, cancelledSchedules };
@@ -1636,7 +1720,11 @@ export async function cleanupExpiredOverdueTasks(sql: SqlClient) {
 
   let cancelledSchedules = 0;
   for (const row of rows) {
-    cancelledSchedules += await cancelPendingNotificationSchedulesForTask(sql, String(row.id), String(row.userId));
+    cancelledSchedules += await cancelPendingNotificationSchedulesForTask(sql, String(row.id), String(row.userId), {
+      reason: 'overdue_expired',
+      caller: 'cleanupExpiredOverdueTasks',
+      taskStatus: 'cancelled',
+    });
   }
 
   return { tasks: rows.length, cancelledSchedules };

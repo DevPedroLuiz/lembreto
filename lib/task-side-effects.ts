@@ -36,6 +36,7 @@ export interface SideEffectDiagnostics {
   processingCount: number;
   failedCount: number;
   doneCount: number;
+  oldestPendingAgeSeconds: number | null;
 }
 
 export interface ProcessTaskSideEffectsSummary {
@@ -213,7 +214,10 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
         ) AS "duePendingCount",
         COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
         COUNT(*) FILTER (WHERE status = 'failed') AS "failedCount",
-        COUNT(*) FILTER (WHERE status = 'done') AS "doneCount"
+        COUNT(*) FILTER (WHERE status = 'done') AS "doneCount",
+        EXTRACT(EPOCH FROM (
+          NOW() - MIN(available_at) FILTER (WHERE status = 'pending')
+        )) AS "oldestPendingAgeSeconds"
       FROM task_side_effects
     `,
     sql`
@@ -244,6 +248,9 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
     processingCount: toCount(overview.processingCount),
     failedCount: toCount(overview.failedCount),
     doneCount: toCount(overview.doneCount),
+    oldestPendingAgeSeconds: overview.oldestPendingAgeSeconds === null || overview.oldestPendingAgeSeconds === undefined
+      ? null
+      : toCount(overview.oldestPendingAgeSeconds),
   };
 }
 
@@ -417,6 +424,8 @@ async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob): 
   if (job.kind === 'cancel_notification_schedules') {
     const cancelled = await cancelPendingNotificationSchedulesForTask(sql, job.taskId, job.userId, {
       ensureInfrastructure: false,
+      reason: 'task_side_effect_cancel_notification_schedules',
+      caller: 'processTaskSideEffects',
     });
     return `cancelled_schedules:${cancelled}`;
   }
@@ -448,12 +457,15 @@ export async function processTaskSideEffects(
   sql: SqlClient,
   limit = TASK_SIDE_EFFECT_LIMIT,
   maxDurationMs = MAX_SIDE_EFFECT_DURATION_MS,
+  options: { ensureInfrastructure?: boolean } = {},
 ): Promise<ProcessTaskSideEffectsSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), TASK_SIDE_EFFECT_LIMIT);
 
-  await ensureTaskSideEffectsInfrastructure(sql);
-  await ensureNotificationSchedulingInfrastructure(sql);
+  if (options.ensureInfrastructure !== false) {
+    await ensureTaskSideEffectsInfrastructure(sql);
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
   const reclaimed = await reclaimStuckProcessingSideEffects(sql, STUCK_SIDE_EFFECT_RECLAIM_LIMIT);
   if (reclaimed > 0) {
     logWarn('task_side_effects_reclaimed', { reclaimed });
