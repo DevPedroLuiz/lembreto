@@ -20,9 +20,11 @@ import {
   detectOverdueNotificationSchedules,
   dismissAlarmSchedule,
   processDueNotificationSchedules,
+  type ProcessNotificationSchedulesSummary,
+  type ScheduleDiagnostics,
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
-import { processTaskSideEffects } from '../task-side-effects.js';
+import { processTaskSideEffects, type ProcessTaskSideEffectsSummary } from '../task-side-effects.js';
 import {
   createNotificationSchema,
   deletePushSubscriptionSchema,
@@ -54,12 +56,135 @@ const OVERDUE_LIMIT = 3;
 const OVERDUE_DURATION_MS = 3000;
 const CRON_DEADLINE_GUARD_MS = 500;
 
+type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
+  stoppedByTimeLimit?: boolean;
+};
+type CalendarSyncSummary = Awaited<ReturnType<typeof processPendingCalendarSyncs>>;
+type OverdueDetectionSummary = Awaited<ReturnType<typeof detectOverdueNotificationSchedules>> & {
+  stoppedByTimeLimit?: boolean;
+};
+
+const EMPTY_SCHEDULE_DIAGNOSTICS: ScheduleDiagnostics = {
+  postgresNow: null,
+  oldestPendingNotifyAt: null,
+  duePendingCount: 0,
+  futurePendingCount: 0,
+  pendingByKind: {},
+  dueByKind: {},
+  processingCount: 0,
+  failedCount: 0,
+  cancelledCount: 0,
+};
+
 function remainingBudgetMs(deadline: number, maxStepDurationMs: number) {
   return Math.max(0, Math.min(maxStepDurationMs, deadline - Date.now() - CRON_DEADLINE_GUARD_MS));
 }
 
 function hasCronBudget(deadline: number) {
   return remainingBudgetMs(deadline, 1) > 0;
+}
+
+function getCronResponseBudgetMs() {
+  const configured = Number(process.env.CRON_MAX_RESPONSE_MS ?? MAX_CRON_RESPONSE_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : MAX_CRON_RESPONSE_MS;
+}
+
+function timeoutFallback<T>(fallback: T, stage: string, timeoutMs: number): T {
+  logWarn('cron_notifications_stage_timeout', {
+    stage,
+    timeoutMs,
+  });
+  return fallback;
+}
+
+export function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+  stage: string,
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    return Promise.resolve(timeoutFallback(fallback, stage, timeoutMs));
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const guardedPromise = promise.catch((error) => {
+    logError('cron_notifications_stage_failed', error, { stage });
+    return fallback;
+  });
+
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timeout = setTimeout(() => resolve(timeoutFallback(fallback, stage, timeoutMs)), timeoutMs);
+  });
+
+  return Promise.race([guardedPromise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+function fallbackSchedules(durationMs = 0): ProcessNotificationSchedulesSummary {
+  return {
+    detectedOverdueTasks: 0,
+    backfilledSchedules: 0,
+    reclaimedSchedules: 0,
+    fetchedSchedules: 0,
+    processedSchedules: 0,
+    sentSchedules: 0,
+    cancelledSchedules: 0,
+    rescheduledSchedules: 0,
+    failedSchedules: 0,
+    durationMs,
+    hasMore: true,
+    stoppedByTimeLimit: true,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    cancelled: 0,
+    scheduleDiagnostics: EMPTY_SCHEDULE_DIAGNOSTICS,
+  };
+}
+
+function fallbackSideEffects(durationMs = 0): ProcessTaskSideEffectsSummary {
+  return {
+    fetched: 0,
+    processed: 0,
+    done: 0,
+    failed: 0,
+    retried: 0,
+    cancelled: 0,
+    durationMs,
+    hasMore: true,
+    stoppedByTimeLimit: true,
+  };
+}
+
+function fallbackBackfill(durationMs = 0): BackfillSummary {
+  return {
+    backfilledSchedules: 0,
+    durationMs,
+    hasMore: true,
+    stoppedByTimeLimit: true,
+  };
+}
+
+function fallbackCalendarSync(durationMs = 0): CalendarSyncSummary {
+  return {
+    scanned: 0,
+    synced: 0,
+    skipped: 0,
+    failed: 0,
+    stoppedByTimeLimit: true,
+    durationMs,
+  };
+}
+
+function fallbackOverdueDetection(durationMs = 0): OverdueDetectionSummary {
+  return {
+    detectedOverdueTasks: 0,
+    durationMs,
+    hasMore: true,
+    stoppedByTimeLimit: true,
+  };
 }
 
 function isAuthorizedCronRequest(context: HandlerContext): boolean {
@@ -353,7 +478,7 @@ export async function handleAlarmDismiss(context: HandlerContext): Promise<Handl
 export async function handleNotificationsCron(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
   const startedAt = Date.now();
-  const deadline = startedAt + MAX_CRON_RESPONSE_MS;
+  const deadline = startedAt + getCronResponseBudgetMs();
 
   if (request.method !== 'GET') return methodNotAllowed();
 
@@ -362,50 +487,57 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
   }
 
   try {
-    const result = await processDueNotificationSchedules(
-      sql,
-      DUE_SCHEDULE_LIMIT,
-      remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS),
+    const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
+    const result = await withTimeout(
+      processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs),
+      scheduleBudgetMs,
+      fallbackSchedules(scheduleBudgetMs),
+      'processDueNotificationSchedules',
     );
     const sideEffects = hasCronBudget(deadline)
-      ? await processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS))
-      : {
-          fetched: 0,
-          processed: 0,
-          done: 0,
-          failed: 0,
-          retried: 0,
-          cancelled: 0,
-          durationMs: 0,
-          hasMore: true,
-          stoppedByTimeLimit: true,
-        };
+      ? await (() => {
+          const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
+          return withTimeout(
+            processTaskSideEffects(sql, SIDE_EFFECT_LIMIT, budgetMs),
+            budgetMs,
+            fallbackSideEffects(budgetMs),
+            'processTaskSideEffects',
+          );
+        })()
+      : fallbackSideEffects();
     const backfill = hasCronBudget(deadline)
-      ? await backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, remainingBudgetMs(deadline, BACKFILL_DURATION_MS))
-      : {
-          backfilledSchedules: 0,
-          durationMs: 0,
-          hasMore: true,
-          stoppedByTimeLimit: true,
-        };
+      ? await (() => {
+          const budgetMs = remainingBudgetMs(deadline, BACKFILL_DURATION_MS);
+          return withTimeout(
+            backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, budgetMs),
+            budgetMs,
+            fallbackBackfill(budgetMs),
+            'backfillMissingNotificationSchedules',
+          );
+        })()
+      : fallbackBackfill();
     const calendarSync = hasCronBudget(deadline)
-      ? await processPendingCalendarSyncs(sql, CALENDAR_SYNC_LIMIT, remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS))
-      : {
-          scanned: 0,
-          synced: 0,
-          skipped: 0,
-          failed: 0,
-          stoppedByTimeLimit: true,
-          durationMs: 0,
-        };
+      ? await (() => {
+          const budgetMs = remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS);
+          return withTimeout(
+            processPendingCalendarSyncs(sql, CALENDAR_SYNC_LIMIT, budgetMs),
+            budgetMs,
+            fallbackCalendarSync(budgetMs),
+            'processPendingCalendarSyncs',
+          );
+        })()
+      : fallbackCalendarSync();
     const overdueDetection = hasCronBudget(deadline)
-      ? await detectOverdueNotificationSchedules(sql, OVERDUE_LIMIT, remainingBudgetMs(deadline, OVERDUE_DURATION_MS))
-      : {
-          detectedOverdueTasks: 0,
-          durationMs: 0,
-          hasMore: true,
-          stoppedByTimeLimit: true,
-        };
+      ? await (() => {
+          const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
+          return withTimeout(
+            detectOverdueNotificationSchedules(sql, OVERDUE_LIMIT, budgetMs),
+            budgetMs,
+            fallbackOverdueDetection(budgetMs),
+            'detectOverdueNotificationSchedules',
+          );
+        })()
+      : fallbackOverdueDetection();
 
     result.backfilledSchedules = backfill.backfilledSchedules;
     result.detectedOverdueTasks = overdueDetection.detectedOverdueTasks;

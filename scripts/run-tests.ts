@@ -760,9 +760,56 @@ async function main() {
     const cronHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
 
     assert.ok(cronHandler.includes('const MAX_CRON_RESPONSE_MS = 20000;'));
+    assert.ok(cronHandler.includes('function withTimeout'));
+    assert.ok(cronHandler.includes("stage: 'processDueNotificationSchedules'") || cronHandler.includes("'processDueNotificationSchedules'"));
+    assert.ok(cronHandler.includes("'processTaskSideEffects'"));
+    assert.ok(cronHandler.includes("'backfillMissingNotificationSchedules'"));
+    assert.ok(cronHandler.includes("'processPendingCalendarSyncs'"));
+    assert.ok(cronHandler.includes("'detectOverdueNotificationSchedules'"));
     assert.ok(cronHandler.includes('const schedules = {'));
     assert.ok(cronHandler.includes('return json(200, {'));
     assert.ok(cronHandler.includes('schedules,'));
+  });
+
+  await run('cron handler returns JSON when a stage never resolves', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const previousBudget = process.env.CRON_MAX_RESPONSE_MS;
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      process.env.CRON_MAX_RESPONSE_MS = '1000';
+      const { handleNotificationsCron } = await import('../lib/handlers/notifications.js');
+      const neverSql = (() => new Promise<Array<Record<string, unknown>>>(() => undefined)) as SqlClient;
+      const startedAt = Date.now();
+      const response = await handleNotificationsCron({
+        sql: neverSql,
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+      const durationMs = Date.now() - startedAt;
+
+      assert.equal(response.status, 200);
+      assert.ok(durationMs < 1500, `expected cron timeout fallback before 1500ms, got ${durationMs}ms`);
+      const body = response.body as {
+        ok?: boolean;
+        stoppedByTimeLimit?: boolean;
+        hasMore?: boolean;
+        schedules?: { fetched?: number; sent?: number; stoppedByTimeLimit?: boolean };
+      };
+      assert.equal(body.ok, true);
+      assert.equal(body.stoppedByTimeLimit, true);
+      assert.equal(body.hasMore, true);
+      assert.equal(body.schedules?.fetched, 0);
+      assert.equal(body.schedules?.sent, 0);
+      assert.equal(body.schedules?.stoppedByTimeLimit, true);
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      if (previousBudget === undefined) delete process.env.CRON_MAX_RESPONSE_MS;
+      else process.env.CRON_MAX_RESPONSE_MS = previousBudget;
+    }
   });
 
   console.log('PASS all tests');
