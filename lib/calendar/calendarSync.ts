@@ -86,9 +86,31 @@ export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
       `;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_provider TEXT CHECK (external_calendar_provider IN ('google', 'outlook'))`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_event_id TEXT`;
+      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_sync_status TEXT NOT NULL DEFAULT 'idle'`;
       await sql`
-        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_sync_status TEXT NOT NULL DEFAULT 'idle'
-        CHECK (external_calendar_sync_status IN ('idle', 'synced', 'failed'))
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'tasks'::regclass
+              AND conname = 'tasks_external_calendar_sync_status_check'
+              AND pg_get_constraintdef(oid) NOT LIKE '%pending%'
+          ) THEN
+            ALTER TABLE tasks DROP CONSTRAINT tasks_external_calendar_sync_status_check;
+          END IF;
+
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'tasks'::regclass
+              AND conname = 'tasks_external_calendar_sync_status_check'
+          ) THEN
+            ALTER TABLE tasks
+            ADD CONSTRAINT tasks_external_calendar_sync_status_check
+            CHECK (external_calendar_sync_status IN ('idle', 'pending', 'synced', 'failed'));
+          END IF;
+        END $$;
       `;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_last_error TEXT`;
       await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_synced_at TIMESTAMPTZ`;
@@ -97,6 +119,10 @@ export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
         CREATE INDEX IF NOT EXISTS idx_tasks_external_calendar
         ON tasks(user_id, external_calendar_provider, external_calendar_event_id)
         WHERE external_calendar_event_id IS NOT NULL
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status
+        ON tasks(user_id, deleted_at, status)
       `;
     })();
   }
@@ -329,7 +355,7 @@ async function markTaskCalendarSync(input: {
   taskId: string;
   provider: CalendarProvider | null;
   eventId: string | null;
-  status: 'idle' | 'synced' | 'failed';
+  status: 'idle' | 'pending' | 'synced' | 'failed';
   error: string | null;
 }) {
   await input.sql`
@@ -378,7 +404,6 @@ export async function getTaskForCalendarSync(
     FROM tasks
     WHERE id = ${taskId}
       AND user_id = ${userId}
-      AND deleted_at IS NULL
   `;
 
   const row = rows[0];
@@ -434,17 +459,17 @@ export async function syncTaskToExternalCalendar(input: {
       );
 
   if (!integration || (!integration.syncEnabled && !input.force)) {
-    if (!task.externalCalendarEventId) {
-      await markTaskCalendarSync({
-        sql: input.sql,
-        userId: input.userId,
-        taskId: task.id,
-        provider: null,
-        eventId: null,
-        status: 'idle',
-        error: null,
-      });
-    }
+    await markTaskCalendarSync({
+      sql: input.sql,
+      userId: input.userId,
+      taskId: task.id,
+      provider: task.externalCalendarProvider,
+      eventId: task.externalCalendarEventId,
+      status: task.externalCalendarEventId ? 'failed' : 'idle',
+      error: task.externalCalendarEventId
+        ? 'CalendÃ¡rio externo desconectado. Reconecte para remover o evento espelhado.'
+        : null,
+    });
     return { ok: true, provider: null };
   }
 
@@ -697,6 +722,53 @@ function buildImportedHistory(provider: CalendarProvider, eventId: string) {
       'Sincronização em lote.',
     ],
   }];
+}
+
+export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5): Promise<{
+  scanned: number;
+  synced: number;
+  skipped: number;
+  failed: number;
+}> {
+  await ensureCalendarIntegrationSchema(sql);
+  const rows = await sql`
+    SELECT id, user_id AS "userId"
+    FROM tasks
+    WHERE external_calendar_sync_status = 'pending'
+      AND (
+        due_date IS NOT NULL
+        OR external_calendar_event_id IS NOT NULL
+      )
+    ORDER BY created_at ASC
+    LIMIT ${Math.min(Math.max(1, limit), 10)}
+  `;
+
+  let synced = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    const result = await syncTaskToExternalCalendar({
+      sql,
+      userId: String(row.userId),
+      taskId: String(row.id),
+    });
+
+    if (result.ok && result.provider) {
+      synced += 1;
+    } else if (result.ok) {
+      skipped += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return {
+    scanned: rows.length,
+    synced,
+    skipped,
+    failed,
+  };
 }
 
 async function importExternalCalendarEvent(input: {

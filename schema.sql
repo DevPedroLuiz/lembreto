@@ -78,8 +78,14 @@ ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS external_calendar_event_id TEXT;
 
 ALTER TABLE tasks
-ADD COLUMN IF NOT EXISTS external_calendar_sync_status TEXT NOT NULL DEFAULT 'idle'
-  CHECK (external_calendar_sync_status IN ('idle', 'synced', 'failed'));
+ADD COLUMN IF NOT EXISTS external_calendar_sync_status TEXT NOT NULL DEFAULT 'idle';
+
+ALTER TABLE tasks
+DROP CONSTRAINT IF EXISTS tasks_external_calendar_sync_status_check;
+
+ALTER TABLE tasks
+ADD CONSTRAINT tasks_external_calendar_sync_status_check
+CHECK (external_calendar_sync_status IN ('idle', 'pending', 'synced', 'failed'));
 
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS external_calendar_last_error TEXT;
@@ -90,6 +96,9 @@ ADD COLUMN IF NOT EXISTS external_calendar_synced_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_tasks_external_calendar
   ON tasks(user_id, external_calendar_provider, external_calendar_event_id)
   WHERE external_calendar_event_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status
+  ON tasks(user_id, deleted_at, status);
 
 CREATE TABLE IF NOT EXISTS calendar_integrations (
   id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -245,6 +254,9 @@ CREATE TABLE IF NOT EXISTS notification_schedules (
 
 CREATE INDEX IF NOT EXISTS idx_notification_schedules_due
   ON notification_schedules(status, notify_at);
+
+CREATE INDEX IF NOT EXISTS idx_notification_schedules_task_status
+  ON notification_schedules(task_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_notification_schedules_user_task
   ON notification_schedules(user_id, task_id);

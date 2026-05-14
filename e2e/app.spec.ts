@@ -321,7 +321,7 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
-  test('saves drafts and promotes them from the drafts tab', async ({ page }) => {
+  test('saves drafts and promotes them from the reminders drafts page', async ({ page }) => {
     const user = buildE2ETestUser();
     const title = 'Rascunho de proposta';
 
@@ -336,13 +336,16 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-date-input').fill(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
       await page.getByTestId('task-save-draft-button').click();
 
-      await page.getByTestId('sidebar-tasks').click();
+      await expect(page.getByTestId('task-view-drafts')).toHaveAttribute('aria-pressed', 'true');
       const pendingDraft = taskCard(page, title);
       await expect(pendingDraft).toBeVisible();
       await expect(pendingDraft).toHaveAttribute('data-task-status', 'draft');
       await expect(pendingDraft).toContainText('Rascunho');
 
-      await page.getByTestId('sidebar-drafts').click();
+      await page.getByTestId('task-view-agenda').click();
+      await expect(taskCard(page, title)).toHaveCount(0);
+
+      await page.getByTestId('task-view-drafts').click();
       await expect(taskCard(page, title)).toBeVisible();
 
       await page.getByTestId('draft-edit-button').click();
@@ -350,9 +353,8 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('task-save-draft-button').click();
 
       await page.getByTestId('draft-promote-button').click();
-      await expect(taskCard(page, title)).toHaveCount(0);
 
-      await page.getByTestId('sidebar-tasks').click();
+      await expect(page.getByTestId('task-view-agenda')).toHaveAttribute('aria-pressed', 'true');
       const promotedTask = taskCard(page, title);
       await expect(promotedTask).toBeVisible();
       await expect(promotedTask).toHaveAttribute('data-task-status', 'pending');

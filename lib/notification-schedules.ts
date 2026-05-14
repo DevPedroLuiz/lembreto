@@ -21,6 +21,7 @@ const PROCESS_LIMIT = 20;
 const OVERDUE_TASK_SCAN_LIMIT = 10;
 const STUCK_PROCESSING_RECLAIM_LIMIT = 10;
 const MAX_CRON_DURATION_MS = 25000;
+const INITIAL_FLOATING_SCHEDULE_LIMIT = 1;
 const OVERDUE_SCHEDULES_PER_TASK_LIMIT = 1;
 const QUIET_START_HOUR = 22;
 const QUIET_END_HOUR = 7;
@@ -352,6 +353,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_due ON notification_schedules(status, notify_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_task_status ON notification_schedules(task_id, status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_user_task ON notification_schedules(user_id, task_id)`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_schedules_dedupe ON notification_schedules(user_id, dedupe_key)`;
   await sql`ALTER TABLE notification_schedules ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ`;
@@ -440,7 +442,7 @@ async function insertSchedule(
     dedupeKey?: string;
   },
 ) {
-  await sql`
+  const rows = await sql`
     INSERT INTO notification_schedules (
       user_id,
       task_id,
@@ -466,10 +468,17 @@ async function insertSchedule(
       ${input.intervalMinutes ?? null}
     )
     ON CONFLICT (user_id, dedupe_key) DO NOTHING
+    RETURNING id
   `;
+  return rows.length > 0;
 }
 
-async function scheduleTimedTask(sql: SqlClient, task: TaskForScheduling, now: Date) {
+async function scheduleTimedTask(
+  sql: SqlClient,
+  task: TaskForScheduling,
+  now: Date,
+  options: { maxOverdueSchedules?: number; overdueNotBefore?: Date } = {},
+) {
   if (!task.dueDate) return;
   const dueDate = new Date(task.dueDate);
   if (Number.isNaN(dueDate.getTime())) return;
@@ -523,13 +532,23 @@ async function scheduleTimedTask(sql: SqlClient, task: TaskForScheduling, now: D
     return;
   }
 
-  await markTaskOverdueAndSchedule(sql, task, dueDate);
+  await markTaskOverdueAndSchedule(sql, task, dueDate, {
+    maxOverdueSchedules: options.maxOverdueSchedules,
+    overdueNotBefore: options.overdueNotBefore,
+  });
 }
 
-async function scheduleFloatingTask(sql: SqlClient, task: TaskForScheduling, now: Date) {
+async function scheduleFloatingTask(
+  sql: SqlClient,
+  task: TaskForScheduling,
+  now: Date,
+  options: { maxSchedules?: number } = {},
+) {
   const createdAt = new Date(task.createdAt);
   const intervalMinutes = task.floatingIntervalMinutes ?? DEFAULT_FLOATING_INTERVAL_MINUTES;
   const expiresAt = task.expiresAt ? new Date(task.expiresAt) : addHours(createdAt, FLOATING_LIFETIME_HOURS);
+  const maxSchedules = options.maxSchedules ?? INITIAL_FLOATING_SCHEDULE_LIMIT;
+  let created = 0;
 
   await sql`
     UPDATE tasks
@@ -543,10 +562,10 @@ async function scheduleFloatingTask(sql: SqlClient, task: TaskForScheduling, now
 
   let notifyAt = addMinutes(createdAt, intervalMinutes);
   let sequenceIndex = 0;
-  while (notifyAt <= expiresAt) {
+  while (notifyAt <= expiresAt && created < maxSchedules) {
     const adjusted = applyScheduleSuppression(task, 'floating_reminder', notifyAt);
     if (adjusted.action !== 'cancel' && adjusted.notifyAt > now && adjusted.notifyAt <= expiresAt) {
-      await insertSchedule(sql, task, {
+      const inserted = await insertSchedule(sql, task, {
         kind: 'floating_reminder',
         notifyAt: adjusted.notifyAt,
         title: 'Lembrete pendente',
@@ -555,14 +574,19 @@ async function scheduleFloatingTask(sql: SqlClient, task: TaskForScheduling, now
         sequenceIndex,
         intervalMinutes,
       });
+      if (inserted) created += 1;
     }
     notifyAt = addMinutes(notifyAt, intervalMinutes);
     sequenceIndex += 1;
   }
+
+  return created;
 }
 
 export async function syncTaskNotificationSchedules(sql: SqlClient, userId: string, taskId: string, options?: {
   floatingIntervalMinutes?: number | null;
+  maxFloatingSchedules?: number;
+  maxOverdueSchedules?: number;
 }) {
   await ensureNotificationSchedulingInfrastructure(sql);
   const task = await fetchTaskForScheduling(sql, userId, taskId);
@@ -583,11 +607,29 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
 
   if (!isSchedulableStatus(task.status) || task.deletedAt || task.status === 'cancelled') return;
   if (reminderMode === 'floating') {
-    await scheduleFloatingTask(sql, { ...task, reminderMode, floatingIntervalMinutes }, new Date());
+    await scheduleFloatingTask(sql, { ...task, reminderMode, floatingIntervalMinutes }, new Date(), {
+      maxSchedules: options?.maxFloatingSchedules ?? INITIAL_FLOATING_SCHEDULE_LIMIT,
+    });
     return;
   }
 
-  await scheduleTimedTask(sql, { ...task, reminderMode }, new Date());
+  await scheduleTimedTask(sql, { ...task, reminderMode }, new Date(), {
+    maxOverdueSchedules: options?.maxOverdueSchedules ?? OVERDUE_SCHEDULES_PER_TASK_LIMIT,
+    overdueNotBefore: new Date(),
+  });
+}
+
+export async function syncTaskNotificationSchedulesLightweight(
+  sql: SqlClient,
+  userId: string,
+  taskId: string,
+  options?: { floatingIntervalMinutes?: number | null },
+) {
+  return syncTaskNotificationSchedules(sql, userId, taskId, {
+    floatingIntervalMinutes: options?.floatingIntervalMinutes,
+    maxFloatingSchedules: INITIAL_FLOATING_SCHEDULE_LIMIT,
+    maxOverdueSchedules: OVERDUE_SCHEDULES_PER_TASK_LIMIT,
+  });
 }
 
 export async function scheduleOverdueRemindersForTask(
@@ -610,7 +652,7 @@ export async function scheduleOverdueRemindersForTask(
     if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt) continue;
     if (options.notBefore && adjusted.notifyAt < options.notBefore) continue;
     const minutesOverdue = Math.max(0, Math.floor((adjusted.notifyAt.getTime() - dueDate.getTime()) / 60000));
-    await insertSchedule(sql, task, {
+    const inserted = await insertSchedule(sql, task, {
       kind: 'overdue_reminder',
       notifyAt: adjusted.notifyAt,
       title: 'Lembrete em atraso',
@@ -619,7 +661,7 @@ export async function scheduleOverdueRemindersForTask(
       sequenceIndex: item.sequenceIndex,
       intervalMinutes: item.intervalMinutes,
     });
-    created += 1;
+    if (inserted) created += 1;
   }
 
   return created;
@@ -816,6 +858,80 @@ async function fetchTaskForSchedule(sql: SqlClient, schedule: ScheduleRow): Prom
   return fetchTaskForScheduling(sql, schedule.userId, schedule.taskId);
 }
 
+async function scheduleNextFloatingReminder(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
+  const intervalMinutes = schedule.intervalMinutes ?? task.floatingIntervalMinutes ?? DEFAULT_FLOATING_INTERVAL_MINUTES;
+  const createdAt = new Date(task.createdAt);
+  const expiresAt = task.expiresAt ? new Date(task.expiresAt) : addHours(createdAt, FLOATING_LIFETIME_HOURS);
+  const now = new Date();
+  let notifyAt = addMinutes(new Date(schedule.notifyAt), intervalMinutes);
+  let sequenceIndex = (schedule.sequenceIndex ?? -1) + 1;
+
+  for (let attempt = 0; attempt < 100 && notifyAt <= expiresAt; attempt += 1) {
+    const adjusted = applyScheduleSuppression(task, 'floating_reminder', notifyAt);
+    if (adjusted.action !== 'cancel' && adjusted.notifyAt > now && adjusted.notifyAt <= expiresAt) {
+      const inserted = await insertSchedule(sql, task, {
+        kind: 'floating_reminder',
+        notifyAt: adjusted.notifyAt,
+        title: 'Lembrete pendente',
+        message: `"${task.title}" ainda estÃ¡ pendente.`,
+        tone: 'info',
+        sequenceIndex,
+        intervalMinutes,
+      });
+      if (inserted) return true;
+    }
+
+    notifyAt = addMinutes(notifyAt, intervalMinutes);
+    sequenceIndex += 1;
+  }
+
+  return false;
+}
+
+async function scheduleNextOverdueReminder(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
+  if (!task.dueDate) return false;
+
+  const dueDate = new Date(task.dueDate);
+  const overdueExpiresAt = task.overdueExpiresAt
+    ? new Date(task.overdueExpiresAt)
+    : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
+  const currentSequenceIndex = schedule.sequenceIndex ?? -1;
+  const now = new Date();
+
+  for (const item of buildOverdueScheduleTimes(dueDate, overdueExpiresAt)) {
+    if (item.sequenceIndex <= currentSequenceIndex) continue;
+
+    const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
+    if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt || adjusted.notifyAt < now) continue;
+
+    const minutesOverdue = Math.max(0, Math.floor((adjusted.notifyAt.getTime() - dueDate.getTime()) / 60000));
+    const inserted = await insertSchedule(sql, task, {
+      kind: 'overdue_reminder',
+      notifyAt: adjusted.notifyAt,
+      title: 'Lembrete em atraso',
+      message: `"${task.title}" estÃ¡ em atraso hÃ¡ ${formatOverdueDuration(minutesOverdue)}. Marque como concluÃ­do quando finalizar.`,
+      tone: 'warning',
+      sequenceIndex: item.sequenceIndex,
+      intervalMinutes: item.intervalMinutes,
+    });
+    if (inserted) return true;
+  }
+
+  return false;
+}
+
+async function scheduleNextIncrementalReminder(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
+  if (schedule.kind === 'floating_reminder') {
+    return scheduleNextFloatingReminder(sql, schedule, task);
+  }
+
+  if (schedule.kind === 'overdue_reminder') {
+    return scheduleNextOverdueReminder(sql, schedule, task);
+  }
+
+  return false;
+}
+
 async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
   const result = await createNotification(sql, {
     userId: schedule.userId,
@@ -952,6 +1068,16 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   }
 
   await updateScheduleStatus(sql, schedule.id, 'sent');
+  if (schedule.kind === 'floating_reminder' || schedule.kind === 'overdue_reminder') {
+    await scheduleNextIncrementalReminder(sql, schedule, task).catch((error) => {
+      logError('notification_schedule_incremental_follow_up_failed', error, {
+        userId: schedule.userId,
+        taskId: schedule.taskId,
+        scheduleId: schedule.id,
+        kind: schedule.kind,
+      });
+    });
+  }
   return 'sent' as const;
 }
 

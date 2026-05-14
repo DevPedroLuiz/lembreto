@@ -8,7 +8,6 @@
 import {
   BellRing,
   CalendarDays,
-  FileText,
   ListTodo,
   NotebookPen,
   Plus,
@@ -74,9 +73,8 @@ import { NotesPage } from './pages/NotesPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { ResetPage } from './pages/ResetPage';
 import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
-import { TasksPage } from './pages/TasksPage';
+import { TasksPage, type TasksPageView } from './pages/TasksPage';
 import { CalendarPage } from './pages/CalendarPage';
-import { DraftsPage } from './pages/DraftsPage';
 
 type AppConfigPatch = Partial<{
   darkMode: boolean;
@@ -88,7 +86,7 @@ type AppConfigPatch = Partial<{
 }>;
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
-type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'drafts' | 'notes' | 'notifications';
+type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -360,6 +358,7 @@ export default function App() {
 
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
+  const [tasksPageView, setTasksPageView] = useState<TasksPageView>('agenda');
   const [filterCategory, setFilterCategory] = useState('Todas');
   const [search, setSearch] = useState('');
 
@@ -762,9 +761,8 @@ export default function App() {
       dashboard: 0,
       calendar: 1,
       tasks: 2,
-      drafts: 3,
-      notes: 4,
-      notifications: 5,
+      notes: 3,
+      notifications: 4,
     };
 
     const previousTab = previousTabRef.current;
@@ -1096,6 +1094,7 @@ export default function App() {
 
     setDashboardMetricDialog(null);
     setTaskDetailsReturnMetric(null);
+    setTasksPageView(relatedTask.status === 'draft' ? 'drafts' : 'agenda');
     setSelectedTask(relatedTask);
     setShowTaskDetails(true);
     setPendingNotificationTaskId(null);
@@ -1811,11 +1810,12 @@ export default function App() {
         ? await updateTask(editingTask.id, payload)
         : await createTask(payload);
 
-      emitNotification('Rascunho salvo', `"${saved.title}" ficou disponível na aba Rascunhos.`, 'success', {
+      emitNotification('Rascunho salvo', `"${saved.title}" ficou disponível em Meus lembretes > Rascunhos.`, 'success', {
         target: { type: 'task', taskId: saved.id },
       });
       resetTaskForm();
-      setActiveTab('drafts');
+      setTasksPageView('drafts');
+      setActiveTab('tasks');
     } catch (error) {
       emitNotification('Erro', error instanceof Error ? error.message : 'Falha ao salvar o rascunho.', 'error');
     } finally {
@@ -1960,6 +1960,7 @@ export default function App() {
       emitNotification('Lembrete adicionado', `"${updated.title}" saiu dos rascunhos e entrou nos pendentes.`, 'success', {
         target: { type: 'task', taskId: updated.id },
       });
+      setTasksPageView('agenda');
     } catch (error) {
       emitNotification('Erro', error instanceof Error ? error.message : 'Não foi possível adicionar o rascunho como lembrete.', 'error');
     } finally {
@@ -2363,9 +2364,9 @@ export default function App() {
     [tasks]
   );
 
-  const pendingAndDraftTasks = useMemo(
-    () => [...pendingTasks, ...inactiveTasks, ...draftTasks],
-    [draftTasks, inactiveTasks, pendingTasks]
+  const pendingAndInactiveTasks = useMemo(
+    () => [...pendingTasks, ...inactiveTasks],
+    [inactiveTasks, pendingTasks]
   );
 
   const calendarTasks = useMemo(
@@ -2724,6 +2725,7 @@ export default function App() {
 
   const openTasksTab = useCallback(() => {
     closeFloatingSurfacesForNavigation();
+    setTasksPageView('agenda');
     setActiveTab('tasks');
   }, [closeFloatingSurfacesForNavigation]);
 
@@ -3099,8 +3101,6 @@ export default function App() {
       ? 'Seu calendário'
     : activeTab === 'tasks'
       ? 'Sua agenda'
-    : activeTab === 'drafts'
-      ? 'Rascunhos'
       : activeTab === 'notes'
         ? 'Suas notas'
       : 'Notificações';
@@ -3109,9 +3109,7 @@ export default function App() {
     : activeTab === 'calendar'
       ? 'Visualize seus lembretes por dia, semana e mês em uma grade de calendário.'
     : activeTab === 'tasks'
-      ? 'Organize lembretes, refine prioridades e avance com tranquilidade.'
-    : activeTab === 'drafts'
-      ? 'Revise lembretes salvos antes de adicioná-los à sua lista principal.'
+      ? 'Organize lembretes, rascunhos, datas e feriados em áreas separadas.'
       : activeTab === 'notes'
         ? 'Guarde contexto, ideias e apontamentos vinculados aos seus lembretes.'
       : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
@@ -3150,12 +3148,14 @@ export default function App() {
       <Sidebar
         currentUser={auth.currentUser}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          if (tab === 'tasks') setTasksPageView('agenda');
+          setActiveTab(tab);
+        }}
         filterCategory={filterCategory}
         setFilterCategory={setFilterCategory}
         categories={categoryOptions}
-        pendingTasks={pendingAndDraftTasks}
-        draftCount={draftTasks.length}
+        pendingTasks={pendingAndInactiveTasks}
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
@@ -3233,8 +3233,6 @@ export default function App() {
                         ? 'Calendário'
                       : activeTab === 'notes'
                         ? 'Caderno pessoal'
-                      : activeTab === 'drafts'
-                        ? 'Rascunhos'
                       : activeTab === 'notifications'
                         ? 'Central de notificações'
                           : 'Gestão de lembretes'}
@@ -3292,15 +3290,6 @@ export default function App() {
                 <Plus size={20} /> Novo lembrete
               </button>
             )}
-            {activeTab === 'drafts' && (
-              <button
-                onClick={openNewTask}
-                data-testid="new-draft-button"
-                className="action-primary hidden lg:inline-flex"
-              >
-                <Plus size={20} /> Novo rascunho
-              </button>
-            )}
             {activeTab === 'notes' && (
               <button
                 onClick={() => openNewNote()}
@@ -3355,7 +3344,7 @@ export default function App() {
               )}
               {activeTab === 'tasks' && (
                 <TasksPage
-                  pendingTasks={pendingAndDraftTasks}
+                  pendingTasks={pendingAndInactiveTasks}
                   completedTasks={completedTasks}
                   categories={categoryOptions}
                   tags={tagOptions}
@@ -3370,7 +3359,13 @@ export default function App() {
                   onDelete={handleDelete}
                   onDeleteSelected={handleDeleteSelectedTasks}
                   onEdit={openTaskDetails}
+                  drafts={draftTasks}
+                  onEditDraft={openEditTask}
+                  onPromoteDraft={handlePromoteDraft}
+                  activeView={tasksPageView}
+                  onActiveViewChange={setTasksPageView}
                   deletingTaskIds={deletingTaskIds}
+                  promotingDraftIds={promotingDraftIds}
                   togglingTaskIds={togglingTaskIds}
                   togglingActiveTaskIds={togglingActiveTaskIds}
                   holidayCalendar={holidayCalendar}
@@ -3383,17 +3378,6 @@ export default function App() {
                     void detectHolidayLocation();
                   }}
                   onOpenHolidaySettings={openHolidaySettings}
-                />
-              )}
-              {activeTab === 'drafts' && (
-                <DraftsPage
-                  drafts={draftTasks}
-                  onNewTask={openNewTask}
-                  onEdit={openEditTask}
-                  onPromote={handlePromoteDraft}
-                  onDelete={handleDelete}
-                  deletingTaskIds={deletingTaskIds}
-                  promotingDraftIds={promotingDraftIds}
                 />
               )}
               {activeTab === 'notes' && (
@@ -3420,7 +3404,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 lg:hidden">
-        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr_1fr] items-center gap-1 p-2">
+        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -3462,24 +3446,6 @@ export default function App() {
             {pendingSummary.overdueCount > 0 && (
               <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
                 {Math.min(pendingSummary.overdueCount, 99)}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              closeFloatingSurfacesForNavigation();
-              setActiveTab('drafts');
-            }}
-            aria-label="Abrir rascunhos"
-            className={cn(
-              'relative flex flex-col items-center rounded-2xl p-3 transition-colors',
-              activeTab === 'drafts' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
-            )}
-          >
-            <FileText size={24} />
-            {draftTasks.length > 0 && (
-              <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(124,58,237,0.8)]">
-                {Math.min(draftTasks.length, 99)}
               </span>
             )}
           </button>

@@ -11,8 +11,12 @@ import {
   ChevronUp,
   Circle,
   CircleDot,
+  FileText,
   Flag,
   Hash,
+  Loader2,
+  PencilLine,
+  Plus,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -34,7 +38,7 @@ type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | 'pending' | 'completed';
 type TagFilter = 'all' | string;
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
-type TasksPageView = 'agenda' | 'holidays';
+export type TasksPageView = 'agenda' | 'holidays' | 'drafts';
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: 'created', label: 'Recentes' },
@@ -111,7 +115,13 @@ interface TasksPageProps {
   onDelete: (id: string, event: React.MouseEvent) => void;
   onDeleteSelected: (ids: string[]) => void;
   onEdit: (task: Task) => void;
+  drafts: Task[];
+  onEditDraft: (task: Task) => void;
+  onPromoteDraft: (task: Task) => void;
+  activeView: TasksPageView;
+  onActiveViewChange: (view: TasksPageView) => void;
   deletingTaskIds?: ReadonlySet<string>;
+  promotingDraftIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
   togglingActiveTaskIds?: ReadonlySet<string>;
   holidayCalendar: HolidayCalendarPayload | null;
@@ -467,7 +477,13 @@ export function TasksPage({
   onDelete,
   onDeleteSelected,
   onEdit,
+  drafts,
+  onEditDraft,
+  onPromoteDraft,
+  activeView,
+  onActiveViewChange,
   deletingTaskIds,
+  promotingDraftIds,
   togglingTaskIds,
   togglingActiveTaskIds,
   holidayCalendar,
@@ -514,7 +530,6 @@ export function TasksPage({
       initialDateFilterMode,
     ),
   );
-  const [activeView, setActiveView] = React.useState<TasksPageView>('agenda');
   const [searchInput, setSearchInput] = React.useState(search);
   const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
   const [isMobileViewport, setIsMobileViewport] = React.useState(() =>
@@ -843,6 +858,38 @@ export function TasksPage({
     dateFilterMode !== 'all',
     search.trim().length > 0,
   ].filter(Boolean).length;
+  const pageTabs = React.useMemo<Array<{
+    value: TasksPageView;
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+    countLabel: string;
+  }>>(
+    () => [
+      {
+        value: 'agenda',
+        label: 'Agenda',
+        description: 'Lembretes ativos, filtros e pendencias do dia a dia.',
+        icon: <ArrowUpDown size={18} />,
+        countLabel: `${totalVisibleTasks} item${totalVisibleTasks === 1 ? '' : 's'}`,
+      },
+      {
+        value: 'holidays',
+        label: 'Datas e feriados',
+        description: 'Calendario de feriados e datas importantes para planejar melhor.',
+        icon: <Sparkles size={18} />,
+        countLabel: 'Calendario',
+      },
+      {
+        value: 'drafts',
+        label: 'Rascunhos',
+        description: 'Ideias salvas para revisar antes de virar lembrete.',
+        icon: <FileText size={18} />,
+        countLabel: `${drafts.length} rascunho${drafts.length === 1 ? '' : 's'}`,
+      },
+    ],
+    [drafts.length, totalVisibleTasks],
+  );
 
   const handleResetFilters = React.useCallback(() => {
     setSearchInput('');
@@ -1245,36 +1292,65 @@ export function TasksPage({
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setActiveView('agenda')}
-              aria-pressed={activeView === 'agenda'}
-              className={[
-                'inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all',
-                activeView === 'agenda'
-                  ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_16px_32px_-24px_rgba(37,99,235,0.75)]'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
-              ].join(' ')}
-            >
-              <ArrowUpDown size={16} />
-              Agenda
-            </button>
+          <div className="grid gap-3 md:grid-cols-3">
+            {pageTabs.map((tab) => {
+              const isActive = activeView === tab.value;
 
-            <button
-              type="button"
-              onClick={() => setActiveView('holidays')}
-              aria-pressed={activeView === 'holidays'}
-              className={[
-                'inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all',
-                activeView === 'holidays'
-                  ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_16px_32px_-24px_rgba(37,99,235,0.75)]'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
-              ].join(' ')}
-            >
-              <Sparkles size={16} />
-              Datas e feriados
-            </button>
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  data-testid={`task-view-${tab.value}`}
+                  onClick={() => onActiveViewChange(tab.value)}
+                  aria-pressed={isActive}
+                  className={[
+                    'group min-h-[128px] rounded-[24px] border p-4 text-left transition-all',
+                    isActive
+                      ? 'border-blue-200 bg-blue-50 text-blue-950 shadow-[0_18px_42px_-32px_rgba(37,99,235,0.75)] dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-white'
+                      : 'border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.07]',
+                  ].join(' ')}
+                >
+                  <span className="flex items-start justify-between gap-3">
+                    <span
+                      className={[
+                        'icon-slot h-10 w-10 rounded-2xl',
+                        isActive
+                          ? 'bg-blue-600 text-white dark:bg-blue-400 dark:text-slate-950'
+                          : 'bg-slate-100 text-slate-500 group-hover:bg-white dark:bg-white/[0.06] dark:text-slate-300',
+                      ].join(' ')}
+                    >
+                      {tab.icon}
+                    </span>
+                    <span
+                      className={[
+                        'rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]',
+                        isActive
+                          ? 'bg-white/80 text-blue-700 dark:bg-white/10 dark:text-blue-100'
+                          : 'bg-slate-100 text-slate-500 dark:bg-white/[0.06] dark:text-slate-400',
+                      ].join(' ')}
+                    >
+                      Pagina
+                    </span>
+                  </span>
+                  <span className="mt-4 block text-base font-semibold text-slate-950 dark:text-white">
+                    {tab.label}
+                  </span>
+                  <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    {tab.description}
+                  </span>
+                  <span
+                    className={[
+                      'mt-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold',
+                      isActive
+                        ? 'bg-blue-600 text-white dark:bg-blue-300 dark:text-slate-950'
+                        : 'bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300',
+                    ].join(' ')}
+                  >
+                    {tab.countLabel}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {activeView === 'agenda' && (
@@ -1455,6 +1531,96 @@ export function TasksPage({
           onDetectLocation={onDetectHolidayLocation}
           onOpenLocationSettings={onOpenHolidaySettings}
         />
+      )}
+
+      {activeView === 'drafts' && (
+        <section className="surface-panel overflow-hidden p-0" data-testid="drafts-panel">
+          <div className="flex flex-col gap-4 border-b border-slate-200/70 bg-slate-50/70 px-5 py-5 dark:border-white/10 dark:bg-white/[0.03] md:flex-row md:items-center md:justify-between md:px-6">
+            <div className="min-w-0">
+              <span className="section-eyebrow">
+                <FileText size={14} />
+                Rascunhos
+              </span>
+              <h4 className="mt-3 text-xl font-semibold text-slate-950 dark:text-white">
+                Lembretes salvos para revisar
+              </h4>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Esta pagina fica separada da agenda: nada daqui entra na lista principal ate voce adicionar como lembrete.
+              </p>
+            </div>
+
+            <button type="button" onClick={onNewTask} className="action-primary justify-center">
+              <Plus size={18} />
+              Novo rascunho
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {drafts.length > 0 ? (
+              <div className="space-y-4 p-5 md:p-6">
+                {drafts.map((draft) => {
+                  const isPromoting = promotingDraftIds?.has(draft.id) ?? false;
+
+                  return (
+                    <motion.div
+                      key={draft.id}
+                      layout
+                      className="rounded-[26px] border border-slate-200/70 bg-white/82 p-3 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-slate-950/36"
+                    >
+                      <TaskItem
+                        task={draft}
+                        onToggle={() => undefined}
+                        onDelete={onDelete}
+                        onEdit={onEditDraft}
+                        isDeleting={deletingTaskIds?.has(draft.id)}
+                      />
+
+                      <div className="mt-3 grid gap-2 sm:flex sm:justify-end">
+                        <button
+                          type="button"
+                          data-testid="draft-edit-button"
+                          onClick={() => onEditDraft(draft)}
+                          disabled={isPromoting}
+                          className="action-secondary justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <PencilLine size={16} />
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="draft-promote-button"
+                          onClick={() => onPromoteDraft(draft)}
+                          disabled={isPromoting}
+                          className="action-primary justify-center disabled:cursor-wait disabled:opacity-70"
+                        >
+                          {isPromoting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                          Adicionar como lembrete
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="px-5 py-6 md:p-6"
+              >
+                <div className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]">
+                  <FileText size={34} className="mx-auto mb-4 text-slate-400" />
+                  <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nenhum rascunho salvo</h4>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    Salve um lembrete como rascunho para revisar antes de publicar.
+                  </p>
+                  <button type="button" onClick={onNewTask} className="action-primary mt-6">
+                    Criar rascunho
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
       )}
 
       {activeView === 'agenda' && statusFilter !== 'completed' && (

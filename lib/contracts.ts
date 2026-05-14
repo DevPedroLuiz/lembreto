@@ -4,7 +4,7 @@ export const NOTE_MODES = ['temporary', 'fixed'] as const;
 export const NOTIFICATION_TONES = ['info', 'success', 'warning', 'error'] as const;
 export const NOTIFICATION_TARGET_TYPES = ['task', 'notifications', 'profile', 'settings'] as const;
 export const CALENDAR_PROVIDERS = ['google', 'outlook'] as const;
-export const EXTERNAL_CALENDAR_SYNC_STATUSES = ['idle', 'synced', 'failed'] as const;
+export const EXTERNAL_CALENDAR_SYNC_STATUSES = ['idle', 'pending', 'synced', 'failed'] as const;
 export const REMINDER_MODES = ['timed', 'floating'] as const;
 export const NOTIFICATION_SCHEDULE_KINDS = [
   'pre_notice',

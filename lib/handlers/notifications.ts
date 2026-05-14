@@ -1,5 +1,6 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import { processPendingCalendarSyncs } from '../calendar/calendarSync.js';
 import {
   clearNotificationsForUser,
   createNotification,
@@ -336,10 +337,12 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
 
   try {
     const result = await processNotificationSchedules(sql);
+    const calendarSync = await processPendingCalendarSyncs(sql);
     logInfo('cron_notifications_completed', getRequestMeta(request, {
       ...result,
+      calendarSync,
     }));
-    return json(200, { ok: true, ...result });
+    return json(200, { ok: true, ...result, calendarSync });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));
     return json(500, { error: 'Erro ao gerar notificações agendadas' });

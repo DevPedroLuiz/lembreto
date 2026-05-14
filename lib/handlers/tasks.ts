@@ -3,9 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { buildTasksIcs, type CalendarTask } from '../calendar/ics.js';
 import {
   ensureCalendarIntegrationSchema,
-  getTaskForCalendarSync,
-  removeTaskFromExternalCalendar,
-  syncTaskToExternalCalendar,
 } from '../calendar/calendarSync.js';
 import {
   buildHolidayCalendar,
@@ -16,7 +13,7 @@ import { logError, logInfo } from '../logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
   ensureNotificationSchedulingInfrastructure,
-  syncTaskNotificationSchedules,
+  syncTaskNotificationSchedulesLightweight,
 } from '../notification-schedules.js';
 import {
   createTaskCategorySchema,
@@ -166,7 +163,7 @@ async function syncTaskNotificationSchedulesBestEffort(
   options?: { floatingIntervalMinutes: number | null },
 ) {
   try {
-    await syncTaskNotificationSchedules(context.sql, userId, taskId, options);
+    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, options);
   } catch (error) {
     if (
       error &&
@@ -240,22 +237,6 @@ function requiresWorkScheduleForUpdate(input: {
   if (input.dueDateChanged && !input.nextDueDate) return true;
   if (input.endDateChanged && !input.nextEndDate) return true;
   return false;
-}
-
-async function syncTaskCalendarBestEffort(
-  context: HandlerContext,
-  userId: string,
-  taskId: string,
-): Promise<void> {
-  try {
-    await syncTaskToExternalCalendar({
-      sql: context.sql,
-      userId,
-      taskId,
-    });
-  } catch (error) {
-    logError('task_calendar_sync_unhandled_failed', error, getRequestMeta(context.request, { userId, taskId }));
-  }
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
@@ -489,6 +470,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           muted_until,
           floating_interval_minutes,
           status,
+          external_calendar_sync_status,
           history
         )
         VALUES (
@@ -507,6 +489,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${mutedUntil || null},
           ${dueDate ? null : noTimeReminderMinutes ?? 60},
           ${status},
+          ${dueDate && status === 'pending' ? 'pending' : 'idle'},
           ${history}::jsonb
         )
         RETURNING
@@ -542,12 +525,9 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       `;
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), category, tags);
-      void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+      await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
         floatingIntervalMinutes: noTimeReminderMinutes ?? null,
       });
-      if (status === 'pending') {
-        void syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
-      }
       logInfo('task_created', getRequestMeta(request, { userId: user.id }));
       return json(201, rows[0]);
     } catch (error) {
@@ -691,6 +671,20 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
             WHEN ${nextValues.status} IN ('pending', 'overdue') THEN NULL
             ELSE completion_source
           END,
+          external_calendar_sync_status = CASE
+            WHEN (
+              (${nextValues.status} = 'pending' AND ${nextValues.dueDate}::timestamptz IS NOT NULL)
+              OR external_calendar_event_id IS NOT NULL
+            ) THEN 'pending'
+            ELSE external_calendar_sync_status
+          END,
+          external_calendar_last_error = CASE
+            WHEN (
+              (${nextValues.status} = 'pending' AND ${nextValues.dueDate}::timestamptz IS NOT NULL)
+              OR external_calendar_event_id IS NOT NULL
+            ) THEN NULL
+            ELSE external_calendar_last_error
+          END,
           history     = COALESCE(history, '[]'::jsonb) || COALESCE(${historyUpdate}::jsonb, '[]'::jsonb)
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
@@ -727,15 +721,12 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
 
       void syncTaskTaxonomyBestEffort(context, user.id, String(rows[0].id), categoryValue, tagsValue);
       if (String(nextValues.status) === 'completed' || String(nextValues.status) === 'cancelled' || String(nextValues.status) === 'inactive' || String(nextValues.status) === 'draft') {
-        void cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id).catch((error) => {
-          logError('task_notification_schedule_cancel_failed', error, getRequestMeta(request, { userId: user.id, taskId: id }));
-        });
+        await cancelPendingNotificationSchedulesForTask(sql, String(rows[0].id), user.id);
       } else {
-        void syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
+        await syncTaskNotificationSchedulesBestEffort(context, user.id, String(rows[0].id), {
           floatingIntervalMinutes: noTimeReminderMinutes ?? null,
         });
       }
-      void syncTaskCalendarBestEffort(context, user.id, String(rows[0].id));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
       return json(200, rows[0]);
     } catch (error) {
@@ -746,19 +737,19 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
 
   if (request.method === 'DELETE') {
     try {
-      const taskForCalendar = await getTaskForCalendarSync(sql, user.id, id);
-      if (taskForCalendar) {
-        await removeTaskFromExternalCalendar({
-          sql,
-          userId: user.id,
-          task: taskForCalendar,
-        });
-      }
       await sql`
         UPDATE tasks
         SET
           status = 'cancelled',
-          deleted_at = COALESCE(deleted_at, NOW())
+          deleted_at = COALESCE(deleted_at, NOW()),
+          external_calendar_sync_status = CASE
+            WHEN external_calendar_event_id IS NOT NULL THEN 'pending'
+            ELSE external_calendar_sync_status
+          END,
+          external_calendar_last_error = CASE
+            WHEN external_calendar_event_id IS NOT NULL THEN NULL
+            ELSE external_calendar_last_error
+          END
         WHERE id = ${id}
           AND user_id = ${user.id}
       `;
