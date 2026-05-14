@@ -1346,25 +1346,35 @@ export default function App() {
   }, [emitNotification, updateCalendarSync]);
 
   const handleSyncAllCalendar = useCallback(async (provider: 'google' | 'outlook') => {
-    const result = await syncAllNow(provider);
-    await refreshTasks();
-    await refreshCalendarIntegrations();
-
     const providerName = provider === 'google' ? 'Google Calendar' : 'Outlook Calendar';
-    const summary = [
-      `${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}`,
-      `${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}`,
-      `${result.deduplicated} duplicata${result.deduplicated === 1 ? '' : 's'} resolvida${result.deduplicated === 1 ? '' : 's'}`,
-    ];
 
-    emitNotification(
-      result.failed > 0 ? 'Sincronização concluída com avisos' : 'Calendário sincronizado',
-      `${providerName}: ${summary.join(' e ')}.${result.failed > 0 ? ` ${result.failed} falha${result.failed === 1 ? '' : 's'}.` : ''}`,
-      result.failed > 0 ? 'warning' : 'success',
-    );
+    try {
+      const result = await syncAllNow(provider);
+      void refreshTasks().catch(() => undefined);
+      void refreshCalendarIntegrations().catch(() => undefined);
 
-    return result;
-  }, [emitNotification, refreshCalendarIntegrations, refreshTasks, syncAllNow]);
+      const summary = [
+        `${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}`,
+        `${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'}`,
+        `${result.deduplicated} duplicata${result.deduplicated === 1 ? '' : 's'} resolvida${result.deduplicated === 1 ? '' : 's'}`,
+      ];
+      const title = result.failed > 0 ? 'Sincronização concluída com avisos' : 'Calendário sincronizado';
+      const message = `${providerName}: ${summary.join(' e ')}.${result.failed > 0 ? ` ${result.failed} falha${result.failed === 1 ? '' : 's'}.` : ''}`;
+      const tone = result.failed > 0 ? 'warning' : 'success';
+
+      emitNotification(title, message, tone, { skipToast: true });
+      triggerToastOnly(title, message);
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : `Não foi possível sincronizar ${providerName} agora.`;
+      emitNotification('Falha ao sincronizar calendário', message, 'error', { skipToast: true });
+      triggerToastOnly('Falha ao sincronizar calendário', message);
+      throw error;
+    }
+  }, [emitNotification, refreshCalendarIntegrations, refreshTasks, syncAllNow, triggerToastOnly]);
 
   const handleSyncTaskCalendar = useCallback(async (task: Task) => {
     if (syncingCalendarTaskIds.has(task.id)) return;
@@ -2368,7 +2378,7 @@ export default function App() {
   }, [auth.updateProfile, emitNotification, isProfileSubmitting, profAvatar, profEmail, profName, profPassword]);
 
   const pendingTasks = useMemo(
-    () => tasks.filter((task) => task.status === 'pending'),
+    () => tasks.filter((task) => task.status === 'pending' || task.status === 'overdue'),
     [tasks]
   );
 
