@@ -17,7 +17,11 @@ const PRE_NOTICE_MINUTES = 15;
 const FLOATING_LIFETIME_HOURS = 24;
 const OVERDUE_LIFETIME_HOURS = 72;
 const DEFAULT_FLOATING_INTERVAL_MINUTES = 60;
-const MAX_CRON_BATCH_SIZE = 100;
+const PROCESS_LIMIT = 20;
+const OVERDUE_TASK_SCAN_LIMIT = 10;
+const STUCK_PROCESSING_RECLAIM_LIMIT = 10;
+const MAX_CRON_DURATION_MS = 25000;
+const OVERDUE_SCHEDULES_PER_TASK_LIMIT = 1;
 const QUIET_START_HOUR = 22;
 const QUIET_END_HOUR = 7;
 const SAO_PAULO_OFFSET = '-03:00';
@@ -61,11 +65,20 @@ interface ScheduleRow {
 
 export interface ProcessNotificationSchedulesSummary {
   detectedOverdueTasks: number;
+  reclaimedSchedules: number;
+  fetchedSchedules: number;
   processedSchedules: number;
   sentSchedules: number;
   cancelledSchedules: number;
   rescheduledSchedules: number;
   failedSchedules: number;
+  durationMs: number;
+  hasMore: boolean;
+  stoppedByTimeLimit: boolean;
+  processed: number;
+  sent: number;
+  failed: number;
+  cancelled: number;
 }
 
 export interface CleanupExpiredTaskSummary {
@@ -577,18 +590,25 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
   await scheduleTimedTask(sql, { ...task, reminderMode }, new Date());
 }
 
-export async function scheduleOverdueRemindersForTask(sql: SqlClient, task: TaskForScheduling) {
+export async function scheduleOverdueRemindersForTask(
+  sql: SqlClient,
+  task: TaskForScheduling,
+  options: { maxSchedules?: number; notBefore?: Date } = {},
+) {
   if (!task.dueDate) return 0;
   const dueDate = new Date(task.dueDate);
   const overdueExpiresAt = task.overdueExpiresAt
     ? new Date(task.overdueExpiresAt)
     : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
   const times = buildOverdueScheduleTimes(dueDate, overdueExpiresAt);
+  const maxSchedules = options.maxSchedules ?? Number.POSITIVE_INFINITY;
   let created = 0;
 
   for (const item of times) {
+    if (created >= maxSchedules) break;
     const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
     if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt) continue;
+    if (options.notBefore && adjusted.notifyAt < options.notBefore) continue;
     const minutesOverdue = Math.max(0, Math.floor((adjusted.notifyAt.getTime() - dueDate.getTime()) / 60000));
     await insertSchedule(sql, task, {
       kind: 'overdue_reminder',
@@ -605,7 +625,12 @@ export async function scheduleOverdueRemindersForTask(sql: SqlClient, task: Task
   return created;
 }
 
-async function markTaskOverdueAndSchedule(sql: SqlClient, task: TaskForScheduling, dueDate: Date) {
+async function markTaskOverdueAndSchedule(
+  sql: SqlClient,
+  task: TaskForScheduling,
+  dueDate: Date,
+  options: { maxOverdueSchedules?: number; overdueNotBefore?: Date } = {},
+) {
   if (task.reminderMode === 'floating' || !isSchedulableStatus(task.status)) return 0;
   const overdueExpiresAt = addHours(dueDate, OVERDUE_LIFETIME_HOURS);
   await sql`
@@ -625,10 +650,13 @@ async function markTaskOverdueAndSchedule(sql: SqlClient, task: TaskForSchedulin
     status: 'overdue',
     overdueSince: dueDate.toISOString(),
     overdueExpiresAt: overdueExpiresAt.toISOString(),
+  }, {
+    maxSchedules: options.maxOverdueSchedules,
+    notBefore: options.overdueNotBefore,
   });
 }
 
-async function detectAndScheduleOverdueTasks(sql: SqlClient) {
+async function detectAndScheduleOverdueTasks(sql: SqlClient, limit: number, startedAt: number) {
   const rows = await sql`
     SELECT
       tasks.id,
@@ -653,22 +681,74 @@ async function detectAndScheduleOverdueTasks(sql: SqlClient) {
     FROM tasks
     INNER JOIN users ON users.id = tasks.user_id
     WHERE tasks.deleted_at IS NULL
-      AND tasks.status IN ('pending', 'overdue')
+      AND (
+        tasks.status = 'pending'
+        OR (
+          tasks.status = 'overdue'
+          AND COALESCE(tasks.overdue_expires_at, tasks.due_date + INTERVAL '72 hours') > NOW()
+          AND NOT EXISTS (
+            SELECT 1
+            FROM notification_schedules existing_overdue
+            WHERE existing_overdue.user_id = tasks.user_id
+              AND existing_overdue.task_id = tasks.id
+              AND existing_overdue.kind = 'overdue_reminder'
+              AND existing_overdue.status IN ('pending', 'processing')
+              AND existing_overdue.notify_at >= NOW()
+          )
+        )
+      )
       AND COALESCE(tasks.reminder_mode, 'timed') = 'timed'
       AND tasks.due_date IS NOT NULL
       AND tasks.due_date < NOW()
-    LIMIT 200
+    ORDER BY tasks.due_date ASC
+    LIMIT ${limit}
   `;
 
   let detected = 0;
   for (const row of rows) {
+    if (Date.now() - startedAt >= MAX_CRON_DURATION_MS) {
+      logWarn('notification_overdue_detection_stopped_by_time_limit', {
+        detected,
+        limit,
+        durationMs: Date.now() - startedAt,
+      });
+      return { detected, hasMore: true };
+    }
+
     const task = mapTask(row);
     if (!task.dueDate) continue;
-    await markTaskOverdueAndSchedule(sql, task, new Date(task.dueDate));
+    await markTaskOverdueAndSchedule(sql, task, new Date(task.dueDate), {
+      maxOverdueSchedules: OVERDUE_SCHEDULES_PER_TASK_LIMIT,
+      overdueNotBefore: new Date(),
+    });
     detected += 1;
   }
 
-  return detected;
+  return { detected, hasMore: rows.length >= limit };
+}
+
+async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number) {
+  const rows = await sql`
+    WITH stuck AS (
+      SELECT id
+      FROM notification_schedules
+      WHERE status = 'processing'
+        AND processing_started_at < NOW() - INTERVAL '10 minutes'
+      ORDER BY processing_started_at ASC NULLS FIRST, notify_at ASC
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE notification_schedules
+    SET
+      status = 'pending',
+      processing_started_at = NULL,
+      error_message = 'reclaimed_stuck_processing',
+      updated_at = NOW()
+    WHERE id IN (SELECT id FROM stuck)
+    RETURNING id
+  `;
+
+  return rows.length;
 }
 
 async function claimDueSchedules(sql: SqlClient, limit: number) {
@@ -676,10 +756,7 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
     WITH due AS (
       SELECT id
       FROM notification_schedules
-      WHERE (
-          status = 'pending'
-          OR (status = 'processing' AND processing_started_at < NOW() - INTERVAL '10 minutes')
-        )
+      WHERE status = 'pending'
         AND notify_at <= NOW()
       ORDER BY notify_at ASC
       LIMIT ${limit}
@@ -785,7 +862,14 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
       target: { type: 'task', taskId: schedule.taskId },
       tone: schedule.tone,
     },
-  }, result.notification.id);
+  }, result.notification.id).catch((error) => {
+    logError('alarm_push_dispatch_failed', error, {
+      userId: schedule.userId,
+      taskId: schedule.taskId,
+      scheduleId: schedule.id,
+      notificationId: result.notification.id,
+    });
+  });
 
   return true;
 }
@@ -871,26 +955,78 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   return 'sent' as const;
 }
 
-export async function processNotificationSchedules(sql: SqlClient, limit = MAX_CRON_BATCH_SIZE): Promise<ProcessNotificationSchedulesSummary> {
+export async function processNotificationSchedules(sql: SqlClient, limit = PROCESS_LIMIT): Promise<ProcessNotificationSchedulesSummary> {
+  const startedAt = Date.now();
+  const processLimit = Math.min(Math.max(1, limit), PROCESS_LIMIT);
+  logInfo('cron_notifications_started', {
+    processLimit,
+    overdueTaskScanLimit: OVERDUE_TASK_SCAN_LIMIT,
+    stuckProcessingReclaimLimit: STUCK_PROCESSING_RECLAIM_LIMIT,
+    maxDurationMs: MAX_CRON_DURATION_MS,
+  });
+
   await ensureNotificationSchedulingInfrastructure(sql);
-  const detectedOverdueTasks = await detectAndScheduleOverdueTasks(sql);
-  const schedules = await claimDueSchedules(sql, limit);
+  const reclaimedSchedules = await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
+  const overdueDetection = await detectAndScheduleOverdueTasks(sql, OVERDUE_TASK_SCAN_LIMIT, startedAt);
+  const outOfTimeBeforeClaim = Date.now() - startedAt >= MAX_CRON_DURATION_MS;
+  if (outOfTimeBeforeClaim) {
+    logWarn('cron_notifications_claim_skipped_by_time_limit', {
+      durationMs: Date.now() - startedAt,
+      maxDurationMs: MAX_CRON_DURATION_MS,
+      detectedOverdueTasks: overdueDetection.detected,
+      reclaimedSchedules,
+    });
+  }
+
+  const schedules = outOfTimeBeforeClaim
+    ? []
+    : await claimDueSchedules(sql, processLimit);
   const summary: ProcessNotificationSchedulesSummary = {
-    detectedOverdueTasks,
-    processedSchedules: schedules.length,
+    detectedOverdueTasks: overdueDetection.detected,
+    reclaimedSchedules,
+    fetchedSchedules: schedules.length,
+    processedSchedules: 0,
     sentSchedules: 0,
     cancelledSchedules: 0,
     rescheduledSchedules: 0,
     failedSchedules: 0,
+    durationMs: 0,
+    hasMore: outOfTimeBeforeClaim || overdueDetection.hasMore || reclaimedSchedules >= STUCK_PROCESSING_RECLAIM_LIMIT || schedules.length >= processLimit,
+    stoppedByTimeLimit: outOfTimeBeforeClaim,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    cancelled: 0,
   };
 
+  logInfo('cron_notifications_schedules_claimed', {
+    fetchedSchedules: schedules.length,
+    reclaimedSchedules,
+    detectedOverdueTasks: overdueDetection.detected,
+    hasMore: summary.hasMore,
+  });
+
   for (const schedule of schedules) {
+    if (Date.now() - startedAt >= MAX_CRON_DURATION_MS) {
+      summary.hasMore = true;
+      summary.stoppedByTimeLimit = true;
+      logWarn('cron_notifications_stopped_by_time_limit', {
+        processedSchedules: summary.processedSchedules,
+        fetchedSchedules: schedules.length,
+        durationMs: Date.now() - startedAt,
+        maxDurationMs: MAX_CRON_DURATION_MS,
+      });
+      break;
+    }
+
     try {
       const result = await processSingleSchedule(sql, schedule);
+      summary.processedSchedules += 1;
       if (result === 'sent') summary.sentSchedules += 1;
       if (result === 'cancelled') summary.cancelledSchedules += 1;
       if (result === 'rescheduled') summary.rescheduledSchedules += 1;
     } catch (error) {
+      summary.processedSchedules += 1;
       summary.failedSchedules += 1;
       await updateScheduleStatus(sql, schedule.id, 'failed', error instanceof Error ? error.message : 'Erro desconhecido');
       logError('notification_schedule_failed', error, {
@@ -901,6 +1037,25 @@ export async function processNotificationSchedules(sql: SqlClient, limit = MAX_C
       });
     }
   }
+
+  summary.durationMs = Date.now() - startedAt;
+  summary.processed = summary.processedSchedules;
+  summary.sent = summary.sentSchedules;
+  summary.failed = summary.failedSchedules;
+  summary.cancelled = summary.cancelledSchedules;
+  logInfo('cron_notifications_finished', {
+    detectedOverdueTasks: summary.detectedOverdueTasks,
+    reclaimedSchedules: summary.reclaimedSchedules,
+    fetchedSchedules: summary.fetchedSchedules,
+    processedSchedules: summary.processedSchedules,
+    sentSchedules: summary.sentSchedules,
+    cancelledSchedules: summary.cancelledSchedules,
+    rescheduledSchedules: summary.rescheduledSchedules,
+    failedSchedules: summary.failedSchedules,
+    durationMs: summary.durationMs,
+    hasMore: summary.hasMore,
+    stoppedByTimeLimit: summary.stoppedByTimeLimit,
+  });
 
   return summary;
 }

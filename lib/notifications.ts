@@ -9,6 +9,8 @@ import { isHolidayForLocationOnDate } from './holidays.js';
 import type { SqlClient } from './handlers/core.js';
 import { logError, logInfo, logWarn } from './logger.js';
 
+const PUSH_SEND_TIMEOUT_MS = 5000;
+
 export interface NotificationTarget {
   type: 'task';
   taskId: string;
@@ -259,6 +261,7 @@ export async function sendPushPayloadToUser(
             },
           },
           serializedPayload,
+          { timeout: PUSH_SEND_TIMEOUT_MS },
         );
       } catch (error) {
         const statusCode =
