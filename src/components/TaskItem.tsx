@@ -166,8 +166,8 @@ function TaskItemComponent({
       data-testid="task-item"
       data-task-id={task.id}
       data-task-title={task.title}
-      data-task-status={derivedStatus}
-      data-raw-task-status={task.status}
+      data-task-status={task.status}
+      data-derived-task-status={derivedStatus}
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}

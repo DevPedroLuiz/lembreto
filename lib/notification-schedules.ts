@@ -995,7 +995,7 @@ async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number, op
       FROM notification_schedules
       WHERE status = 'processing'
         AND processing_started_at < NOW() - INTERVAL '10 minutes'
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       ORDER BY processing_started_at ASC NULLS FIRST, notify_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -1024,7 +1024,7 @@ async function claimDueSchedules(sql: SqlClient, limit: number, options: { userI
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       ORDER BY notify_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -1083,13 +1083,13 @@ async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string
         ) AS "futurePendingCount"
       FROM notification_schedules
       WHERE status = 'pending'
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
     `,
     sql`
       SELECT kind, COUNT(*) AS count
       FROM notification_schedules
       WHERE status = 'pending'
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       GROUP BY kind
       ORDER BY kind ASC
     `,
@@ -1101,13 +1101,13 @@ async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       GROUP BY kind
       ORDER BY kind ASC
     `,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing' AND (${userId} IS NULL OR user_id = ${userId})`,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed' AND (${userId} IS NULL OR user_id = ${userId})`,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled' AND (${userId} IS NULL OR user_id = ${userId})`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
     sql`
       SELECT
         id,
@@ -1121,7 +1121,7 @@ async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
-        AND (${userId} IS NULL OR user_id = ${userId})
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       ORDER BY notify_at ASC
       LIMIT 5
     `,
