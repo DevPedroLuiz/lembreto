@@ -106,7 +106,11 @@ function TaskItemComponent({
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
   const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
-  const statusLabel = getDerivedTaskStatusLabel(derivedStatus);
+  const statusLabel = isDraft
+    ? 'Rascunho'
+    : isInactive
+      ? 'Desativado'
+      : getDerivedTaskStatusLabel(derivedStatus);
   const statusToneClass = isCompleted
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
     : isCancelled

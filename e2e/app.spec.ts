@@ -1036,25 +1036,29 @@ test.describe('Lembreto critical flows', () => {
     await cleanupUsersByEmail([user.email]);
 
     try {
+      const futureHighDueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const futureLowDueDate = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000);
+      const completedDueDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
       await registerUser(page, user);
       await seedCustomTasksForUser(user.email, [
         {
           title: 'Alta pendente',
-          dueDate: new Date('2026-04-26T09:00:00.000Z').toISOString(),
+          dueDate: futureHighDueDate.toISOString(),
           priority: 'high',
           category: 'Trabalho',
           tags: ['Casa'],
         },
         {
           title: 'Baixa pendente',
-          dueDate: new Date('2026-04-27T09:00:00.000Z').toISOString(),
+          dueDate: futureLowDueDate.toISOString(),
           priority: 'low',
           category: 'Pessoal',
           tags: ['Estudo'],
         },
         {
           title: 'Alta concluída',
-          dueDate: new Date('2026-04-25T09:00:00.000Z').toISOString(),
+          dueDate: completedDueDate.toISOString(),
           priority: 'high',
           category: 'Trabalho',
           status: 'completed',
