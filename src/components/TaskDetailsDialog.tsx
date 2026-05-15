@@ -2,6 +2,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  AlertTriangle,
   Bell,
   BellOff,
   CalendarClock,
@@ -23,6 +24,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
+import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../lib/taskStatus';
 import { NoteCard } from './NoteCard';
 import type { Note, Priority, Task, TaskHistoryEvent } from '../types';
 
@@ -141,13 +143,7 @@ function buildTaskHistory(task: Task): TaskHistoryEvent[] {
       createdAt: task.createdAt,
       details: [
         `Prazo atual: ${formatDueDate(task)}.`,
-        task.status === 'completed'
-          ? 'Situação atual: concluído.'
-          : task.status === 'draft'
-            ? 'Situação atual: rascunho.'
-            : task.status === 'inactive'
-              ? 'Situação atual: desativado.'
-            : 'Situação atual: pendente.',
+        `Situação atual: ${getDerivedTaskStatusLabel(getDerivedTaskStatus(task)).toLocaleLowerCase('pt-BR')}.`,
       ],
     },
   ];
@@ -215,7 +211,10 @@ export function TaskDetailsDialog({
   const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
   const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
   const timeDescription = getTaskTimeDescription(task.dueDate);
-  const isCompleted = task.status === 'completed';
+  const derivedStatus = getDerivedTaskStatus(task);
+  const isCompleted = derivedStatus === 'completed';
+  const isOverdue = derivedStatus === 'overdue';
+  const isCancelled = derivedStatus === 'cancelled';
   const isDraft = task.status === 'draft';
   const isInactive = task.status === 'inactive';
   const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar || isTogglingActive;
@@ -307,15 +306,15 @@ export function TaskDetailsDialog({
                         'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
                         isCompleted
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
-                          : isDraft
-                            ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
-                          : isInactive
+                          : isCancelled
                             ? 'border-slate-300 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-300'
+                          : isOverdue
+                            ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
                             : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
                       ].join(' ')}
                     >
-                      {isCompleted ? <CheckCircle2 size={12} /> : isDraft ? <FileText size={12} /> : isInactive ? <BellOff size={12} /> : <Circle size={12} />}
-                      {isCompleted ? 'Concluído' : isDraft ? 'Rascunho' : isInactive ? 'Desativado' : 'Pendente'}
+                      {isCompleted ? <CheckCircle2 size={12} /> : isCancelled ? <BellOff size={12} /> : isOverdue ? <AlertTriangle size={12} /> : isDraft ? <FileText size={12} /> : <Circle size={12} />}
+                      {getDerivedTaskStatusLabel(derivedStatus)}
                     </span>
                   </div>
                 </div>

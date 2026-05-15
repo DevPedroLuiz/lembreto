@@ -14,6 +14,10 @@ interface NotificationCreateResponse {
   notification: AppNotification;
 }
 
+interface ProcessDueNotificationsResponse extends NotificationsResponse {
+  ok: boolean;
+}
+
 export function useNotifications(token: string | null) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [serverEnabled, setServerEnabled] = useState<boolean | null>(null);
@@ -89,6 +93,35 @@ export function useNotifications(token: string | null) {
     return data;
   }, [refreshNotifications, token]);
 
+  const processDueNotifications = useCallback(async (overrideToken?: string | null) => {
+    const requestToken = overrideToken ?? token;
+
+    if (!requestToken) {
+      return {
+        ok: false,
+        notifications: [],
+        enabled: true,
+      } satisfies ProcessDueNotificationsResponse;
+    }
+
+    const requestSequence = ++requestSequenceRef.current;
+    const data = await apiPost<ProcessDueNotificationsResponse>(
+      '/api/notifications/process-due',
+      {},
+      requestToken,
+    );
+
+    if (requestSequence === requestSequenceRef.current) {
+      setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      setServerEnabled(data.enabled);
+      setPushConfigured(Boolean(data.pushConfigured));
+      setPushPublicKey(typeof data.pushPublicKey === 'string' ? data.pushPublicKey : null);
+      setLoaded(true);
+    }
+
+    return data;
+  }, [token]);
+
   const markNotificationRead = useCallback(async (id: string, read: boolean) => {
     if (!token) {
       throw new Error('Não autenticado');
@@ -140,6 +173,7 @@ export function useNotifications(token: string | null) {
     pushPublicKey,
     loaded,
     refreshNotifications,
+    processDueNotifications,
     createNotification,
     markNotificationRead,
     markAllRead,

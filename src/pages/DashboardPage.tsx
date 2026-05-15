@@ -16,6 +16,7 @@ import { motion } from 'motion/react';
 import { MetricCard } from '../components/MetricCard';
 import { TaskItem } from '../components/TaskItem';
 import { getTaskTimeLabel } from '../lib/taskDueDate';
+import { getDerivedTaskStatus } from '../lib/taskStatus';
 import type { Priority, Task } from '../types';
 
 export interface QuickStartTemplate {
@@ -79,6 +80,7 @@ function getTaskSortValue(task: Task): Date {
 }
 
 function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
+  if (getDerivedTaskStatus(task) === 'overdue') return 'overdue';
   if (!task.dueDate) return 'upcoming';
 
   try {
@@ -95,6 +97,7 @@ function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
 interface DashboardPageProps {
   tasks: Task[];
   pendingTasks: Task[];
+  overdueTasks: Task[];
   completedTasks: Task[];
   todayCount: number;
   overdueCount: number;
@@ -114,6 +117,7 @@ interface DashboardPageProps {
 export function DashboardPage({
   tasks,
   pendingTasks,
+  overdueTasks,
   completedTasks,
   todayCount,
   overdueCount,
@@ -133,12 +137,13 @@ export function DashboardPage({
     ? 0
     : Math.round((completedTasks.length / tasks.length) * 100);
 
-  const nextTasks = pendingTasks.slice(0, 5);
-  const sortedPendingTasks = [...pendingTasks].sort((left, right) => {
+  const activeTasks = React.useMemo(() => [...overdueTasks, ...pendingTasks], [overdueTasks, pendingTasks]);
+  const sortedPendingTasks = [...activeTasks].sort((left, right) => {
     const dateOrder = compareAsc(getTaskSortValue(left), getTaskSortValue(right));
     if (dateOrder !== 0) return dateOrder;
     return PRIORITY_WEIGHT[left.priority] - PRIORITY_WEIGHT[right.priority];
   });
+  const nextTasks = sortedPendingTasks.slice(0, 5);
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -278,17 +283,19 @@ export function DashboardPage({
                 <span
                   className={[
                     'h-2.5 w-2.5 rounded-full',
-                    pendingTasks.length === 0
+                    activeTasks.length === 0
                       ? 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]'
                       : 'bg-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.14)] animate-pulse',
                   ].join(' ')}
                 />
-                {pendingTasks.length === 0
+                {activeTasks.length === 0
                   ? 'Tudo em dia'
-                  : `${pendingTasks.length} pendente${pendingTasks.length === 1 ? '' : 's'}`}
+                  : `${pendingTasks.length} pendente${pendingTasks.length === 1 ? '' : 's'}${
+                    overdueTasks.length > 0 ? `, ${overdueTasks.length} atrasado${overdueTasks.length === 1 ? '' : 's'}` : ''
+                  }`}
               </span>
               <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
-                {pendingTasks.length === 0
+                {activeTasks.length === 0
                   ? 'Sua agenda está sob controle.'
                   : 'Ainda vale revisar os próximos passos.'}
               </p>
@@ -542,7 +549,7 @@ export function DashboardPage({
               />
             ))}
 
-            {tasks.length > 0 && pendingTasks.length === 0 && (
+            {tasks.length > 0 && activeTasks.length === 0 && (
               <div className="rounded-[28px] border border-dashed border-emerald-200 bg-emerald-50/70 px-6 py-14 text-center dark:border-emerald-500/20 dark:bg-emerald-500/10">
                 <CheckCircle2 size={40} className="mx-auto mb-4 text-emerald-500" />
                 <p className="text-lg font-semibold text-slate-900 dark:text-white">Nenhuma pendência no momento.</p>

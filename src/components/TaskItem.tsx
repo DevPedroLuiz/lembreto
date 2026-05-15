@@ -15,11 +15,12 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
+import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
+import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../lib/taskStatus';
 import type { Priority, Task } from '../types';
 
 function cn(...inputs: Parameters<typeof clsx>) {
@@ -93,8 +94,10 @@ function TaskItemComponent({
   const date = safeDate();
   const isDraft = task.status === 'draft';
   const isInactive = task.status === 'inactive';
-  const isOverdue = Boolean(date) && isPast(date) && task.status === 'pending';
-  const isCompleted = task.status === 'completed';
+  const derivedStatus = getDerivedTaskStatus(task);
+  const isOverdue = derivedStatus === 'overdue';
+  const isCompleted = derivedStatus === 'completed';
+  const isCancelled = derivedStatus === 'cancelled';
   const isBusy = isDeleting || isToggling || isTogglingActive;
   const canToggleActive = Boolean(onToggleActive) && !isDraft && !isCompleted;
   const timeLabel = getTaskTimeLabel(task.dueDate);
@@ -103,29 +106,27 @@ function TaskItemComponent({
   const timeDescription = getTaskTimeDescription(task.dueDate);
   const overdueKind = isOverdue ? (timeLabel ? 'timed' : 'all-day') : 'none';
   const visibleTags = compact ? (task.tags?.slice(0, 1) ?? []) : (task.tags ?? []);
-  const statusLabel = isDraft ? 'Rascunho' : isInactive ? 'Desativado' : isCompleted ? 'Concluído' : isOverdue ? 'Atrasado' : 'Pendente';
+  const statusLabel = getDerivedTaskStatusLabel(derivedStatus);
   const statusToneClass = isCompleted
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
-    : isDraft
-      ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300'
-    : isInactive
+    : isCancelled
       ? 'border-slate-300 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-300'
-    : overdueKind === 'timed'
-      ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
-      : overdueKind === 'all-day'
-        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
-        : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
+      : overdueKind === 'timed'
+        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+        : overdueKind === 'all-day'
+          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'
+          : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300';
   const cardToneClass = isCompleted
     ? 'border-slate-200/70 bg-slate-50/88 dark:border-white/10 dark:bg-white/[0.035]'
     : isDraft
       ? 'border-violet-200/80 bg-gradient-to-br from-white via-violet-50/72 to-white shadow-[0_24px_58px_-38px_rgba(124,58,237,0.32)] dark:border-violet-500/25 dark:from-violet-950/18 dark:via-slate-950/80 dark:to-slate-950/70'
-    : isInactive
+    : isCancelled
       ? 'border-slate-200/80 bg-gradient-to-br from-white via-slate-50/80 to-white opacity-90 dark:border-white/10 dark:from-slate-950/74 dark:via-slate-950/68 dark:to-white/[0.025]'
-    : overdueKind === 'timed'
-      ? 'border-rose-200/90 bg-gradient-to-br from-white via-rose-50/88 to-white shadow-[0_24px_58px_-38px_rgba(244,63,94,0.42)] dark:border-rose-500/25 dark:from-rose-950/22 dark:via-slate-950/80 dark:to-slate-950/70'
-      : overdueKind === 'all-day'
-        ? 'border-amber-200/90 bg-gradient-to-br from-white via-amber-50/82 to-white shadow-[0_24px_58px_-38px_rgba(245,158,11,0.36)] dark:border-amber-500/25 dark:from-amber-950/18 dark:via-slate-950/80 dark:to-slate-950/70'
-        : 'border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-50/88 dark:border-white/10 dark:from-slate-950/78 dark:via-slate-950/68 dark:to-white/[0.035]';
+      : overdueKind === 'timed'
+        ? 'border-rose-200/90 bg-gradient-to-br from-white via-rose-50/88 to-white shadow-[0_24px_58px_-38px_rgba(244,63,94,0.42)] dark:border-rose-500/25 dark:from-rose-950/22 dark:via-slate-950/80 dark:to-slate-950/70'
+        : overdueKind === 'all-day'
+          ? 'border-amber-200/90 bg-gradient-to-br from-white via-amber-50/82 to-white shadow-[0_24px_58px_-38px_rgba(245,158,11,0.36)] dark:border-amber-500/25 dark:from-amber-950/18 dark:via-slate-950/80 dark:to-slate-950/70'
+          : 'border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-50/88 dark:border-white/10 dark:from-slate-950/78 dark:via-slate-950/68 dark:to-white/[0.035]';
 
   const formatDate = () => {
     if (!date) return 'Sem início';
@@ -165,7 +166,8 @@ function TaskItemComponent({
       data-testid="task-item"
       data-task-id={task.id}
       data-task-title={task.title}
-      data-task-status={task.status}
+      data-task-status={derivedStatus}
+      data-raw-task-status={task.status}
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -261,7 +263,7 @@ function TaskItemComponent({
                   statusToneClass,
                 )}
               >
-                {isDraft ? <FileText size={12} /> : isInactive ? <BellOff size={12} /> : isCompleted ? <CheckCircle2 size={12} /> : isOverdue ? <AlertTriangle size={12} /> : <Circle size={12} />}
+                {isDraft ? <FileText size={12} /> : isCancelled ? <BellOff size={12} /> : isCompleted ? <CheckCircle2 size={12} /> : isOverdue ? <AlertTriangle size={12} /> : <Circle size={12} />}
                 {statusLabel}
               </span>
 
@@ -478,25 +480,5 @@ function TaskItemComponent({
   );
 }
 
-export const TaskItem = React.memo(
-  TaskItemComponent,
-  (prev, next) =>
-    prev.task.id === next.task.id &&
-    prev.task.title === next.task.title &&
-    prev.task.description === next.task.description &&
-    prev.task.dueDate === next.task.dueDate &&
-    prev.task.priority === next.task.priority &&
-    prev.task.category === next.task.category &&
-    JSON.stringify(prev.task.tags ?? []) === JSON.stringify(next.task.tags ?? []) &&
-    prev.task.status === next.task.status &&
-    prev.task.syncStatus === next.task.syncStatus &&
-    prev.task.externalCalendarSyncStatus === next.task.externalCalendarSyncStatus &&
-    prev.task.externalCalendarLastError === next.task.externalCalendarLastError &&
-    prev.showSelectionControl === next.showSelectionControl &&
-    prev.showToggleControl === next.showToggleControl &&
-    prev.compact === next.compact &&
-    prev.isDeleting === next.isDeleting &&
-    prev.isToggling === next.isToggling &&
-    prev.isSelected === next.isSelected,
-);
+export const TaskItem = TaskItemComponent;
 

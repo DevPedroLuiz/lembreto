@@ -2,7 +2,7 @@ name: Reminder Scheduler
 
 on:
   schedule:
-    - cron: "* * * * *"
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      APP_URL: ${{ secrets.APP_URL }}
+      APP_URL: https://lembreto.vercel.app
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
@@ -31,12 +31,64 @@ jobs:
       - name: Trigger notification processing
         shell: bash
         run: |
-          curl \
-            --fail-with-body \
-            --silent \
-            --show-error \
-            --retry 5 \
-            --retry-delay 3 \
-            --max-time 60 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$APP_URL/api/cron/notifications"
+          set +e
+
+          host="$(node -e "console.log(new URL(process.env.APP_URL).host)")"
+          response_file="$(mktemp)"
+          started_ms="$(date +%s%3N)"
+
+          echo "utc_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "event_name=${GITHUB_EVENT_NAME}"
+          echo "event_schedule=${{ github.event.schedule || 'manual' }}"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "app_host=${host}"
+
+          http_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --retry 2 \
+              --retry-delay 3 \
+              --max-time 25 \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$APP_URL/api/cron/notifications"
+          )"
+          curl_exit=$?
+          finished_ms="$(date +%s%3N)"
+          duration_ms=$((finished_ms - started_ms))
+
+          echo "http_status=${http_status}"
+          echo "response_ms=${duration_ms}"
+
+          if jq -e . "$response_file" >/dev/null 2>&1; then
+            jq -c '{
+              ok,
+              durationMs,
+              stoppedByTimeLimit,
+              hasMore,
+              schedules: {
+                fetched: (.schedules.fetched // .schedules.fetchedSchedules // 0),
+                processed: (.schedules.processed // .schedules.processedSchedules // 0),
+                sent: (.schedules.sent // .schedules.sentSchedules // 0),
+                failed: (.schedules.failed // .schedules.failedSchedules // 0)
+              },
+              sideEffects: {
+                fetched: (.sideEffects.fetched // 0),
+                done: (.sideEffects.done // 0),
+                failed: (.sideEffects.failed // 0)
+              },
+              scheduleDuePendingCount: (.scheduleDiagnostics.duePendingCount // null),
+              sideEffectDuePendingCount: (.sideEffectDiagnostics.duePendingCount // null)
+            }' "$response_file"
+          else
+            echo "::warning::cron response was not valid JSON"
+            head -c 500 "$response_file"
+            echo
+          fi
+
+          if [ "$curl_exit" -ne 0 ] || [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            echo "::error::Reminder Scheduler request failed"
+            exit 1
+          fi

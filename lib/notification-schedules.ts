@@ -987,13 +987,15 @@ async function backfillMissingPendingTaskSchedules(
   };
 }
 
-async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number) {
+async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number, options: { userId?: string } = {}) {
+  const userId = options.userId ?? null;
   const rows = await sql`
     WITH stuck AS (
       SELECT id
       FROM notification_schedules
       WHERE status = 'processing'
         AND processing_started_at < NOW() - INTERVAL '10 minutes'
+        AND (${userId} IS NULL OR user_id = ${userId})
       ORDER BY processing_started_at ASC NULLS FIRST, notify_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -1011,7 +1013,8 @@ async function reclaimStuckProcessingSchedules(sql: SqlClient, limit: number) {
   return rows.length;
 }
 
-async function claimDueSchedules(sql: SqlClient, limit: number) {
+async function claimDueSchedules(sql: SqlClient, limit: number, options: { userId?: string } = {}) {
+  const userId = options.userId ?? null;
   const rows = await sql`
     WITH due AS (
       SELECT id
@@ -1021,6 +1024,7 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
+        AND (${userId} IS NULL OR user_id = ${userId})
       ORDER BY notify_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -1049,7 +1053,8 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
   return rows.map(mapSchedule);
 }
 
-async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnostics> {
+async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string } = {}): Promise<ScheduleDiagnostics> {
+  const userId = options.userId ?? null;
   const [
     nowRows,
     pendingOverviewRows,
@@ -1078,11 +1083,13 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
         ) AS "futurePendingCount"
       FROM notification_schedules
       WHERE status = 'pending'
+        AND (${userId} IS NULL OR user_id = ${userId})
     `,
     sql`
       SELECT kind, COUNT(*) AS count
       FROM notification_schedules
       WHERE status = 'pending'
+        AND (${userId} IS NULL OR user_id = ${userId})
       GROUP BY kind
       ORDER BY kind ASC
     `,
@@ -1094,12 +1101,13 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
+        AND (${userId} IS NULL OR user_id = ${userId})
       GROUP BY kind
       ORDER BY kind ASC
     `,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing'`,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed'`,
-    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled'`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing' AND (${userId} IS NULL OR user_id = ${userId})`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed' AND (${userId} IS NULL OR user_id = ${userId})`,
+    sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled' AND (${userId} IS NULL OR user_id = ${userId})`,
     sql`
       SELECT
         id,
@@ -1113,6 +1121,7 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
         AND sent_at IS NULL
         AND failed_at IS NULL
         AND cancelled_at IS NULL
+        AND (${userId} IS NULL OR user_id = ${userId})
       ORDER BY notify_at ASC
       LIMIT 5
     `,
@@ -1527,6 +1536,7 @@ export async function processDueNotificationSchedules(
     ensureInfrastructure?: boolean;
     precomputedDiagnostics?: ScheduleDiagnostics;
     reclaimStuckProcessing?: boolean;
+    userId?: string;
   } = {},
 ): Promise<ProcessNotificationSchedulesSummary> {
   const startedAt = Date.now();
@@ -1542,8 +1552,8 @@ export async function processDueNotificationSchedules(
   }
   const reclaimedSchedules = options.reclaimStuckProcessing === false
     ? 0
-    : await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
-  const scheduleDiagnostics = options.precomputedDiagnostics ?? await getScheduleDiagnostics(sql);
+    : await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT, { userId: options.userId });
+  const scheduleDiagnostics = options.precomputedDiagnostics ?? await getScheduleDiagnostics(sql, { userId: options.userId });
   const outOfTimeBeforeClaim = Date.now() - startedAt >= maxDurationMs;
   if (outOfTimeBeforeClaim) {
     logWarn('cron_notifications_claim_skipped_by_time_limit', {
@@ -1556,7 +1566,7 @@ export async function processDueNotificationSchedules(
 
   const schedules = outOfTimeBeforeClaim
     ? []
-    : await claimDueSchedules(sql, processLimit);
+    : await claimDueSchedules(sql, processLimit, { userId: options.userId });
   const summary = createScheduleSummary({
     diagnostics: scheduleDiagnostics,
     reclaimedSchedules,

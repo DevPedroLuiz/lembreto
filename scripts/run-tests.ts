@@ -21,6 +21,7 @@ import {
   registerSchema,
   updateTaskSchema,
 } from '../lib/schemas.js';
+import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../src/lib/taskStatus.ts';
 
 process.env.JWT_SECRET ||= 'test-secret-with-at-least-thirty-two-characters';
 
@@ -52,8 +53,11 @@ function createNotificationScheduleSqlMock(options?: {
   taskDueMinutesFromNow?: number;
   failPushLookup?: boolean;
   slowPushLookupMs?: number;
+  scheduleUserId?: string;
+  existingNotification?: boolean;
 }) {
   const userId = '11111111-1111-4111-8111-111111111111';
+  const scheduleUserId = options?.scheduleUserId ?? userId;
   const taskId = '22222222-2222-4222-8222-222222222222';
   const scheduleId = '33333333-3333-4333-8333-333333333333';
   const now = new Date('2026-05-14T17:40:36.651Z');
@@ -64,7 +68,7 @@ function createNotificationScheduleSqlMock(options?: {
     : new Date(now.getTime() + options.taskDueMinutesFromNow * 60_000);
   const schedule = {
     id: scheduleId,
-    userId,
+    userId: scheduleUserId,
     taskId,
     kind,
     notifyAt: notifyAt.toISOString(),
@@ -72,7 +76,7 @@ function createNotificationScheduleSqlMock(options?: {
     title: kind === 'pre_notice' ? 'Lembrete em 15 minutos' : 'Esta na hora',
     message: kind === 'pre_notice' ? '"Teste" comeca em breve.' : '"Teste" chegou ao horario definido.',
     tone: 'info',
-    dedupeKey: `user:${userId}:task:${taskId}:${kind}:2026-05-14-17-39`,
+    dedupeKey: `user:${scheduleUserId}:task:${taskId}:${kind}:2026-05-14-17-39`,
     sequenceIndex: null,
     intervalMinutes: null,
     sentAt: null as string | null,
@@ -81,7 +85,27 @@ function createNotificationScheduleSqlMock(options?: {
     processingStartedAt: null as string | null,
     errorMessage: null as string | null,
   };
-  const notifications: Array<Record<string, unknown>> = [];
+  const notifications: Array<Record<string, unknown>> = options?.existingNotification
+    ? [{
+        id: '44444444-4444-4444-8444-444444444444',
+        userId: schedule.userId,
+        title: schedule.title,
+        message: schedule.message,
+        tone: schedule.tone,
+        targetType: 'task',
+        targetTaskId: schedule.taskId,
+        dedupeKey: schedule.dedupeKey,
+        sourceScheduleId: schedule.id,
+        kind: schedule.kind,
+        createdAt: now.toISOString(),
+        read: false,
+      }]
+    : [];
+
+  const matchesScheduleUserScope = (values: unknown[]) => {
+    const scopedUserId = values.find((value) => value === userId || value === schedule.userId);
+    return scopedUserId === undefined || scopedUserId === schedule.userId;
+  };
 
   const rowForSchedule = () => ({
     id: schedule.id,
@@ -114,6 +138,21 @@ function createNotificationScheduleSqlMock(options?: {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
 
+    if (query.includes('FROM token_blacklist')) {
+      return [];
+    }
+
+    if (query.includes('FROM users') && !query.includes('FROM tasks') && !query.includes('INNER JOIN users')) {
+      return values[0] === userId
+        ? [{
+            id: userId,
+            name: 'Pedro',
+            email: 'pedro@example.com',
+            avatar: null,
+          }]
+        : [];
+    }
+
     if (query.includes('SELECT NOW() AS "postgresNow"')) {
       return [{ postgresNow: now.toISOString() }];
     }
@@ -123,18 +162,19 @@ function createNotificationScheduleSqlMock(options?: {
         new Date(schedule.notifyAt) <= now &&
         schedule.sentAt === null &&
         schedule.failedAt === null &&
-        schedule.cancelledAt === null;
+        schedule.cancelledAt === null &&
+        matchesScheduleUserScope(values);
       return [{
-        oldestPendingNotifyAt: schedule.status === 'pending' ? schedule.notifyAt : null,
+        oldestPendingNotifyAt: schedule.status === 'pending' && matchesScheduleUserScope(values) ? schedule.notifyAt : null,
         duePendingCount: isDue ? 1 : 0,
-        futurePendingCount: schedule.status === 'pending' && !isDue ? 1 : 0,
+        futurePendingCount: schedule.status === 'pending' && matchesScheduleUserScope(values) && !isDue ? 1 : 0,
       }];
     }
 
     if (query.includes('SELECT COUNT(*) AS count FROM notification_schedules WHERE status =')) {
       const status = String(values[0] ?? '');
       const statusFromQuery = query.match(/status = '([^']+)'/)?.[1] ?? status;
-      return [{ count: schedule.status === statusFromQuery ? 1 : 0 }];
+      return [{ count: schedule.status === statusFromQuery && matchesScheduleUserScope(values) ? 1 : 0 }];
     }
 
     if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
@@ -144,7 +184,7 @@ function createNotificationScheduleSqlMock(options?: {
         schedule.sentAt === null &&
         schedule.failedAt === null &&
         schedule.cancelledAt === null;
-      if (schedule.status !== 'pending') return [];
+      if (schedule.status !== 'pending' || !matchesScheduleUserScope(values)) return [];
       if (isDueQuery && !isDue) return [];
       return [{ kind: schedule.kind, count: 1 }];
     }
@@ -155,7 +195,7 @@ function createNotificationScheduleSqlMock(options?: {
         schedule.sentAt === null &&
         schedule.failedAt === null &&
         schedule.cancelledAt === null;
-      return isDue
+      return isDue && matchesScheduleUserScope(values)
         ? [{
             id: schedule.id,
             kind: schedule.kind,
@@ -175,7 +215,8 @@ function createNotificationScheduleSqlMock(options?: {
         new Date(schedule.notifyAt) <= now &&
         schedule.sentAt === null &&
         schedule.failedAt === null &&
-        schedule.cancelledAt === null;
+        schedule.cancelledAt === null &&
+        matchesScheduleUserScope(values);
       if (!isDue) return [];
       schedule.status = 'processing';
       schedule.processingStartedAt = now.toISOString();
@@ -185,7 +226,7 @@ function createNotificationScheduleSqlMock(options?: {
     if (query.includes('FROM tasks') && query.includes('INNER JOIN users')) {
       return [{
         id: taskId,
-        userId,
+        userId: schedule.userId,
         title: 'Teste',
         description: '',
         dueDate: taskDueDate.toISOString(),
@@ -208,6 +249,12 @@ function createNotificationScheduleSqlMock(options?: {
     }
 
     if (query.includes('FROM notifications') && query.includes('WHERE user_id')) {
+      if (query.includes('ORDER BY created_at DESC')) {
+        return notifications
+          .filter((notification) => notification.userId === values[0])
+          .map(mapNotification);
+      }
+
       const dedupeKey = values.find((value) => value === schedule.dedupeKey);
       const sourceScheduleId = values.find((value) => value === schedule.id);
       const existing = notifications.find((notification) => (
@@ -725,6 +772,7 @@ async function main() {
     handleCalendarIntegrations,
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
+  const { handleNotificationProcessDue } = await import('../lib/handlers/notifications.js');
   const {
     backfillMissingNotificationSchedules,
     processDueNotificationSchedules,
@@ -913,6 +961,32 @@ async function main() {
     assert.equal(requiresWorkEndDateForStatus('cancelled'), false);
     assert.equal(requiresWorkEndDateForStatus('inactive'), false);
     assert.equal(requiresWorkEndDateForStatus('draft'), false);
+  });
+
+  await run('UI derived task status treats pending past due as overdue', () => {
+    const now = new Date('2026-05-15T12:00:00.000Z');
+
+    assert.equal(getDerivedTaskStatus({
+      status: 'pending',
+      dueDate: '2026-05-15T11:59:59.000Z',
+      deletedAt: null,
+    }, now), 'overdue');
+    assert.equal(getDerivedTaskStatus({
+      status: 'pending',
+      dueDate: '2026-05-15T12:05:00.000Z',
+      deletedAt: null,
+    }, now), 'pending');
+    assert.equal(getDerivedTaskStatus({
+      status: 'completed',
+      dueDate: '2026-05-15T11:59:59.000Z',
+      deletedAt: null,
+    }, now), 'completed');
+    assert.equal(getDerivedTaskStatus({
+      status: 'inactive',
+      dueDate: '2026-05-15T12:05:00.000Z',
+      deletedAt: null,
+    }, now), 'cancelled');
+    assert.equal(getDerivedTaskStatusLabel('overdue'), 'Atrasado');
   });
 
   await run('calendar export builds Google/Outlook compatible ICS', () => {
@@ -1170,6 +1244,68 @@ async function main() {
     assert.equal(schedule.sentAt, null);
   });
 
+  await run('authenticated fallback reflects due notification for logged user', async () => {
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock();
+    const token = signToken({ sub: schedule.userId, email: 'pedro@example.com' });
+    const response = await handleNotificationProcessDue({
+      sql,
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    const body = response.body as { ok: boolean; notifications: Array<Record<string, unknown>> };
+    assert.equal(body.ok, true);
+    assert.equal(notifications.length, 1);
+    assert.equal(body.notifications.length, 1);
+    assert.equal(body.notifications[0].sourceScheduleId, schedule.id);
+    assert.equal(schedule.status, 'sent');
+    assert.notEqual(schedule.sentAt, null);
+  });
+
+  await run('authenticated fallback does not duplicate existing notification', async () => {
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ existingNotification: true });
+    const token = signToken({ sub: schedule.userId, email: 'pedro@example.com' });
+    const response = await handleNotificationProcessDue({
+      sql,
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    const body = response.body as { ok: boolean; notifications: Array<Record<string, unknown>> };
+    assert.equal(body.ok, true);
+    assert.equal(notifications.length, 1);
+    assert.equal(body.notifications.length, 1);
+    assert.equal(body.notifications[0].sourceScheduleId, schedule.id);
+    assert.equal(schedule.status, 'sent');
+  });
+
+  await run('authenticated fallback does not process another user schedule', async () => {
+    const otherUserId = '99999999-9999-4999-8999-999999999999';
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ scheduleUserId: otherUserId });
+    const token = signToken({ sub: '11111111-1111-4111-8111-111111111111', email: 'pedro@example.com' });
+    const response = await handleNotificationProcessDue({
+      sql,
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    const body = response.body as { ok: boolean; notifications: Array<Record<string, unknown>> };
+    assert.equal(body.ok, true);
+    assert.equal(notifications.length, 0);
+    assert.equal(body.notifications.length, 0);
+    assert.equal(schedule.status, 'pending');
+    assert.equal(schedule.sentAt, null);
+  });
+
   await run('push failure does not block central notification or sent schedule', async () => {
     const previousPublicKey = process.env.VAPID_PUBLIC_KEY;
     const previousPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -1355,6 +1491,22 @@ async function main() {
     assert.equal(jobs.find((job) => job.kind === 'sync_notification_schedules')?.status, 'pending');
   });
 
+  await run('sync_external_calendar without active integration does not stay pending', async () => {
+    const { sql, jobs } = createTaskSideEffectsSqlMock({
+      includeExternalCalendarJob: true,
+      includeNotificationJob: false,
+      dueMinutesFromNow: 5,
+    });
+    const result = await processExternalCalendarSideEffects(sql, 1, 8000);
+    const job = jobs.find((item) => item.kind === 'sync_external_calendar');
+
+    assert.equal(result.scanned, 1);
+    assert.equal(result.synced, 1);
+    assert.equal(job?.status, 'done');
+    assert.notEqual(job?.doneAt, null);
+    assert.equal(job?.failedAt, null);
+  });
+
   await run('external calendar side effect timeout fails with clear error', async () => {
     const { sql, jobs, task } = createTaskSideEffectsSqlMock({
       includeExternalCalendarJob: true,
@@ -1405,6 +1557,24 @@ async function main() {
     assert.ok(cronHandler.includes('notificationSchedulesOnly: true'));
     assert.ok(cronHandler.includes('precomputedDiagnostics: preliminarySideEffectDiagnostics'));
     assert.ok(cronHandler.includes('backfillDiagnostics'));
+  });
+
+  await run('reminder scheduler workflow has safe logs and authenticated cron call', () => {
+    const workflow = readFileSync(new URL('../.github/workflows/reminder-scheduler.yml', import.meta.url), 'utf8');
+
+    assert.match(workflow, /cron: "2-59\/5 \* \* \* \*"/);
+    assert.match(workflow, /APP_URL: https:\/\/lembreto\.vercel\.app/);
+    assert.match(workflow, /CRON_SECRET: \$\{\{ secrets\.CRON_SECRET \}\}/);
+    assert.match(workflow, /Authorization: Bearer \$CRON_SECRET/);
+    assert.match(workflow, /utc_now=/);
+    assert.match(workflow, /event_name=/);
+    assert.match(workflow, /branch=/);
+    assert.match(workflow, /app_host=/);
+    assert.match(workflow, /http_status=/);
+    assert.match(workflow, /response_ms=/);
+    assert.match(workflow, /scheduleDuePendingCount/);
+    assert.doesNotMatch(workflow, /echo .*CRON_SECRET/);
+    assert.doesNotMatch(workflow, /set -x/);
   });
 
   await run('task creation enqueues notification schedule side effect before calendar sync', () => {

@@ -56,6 +56,7 @@ import {
   handleNotificationPushSubscriptions,
   handleNotificationSettings,
   handleNotificationMarkAllRead,
+  handleNotificationProcessDue,
 } from './lib/handlers/notifications.js';
 
 if (!process.env.DATABASE_URL) {
@@ -161,6 +162,7 @@ async function startServer() {
   app.post('/api/notifications', run(handleNotificationsCollection));
   app.delete('/api/notifications', run(handleNotificationsCollection));
   app.post('/api/notifications/mark-all-read', run(handleNotificationMarkAllRead));
+  app.post('/api/notifications/process-due', run(handleNotificationProcessDue));
   app.get('/api/notifications/settings', run(handleNotificationSettings));
   app.put('/api/notifications/settings', run(handleNotificationSettings));
   app.post('/api/notifications/push-subscriptions', run(handleNotificationPushSubscriptions));

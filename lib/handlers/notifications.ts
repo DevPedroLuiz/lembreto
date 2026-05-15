@@ -66,6 +66,8 @@ const OVERDUE_DURATION_MS = 3000;
 const CRON_DEADLINE_GUARD_MS = 500;
 const DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS = 3000;
 const DB_HEALTH_SLOW_THRESHOLD_MS = 1000;
+const USER_DUE_SCHEDULE_LIMIT = 5;
+const USER_DUE_SCHEDULE_DURATION_MS = 3500;
 
 type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
@@ -385,6 +387,49 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
   }
 
   return methodNotAllowed();
+}
+
+export async function handleNotificationProcessDue(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireNotificationAuth(context);
+  if ('status' in auth) return auth;
+
+  const { request, sql } = context;
+  const user = auth.user;
+
+  if (request.method !== 'POST') return methodNotAllowed();
+
+  try {
+    const schedules = await processDueNotificationSchedules(sql, USER_DUE_SCHEDULE_LIMIT, USER_DUE_SCHEDULE_DURATION_MS, {
+      ensureInfrastructure: false,
+      reclaimStuckProcessing: false,
+      userId: user.id,
+    });
+    const [notifications, enabled] = await Promise.all([
+      listNotificationsForUser(sql, user.id),
+      getNotificationsEnabled(sql, user.id),
+    ]);
+
+    logInfo('notifications_user_due_processed', getRequestMeta(request, {
+      userId: user.id,
+      fetched: schedules.fetchedSchedules,
+      processed: schedules.processedSchedules,
+      sent: schedules.sentSchedules,
+      failed: schedules.failedSchedules,
+      durationMs: schedules.durationMs,
+    }));
+
+    return json(200, {
+      ok: true,
+      schedules,
+      notifications,
+      enabled,
+      pushConfigured: isPushConfigured(),
+      pushPublicKey: getPushPublicKey(),
+    });
+  } catch (error) {
+    logError('notifications_user_due_process_failed', error, getRequestMeta(request, { userId: user.id }));
+    return json(500, { error: 'Erro ao processar notificações vencidas' });
+  }
 }
 
 export async function handleNotificationById(context: HandlerContext): Promise<HandlerResult> {

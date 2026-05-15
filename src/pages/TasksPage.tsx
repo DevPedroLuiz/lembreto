@@ -28,6 +28,7 @@ import { FilterTag } from '../components/FilterTag';
 import { HolidaysPanel } from '../components/HolidaysPanel';
 import { TaskItem } from '../components/TaskItem';
 import { LS } from '../lib/storage';
+import { getDerivedTaskStatus, type DerivedTaskStatus } from '../lib/taskStatus';
 import type { HolidayCalendarPayload, Priority, Task } from '../types';
 
 const PAGE_SIZE = 20;
@@ -35,7 +36,7 @@ const SEARCH_DEBOUNCE_MS = 200;
 
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
-type StatusFilter = 'all' | 'pending' | 'completed';
+type StatusFilter = 'all' | DerivedTaskStatus;
 type TagFilter = 'all' | string;
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
 export type TasksPageView = 'agenda' | 'holidays' | 'drafts';
@@ -57,7 +58,9 @@ const PRIORITY_FILTER_OPTIONS: Array<{ value: PriorityFilter; label: string }> =
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'Todos' },
   { value: 'pending', label: 'Pendentes' },
+  { value: 'overdue', label: 'Atrasados' },
   { value: 'completed', label: 'Concluídos' },
+  { value: 'cancelled', label: 'Cancelados' },
 ];
 
 const DATE_FILTER_OPTIONS: Array<{ value: DateFilterMode; label: string }> = [
@@ -86,7 +89,7 @@ function isPriorityFilter(value: unknown): value is PriorityFilter {
 }
 
 function isStatusFilter(value: unknown): value is StatusFilter {
-  return value === 'all' || value === 'pending' || value === 'completed';
+  return value === 'all' || value === 'pending' || value === 'overdue' || value === 'completed' || value === 'cancelled';
 }
 
 function isDateFilterMode(value: unknown): value is DateFilterMode {
@@ -714,12 +717,16 @@ export function TasksPage({
   );
 
   const visiblePendingTasks = React.useMemo(
-    () => (statusFilter === 'completed' ? [] : locallyFilteredPendingTasks),
+    () => {
+      if (statusFilter === 'completed') return [];
+      if (statusFilter === 'all') return locallyFilteredPendingTasks;
+      return locallyFilteredPendingTasks.filter((task) => getDerivedTaskStatus(task) === statusFilter);
+    },
     [locallyFilteredPendingTasks, statusFilter],
   );
 
   const visibleCompletedTasks = React.useMemo(
-    () => (statusFilter === 'pending' ? [] : locallyFilteredCompletedTasks),
+    () => (statusFilter === 'all' || statusFilter === 'completed' ? locallyFilteredCompletedTasks : []),
     [locallyFilteredCompletedTasks, statusFilter],
   );
 
@@ -1628,7 +1635,7 @@ export function TasksPage({
         <section className="surface-panel p-5 md:p-6">
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Lembretes pendentes</h4>
+              <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Lembretes em aberto</h4>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 {sortedPendingTasks.length} lembrete{sortedPendingTasks.length === 1 ? '' : 's'} em aberto
               </p>
@@ -1682,7 +1689,7 @@ export function TasksPage({
         </section>
       )}
 
-      {activeView === 'agenda' && showCompleted && statusFilter !== 'pending' && sortedCompletedTasks.length > 0 && (
+      {activeView === 'agenda' && showCompleted && (statusFilter === 'all' || statusFilter === 'completed') && sortedCompletedTasks.length > 0 && (
         <section className="surface-panel p-5 opacity-90 md:p-6">
           <div className="mb-5">
             <h4 className="text-lg font-semibold text-slate-900 dark:text-white">

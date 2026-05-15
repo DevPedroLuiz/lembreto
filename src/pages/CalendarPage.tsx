@@ -16,15 +16,16 @@ import {
   Tag,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { format, isPast, isToday, parseISO } from 'date-fns';
+import { format, isToday, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 import { TaskItem } from '../components/TaskItem';
 import { cn } from '../lib/cn';
 import { getTaskTimeLabel } from '../lib/taskDueDate';
+import { getDerivedTaskStatus, type DerivedTaskStatus } from '../lib/taskStatus';
 import type { Priority, Task } from '../types';
 
-type StatusFilter = 'all' | 'pending' | 'completed';
+type StatusFilter = 'all' | DerivedTaskStatus;
 type PriorityFilter = 'all' | Priority;
 type CalendarPanel = 'calendar' | 'filters';
 
@@ -57,7 +58,9 @@ const PRIORITY_STYLES: Record<Priority, string> = {
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'Todos' },
   { value: 'pending', label: 'Pendentes' },
+  { value: 'overdue', label: 'Atrasados' },
   { value: 'completed', label: 'Concluídos' },
+  { value: 'cancelled', label: 'Cancelados' },
 ];
 
 const PRIORITY_OPTIONS: Array<{ value: PriorityFilter; label: string }> = [
@@ -174,7 +177,7 @@ function matchesFilters(
     .toLocaleLowerCase('pt-BR');
 
   const matchesSearch = !normalizedSearch || haystack.includes(normalizedSearch);
-  const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+  const matchesStatus = statusFilter === 'all' || getDerivedTaskStatus(task) === statusFilter;
   const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
   const matchesCategory = categoryFilter === 'Todas' || task.category === categoryFilter;
   const matchesTag = tagFilter === 'Todas' || (task.tags ?? []).includes(tagFilter);
@@ -280,8 +283,9 @@ export function CalendarPage({
 
   const selectedDateKey = formatDateKey(selectedDate);
   const selectedTasks = tasksByDay.get(selectedDateKey) ?? [];
-  const selectedPendingCount = selectedTasks.filter((task) => task.status === 'pending').length;
-  const selectedCompletedCount = selectedTasks.filter((task) => task.status === 'completed').length;
+  const selectedPendingCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'pending').length;
+  const selectedOverdueCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
+  const selectedCompletedCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'completed').length;
   const monthPrefix = `${cursorDate.getFullYear()}-${`${cursorDate.getMonth() + 1}`.padStart(2, '0')}`;
   const monthTaskCount = filteredTasks.filter((task) => {
     const dueDate = parseTaskDate(task);
@@ -294,10 +298,7 @@ export function CalendarPage({
     const key = formatDateKey(dueDate);
     return key >= weekRange.start && key <= weekRange.end;
   }).length;
-  const overdueCount = filteredTasks.filter((task) => {
-    const dueDate = parseTaskDate(task);
-    return dueDate ? isPast(dueDate) && task.status === 'pending' : false;
-  }).length;
+  const overdueCount = filteredTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
   const activeFilterCount = [
     search.trim(),
     statusFilter !== 'all',
@@ -601,10 +602,7 @@ export function CalendarPage({
                 const dayTasks = tasksByDay.get(dayKey) ?? [];
                 const isCurrentMonth = day.getMonth() === cursorDate.getMonth();
                 const isSelected = dayKey === selectedDateKey;
-                const hasOverdue = dayTasks.some((task) => {
-                  const dueDate = parseTaskDate(task);
-                  return dueDate ? isPast(dueDate) && task.status === 'pending' : false;
-                });
+                const hasOverdue = dayTasks.some((task) => getDerivedTaskStatus(task) === 'overdue');
 
                 return (
                   <div
@@ -667,8 +665,10 @@ export function CalendarPage({
                             }}
                             className={cn(
                               'block w-full truncate rounded-lg border px-1.5 py-1 text-left text-[10px] font-semibold transition-transform hover:-translate-y-0.5 sm:text-[11px]',
-                              task.status === 'completed'
+                              getDerivedTaskStatus(task) === 'completed'
                                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700 line-through dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                                : getDerivedTaskStatus(task) === 'overdue'
+                                  ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
                                 : PRIORITY_STYLES[task.priority],
                             )}
                             title={task.title}
@@ -702,7 +702,8 @@ export function CalendarPage({
                   {formatSelectedDateLabel(selectedDate)}
                 </h3>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                  {selectedPendingCount} pendente{selectedPendingCount === 1 ? '' : 's'} e {selectedCompletedCount} concluído
+                  {selectedPendingCount} pendente{selectedPendingCount === 1 ? '' : 's'}, {selectedOverdueCount} atrasado
+                  {selectedOverdueCount === 1 ? '' : 's'} e {selectedCompletedCount} concluído
                   {selectedCompletedCount === 1 ? '' : 's'}.
                 </p>
               </div>

@@ -7,6 +7,7 @@ import {
   handleNotificationMarkAllRead,
   handleNotificationPushSubscriptions,
   handleNotificationSettings,
+  handleNotificationProcessDue,
   handleNotificationsCollection,
 } from '../lib/handlers/notifications.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
@@ -33,6 +34,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'mark-all-read') {
       return handleNotificationMarkAllRead({ sql, request });
+    }
+
+    if (action === 'process-due') {
+      return handleNotificationProcessDue({ sql, request });
     }
 
     if (action === 'alarm-snooze') {

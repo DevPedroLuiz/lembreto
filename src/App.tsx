@@ -40,6 +40,7 @@ import {
   normalizeNoTimeReminderMinutes,
   parseDueDateToForm,
 } from './lib/taskDueDate';
+import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from './lib/taskStatus';
 import {
   buildRecurringDates,
   countDateKeyMatches,
@@ -208,13 +209,7 @@ function buildTaskShareMessage(task: Task): string {
   const timeLabel = getTaskTimeLabel(task.dueDate);
   const endTimeLabel = task.endDate ? getTaskTimeLabel(task.endDate) : null;
   const timeRangeLabel = timeLabel && endTimeLabel ? `${timeLabel} - ${endTimeLabel}` : timeLabel;
-  const statusLabel = task.status === 'completed'
-    ? 'Concluído'
-    : task.status === 'draft'
-      ? 'Rascunho'
-      : task.status === 'inactive'
-        ? 'Desativado'
-        : 'Pendente';
+  const statusLabel = getDerivedTaskStatusLabel(getDerivedTaskStatus(task));
 
   return [
     `Lembrete: ${task.title}`,
@@ -339,6 +334,7 @@ export default function App() {
     pushPublicKey,
     loaded: notificationsLoaded,
     refreshNotifications,
+    processDueNotifications,
     createNotification,
     markNotificationRead,
     markAllRead,
@@ -454,6 +450,7 @@ export default function App() {
   const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
+  const dueNotificationFallbackInFlightRef = useRef(false);
   const previousPendingOfflineTaskCountRef = useRef(0);
   const seenPushKeysRef = useRef<Set<string>>(new Set());
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
@@ -655,6 +652,36 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [auth.token, refreshNotifications]);
+
+  useEffect(() => {
+    if (!auth.token || !notificationsEnabled) return undefined;
+
+    const runFallback = () => {
+      if (dueNotificationFallbackInFlightRef.current) return;
+      dueNotificationFallbackInFlightRef.current = true;
+
+      void processDueNotifications(auth.token)
+        .catch(() => {
+          // keep local state as-is when the authenticated due-notification fallback fails
+        })
+        .finally(() => {
+          dueNotificationFallbackInFlightRef.current = false;
+        });
+    };
+
+    runFallback();
+    const intervalId = window.setInterval(runFallback, 30000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') runFallback();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [auth.token, notificationsEnabled, processDueNotifications]);
 
   useEffect(() => () => {
     if (profileCloseTimerRef.current) {
@@ -2374,9 +2401,16 @@ export default function App() {
     }
   }, [auth.updateProfile, emitNotification, isProfileSubmitting, profAvatar, profEmail, profName, profPassword]);
 
+  const derivedStatusNow = useMemo(() => new Date(notificationClock), [notificationClock]);
+
   const pendingTasks = useMemo(
-    () => tasks.filter((task) => task.status === 'pending' || task.status === 'overdue'),
-    [tasks]
+    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'pending'),
+    [derivedStatusNow, tasks]
+  );
+
+  const overdueTasks = useMemo(
+    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'overdue'),
+    [derivedStatusNow, tasks]
   );
 
   const draftTasks = useMemo(
@@ -2389,42 +2423,30 @@ export default function App() {
     [tasks]
   );
 
-  const pendingAndInactiveTasks = useMemo(
-    () => [...pendingTasks, ...inactiveTasks],
-    [inactiveTasks, pendingTasks]
+  const cancelledTasks = useMemo(
+    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'cancelled' && task.status !== 'inactive'),
+    [derivedStatusNow, tasks]
+  );
+
+  const taskListRows = useMemo(
+    () => [...overdueTasks, ...pendingTasks, ...inactiveTasks, ...cancelledTasks],
+    [cancelledTasks, inactiveTasks, overdueTasks, pendingTasks]
   );
 
   const calendarTasks = useMemo(
-    () => tasks.filter((task) => task.status !== 'draft' && task.status !== 'inactive'),
+    () => tasks.filter((task) => task.status !== 'draft'),
     [tasks]
   );
 
-  const dashboardTasks = calendarTasks;
+  const dashboardTasks = useMemo(
+    () => calendarTasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) !== 'cancelled'),
+    [calendarTasks, derivedStatusNow]
+  );
 
   const completedTasks = useMemo(
-    () => tasks.filter((task) => task.status === 'completed'),
-    [tasks]
+    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'completed'),
+    [derivedStatusNow, tasks]
   );
-
-  const pendingSummary = useMemo(() => {
-    return pendingTasks.reduce(
-      (summary, task) => {
-        try {
-          const dueDate = parseISO(task.dueDate);
-          if (isPast(dueDate)) {
-            summary.overdueCount += 1;
-          } else if (isToday(dueDate)) {
-            summary.todayCount += 1;
-          }
-        } catch {
-          // ignore malformed dates in summary
-        }
-
-        return summary;
-      },
-      { todayCount: 0, overdueCount: 0 }
-    );
-  }, [pendingTasks]);
 
   const todayTasks = useMemo(() => {
     return pendingTasks.filter((task) => {
@@ -2447,16 +2469,10 @@ export default function App() {
     });
   }, [pendingTasks]);
 
-  const overdueTasks = useMemo(() => {
-    return pendingTasks.filter((task) => {
-      try {
-        const dueDate = parseISO(task.dueDate);
-        return isPast(dueDate);
-      } catch {
-        return false;
-      }
-    });
-  }, [pendingTasks]);
+  const pendingSummary = useMemo(() => ({
+    todayCount: todayTasks.length,
+    overdueCount: overdueTasks.length,
+  }), [overdueTasks.length, todayTasks.length]);
 
   const timedPendingTasks = useMemo(() => {
     return pendingTasks.filter((task) => Boolean(getTaskTimeLabel(task.dueDate)));
@@ -3178,7 +3194,7 @@ export default function App() {
         filterCategory={filterCategory}
         setFilterCategory={setFilterCategory}
         categories={categoryOptions}
-        pendingTasks={pendingAndInactiveTasks}
+        pendingTasks={pendingTasks}
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
@@ -3336,6 +3352,7 @@ export default function App() {
                 <DashboardPage
                   tasks={dashboardTasks}
                   pendingTasks={pendingTasks}
+                  overdueTasks={overdueTasks}
                   completedTasks={completedTasks}
                   todayCount={pendingSummary.todayCount}
                   overdueCount={pendingSummary.overdueCount}
@@ -3367,7 +3384,7 @@ export default function App() {
               )}
               {activeTab === 'tasks' && (
                 <TasksPage
-                  pendingTasks={pendingAndInactiveTasks}
+                  pendingTasks={taskListRows}
                   completedTasks={completedTasks}
                   categories={categoryOptions}
                   tags={tagOptions}
