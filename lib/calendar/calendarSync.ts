@@ -174,8 +174,18 @@ export function toPublicIntegrations(rows: CalendarIntegration[]): PublicCalenda
   });
 }
 
-export async function listCalendarIntegrations(sql: SqlClient, userId: string): Promise<CalendarIntegration[]> {
-  await ensureCalendarIntegrationSchema(sql);
+type CalendarInfrastructureOptions = {
+  ensureInfrastructure?: boolean;
+};
+
+export async function listCalendarIntegrations(
+  sql: SqlClient,
+  userId: string,
+  options: CalendarInfrastructureOptions = {},
+): Promise<CalendarIntegration[]> {
+  if (options.ensureInfrastructure !== false) {
+    await ensureCalendarIntegrationSchema(sql);
+  }
   const rows = await sql`
     SELECT
       id,
@@ -201,8 +211,9 @@ export async function getCalendarIntegration(
   sql: SqlClient,
   userId: string,
   provider: CalendarProvider,
+  options: CalendarInfrastructureOptions = {},
 ): Promise<CalendarIntegration | null> {
-  const rows = await listCalendarIntegrations(sql, userId);
+  const rows = await listCalendarIntegrations(sql, userId, options);
   return rows.find((row) => row.provider === provider) ?? null;
 }
 
@@ -394,8 +405,11 @@ export async function getTaskForCalendarSync(
   sql: SqlClient,
   userId: string,
   taskId: string,
+  options: CalendarInfrastructureOptions = {},
 ): Promise<CalendarTaskForSync | null> {
-  await ensureCalendarIntegrationSchema(sql);
+  if (options.ensureInfrastructure !== false) {
+    await ensureCalendarIntegrationSchema(sql);
+  }
   const rows = await sql`
     SELECT
       id,
@@ -446,8 +460,11 @@ export async function syncTaskToExternalCalendar(input: {
   taskId: string;
   provider?: CalendarProvider;
   force?: boolean;
+  ensureInfrastructure?: boolean;
 }): Promise<{ ok: boolean; provider: CalendarProvider | null; error?: string }> {
-  const task = await getTaskForCalendarSync(input.sql, input.userId, input.taskId);
+  const task = await getTaskForCalendarSync(input.sql, input.userId, input.taskId, {
+    ensureInfrastructure: input.ensureInfrastructure,
+  });
   if (!task) return { ok: false, provider: null, error: 'Lembrete não encontrado' };
 
   const eventInput = buildCalendarEventInput(task);
@@ -457,11 +474,14 @@ export async function syncTaskToExternalCalendar(input: {
       userId: input.userId,
       task,
       clearLocalState: true,
+      ensureInfrastructure: input.ensureInfrastructure,
     });
     return { ok: true, provider: null };
   }
 
-  const integrations = await listCalendarIntegrations(input.sql, input.userId);
+  const integrations = await listCalendarIntegrations(input.sql, input.userId, {
+    ensureInfrastructure: input.ensureInfrastructure,
+  });
   const integration = input.provider
     ? integrations.find((item) => item.provider === input.provider)
     : (
@@ -986,15 +1006,22 @@ export async function removeTaskFromExternalCalendar(input: {
   task?: CalendarTaskForSync | null;
   taskId?: string;
   clearLocalState?: boolean;
+  ensureInfrastructure?: boolean;
 }): Promise<{ ok: boolean; provider: CalendarProvider | null; error?: string }> {
   const task = input.task ?? (
-    input.taskId ? await getTaskForCalendarSync(input.sql, input.userId, input.taskId) : null
+    input.taskId
+      ? await getTaskForCalendarSync(input.sql, input.userId, input.taskId, {
+          ensureInfrastructure: input.ensureInfrastructure,
+        })
+      : null
   );
   if (!task?.externalCalendarProvider || !task.externalCalendarEventId) {
     return { ok: true, provider: null };
   }
 
-  const integration = await getCalendarIntegration(input.sql, input.userId, task.externalCalendarProvider);
+  const integration = await getCalendarIntegration(input.sql, input.userId, task.externalCalendarProvider, {
+    ensureInfrastructure: input.ensureInfrastructure,
+  });
   if (!integration) {
     return { ok: true, provider: task.externalCalendarProvider };
   }

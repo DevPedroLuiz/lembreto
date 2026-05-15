@@ -1,7 +1,6 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
 import { getDatabaseConnectionMetadata } from '../db.js';
 import { logError, logInfo, logWarn } from '../logger.js';
-import { processPendingCalendarSyncs } from '../calendar/calendarSync.js';
 import {
   clearNotificationsForUser,
   createNotification,
@@ -26,6 +25,7 @@ import {
   snoozeAlarmSchedule,
 } from '../notification-schedules.js';
 import {
+  processExternalCalendarSideEffects,
   processTaskSideEffects,
   type ProcessTaskSideEffectsSummary,
   type SideEffectDiagnostics,
@@ -39,6 +39,10 @@ import {
   updateNotificationSettingsSchema,
   snoozeAlarmSchema,
 } from '../schemas.js';
+import {
+  NOTIFICATION_SCHEDULE_KINDS,
+  type NotificationScheduleKind,
+} from '../contracts.js';
 import {
   empty,
   type HandlerContext,
@@ -66,7 +70,7 @@ const DB_HEALTH_SLOW_THRESHOLD_MS = 1000;
 type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
 };
-type CalendarSyncSummary = Awaited<ReturnType<typeof processPendingCalendarSyncs>>;
+type CalendarSyncSummary = Awaited<ReturnType<typeof processExternalCalendarSideEffects>>;
 type OverdueDetectionSummary = Awaited<ReturnType<typeof detectOverdueNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
 };
@@ -97,6 +101,7 @@ type CronDbHealth = {
     taskSideEffectsNotificationDue: number | null;
     schedulesPending: number | null;
     schedulesDue: number | null;
+    schedulesDueByKind: ScheduleKindCounts;
     tasksPending: number | null;
     overdueCandidates: number | null;
   };
@@ -113,13 +118,15 @@ type LockDiagnostics = {
   error?: string;
 };
 
+type ScheduleKindCounts = Record<NotificationScheduleKind, number>;
+
 const EMPTY_SCHEDULE_DIAGNOSTICS: ScheduleDiagnostics = {
   postgresNow: null,
   oldestPendingNotifyAt: null,
   duePendingCount: 0,
   futurePendingCount: 0,
-  pendingByKind: {},
-  dueByKind: {},
+  pendingByKind: emptyScheduleKindCounts(),
+  dueByKind: emptyScheduleKindCounts(),
   processingCount: 0,
   failedCount: 0,
   cancelledCount: 0,
@@ -153,6 +160,17 @@ function getCronResponseBudgetMs() {
 function getDbHealthQueryTimeoutMs() {
   const configured = Number(process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS ?? DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS;
+}
+
+function emptyScheduleKindCounts(): ScheduleKindCounts {
+  return Object.fromEntries(NOTIFICATION_SCHEDULE_KINDS.map((kind) => [kind, 0])) as ScheduleKindCounts;
+}
+
+function withAllScheduleKinds(counts: Record<string, number>): ScheduleKindCounts {
+  return {
+    ...emptyScheduleKindCounts(),
+    ...counts,
+  };
 }
 
 function timeoutFallback<T>(fallback: T, stage: string, timeoutMs: number): T {
@@ -207,6 +225,7 @@ function fallbackSchedules(durationMs = 0): ProcessNotificationSchedulesSummary 
     failed: 0,
     cancelled: 0,
     scheduleDiagnostics: EMPTY_SCHEDULE_DIAGNOSTICS,
+    schedulesByKindProcessed: emptyScheduleKindCounts(),
   };
 }
 
@@ -248,6 +267,7 @@ function fallbackCalendarSync(durationMs = 0): CalendarSyncSummary {
     failed: 0,
     stoppedByTimeLimit: true,
     durationMs,
+    sideEffects: fallbackSideEffects(durationMs),
   };
 }
 
@@ -605,6 +625,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     taskSideEffectsNotificationDue: null,
     schedulesPending: null,
     schedulesDue: null,
+    schedulesDueByKind: emptyScheduleKindCounts(),
     tasksPending: null,
     overdueCandidates: null,
   };
@@ -630,6 +651,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     steps.taskSideEffectsNotificationDue = skippedStep();
     steps.schedulesPending = skippedStep();
     steps.schedulesDue = skippedStep();
+    steps.schedulesDueByKind = skippedStep();
     steps.tasksPending = skippedStep();
     steps.overdueCandidates = skippedStep();
     return {
@@ -706,12 +728,34 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
       WHERE status = 'pending'
         AND notify_at <= NOW()
         AND sent_at IS NULL
+        AND failed_at IS NULL
         AND cancelled_at IS NULL
     `,
   );
   steps.schedulesDue = schedulesDue.step;
   db.schedulesDueMs = schedulesDue.step.durationMs;
   counts.schedulesDue = schedulesDue.step.ok ? toCount(schedulesDue.rows[0]?.count) : null;
+
+  const schedulesDueByKind = await measureQuery(
+    'notification_schedules_due_by_kind',
+    () => sql`
+      SELECT kind, COUNT(*) AS count
+      FROM notification_schedules
+      WHERE status = 'pending'
+        AND notify_at <= NOW()
+        AND sent_at IS NULL
+        AND failed_at IS NULL
+        AND cancelled_at IS NULL
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+  );
+  steps.schedulesDueByKind = schedulesDueByKind.step;
+  if (schedulesDueByKind.step.ok) {
+    counts.schedulesDueByKind = withAllScheduleKinds(
+      Object.fromEntries(schedulesDueByKind.rows.map((row) => [String(row.kind), toCount(row.count)])),
+    );
+  }
 
   const tasksPending = await measureQuery(
     'tasks_pending',
@@ -810,8 +854,8 @@ function buildPreliminaryScheduleDiagnostics(dbHealth: CronDbHealth): ScheduleDi
     oldestPendingNotifyAt: null,
     duePendingCount: due,
     futurePendingCount: Math.max(0, pending - due),
-    pendingByKind: {},
-    dueByKind: {},
+    pendingByKind: emptyScheduleKindCounts(),
+    dueByKind: dbHealth.counts.schedulesDueByKind,
     processingCount: 0,
     failedCount: 0,
     cancelledCount: 0,
@@ -848,6 +892,7 @@ function calendarSyncDisabledSummary(reason = 'disabled_in_notification_cron'): 
     failed: 0,
     stoppedByTimeLimit: false,
     durationMs: 0,
+    sideEffects: fallbackSideEffects(0),
     skippedReason: reason,
   };
 }
@@ -941,6 +986,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
         durationMs: 0,
         stoppedByTimeLimit: false,
         hasMore: true,
+        schedulesByKindProcessed: emptyScheduleKindCounts(),
         skippedReason: 'db_health_unavailable',
       };
       const sideEffects = {
@@ -1028,6 +1074,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           failed: 0,
           cancelled: 0,
           scheduleDiagnostics: preliminaryScheduleDiagnostics,
+          schedulesByKindProcessed: emptyScheduleKindCounts(),
         };
     if (!hasDueSchedules) {
       logInfo('cron_notifications_schedules_skipped_no_due', getRequestMeta(request, {
@@ -1070,17 +1117,26 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           );
         })()
       : maintenanceStageDisabledSummary(0, dbHealthMaintenanceSkipReason);
-    const calendarSync = process.env.CRON_ENABLE_CALENDAR_SYNC === 'true' && !dbHealth.slow && hasCronBudget(deadline)
+    const hasDueExternalCalendarSideEffects = (
+      (preliminarySideEffectDiagnostics.dueByKind.sync_external_calendar ?? 0) +
+      (preliminarySideEffectDiagnostics.dueByKind.delete_external_calendar_event ?? 0)
+    ) > 0;
+    const externalCalendarSkipReason = dbHealth.slow
+      ? 'db_health_slow'
+      : hasDueExternalCalendarSideEffects
+        ? 'time_limit'
+        : 'no_external_calendar_side_effects_due';
+    const calendarSync = hasDueExternalCalendarSideEffects && !dbHealth.slow && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, CALENDAR_SYNC_DURATION_MS);
           return withTimeout(
-            processPendingCalendarSyncs(sql, CALENDAR_SYNC_LIMIT, budgetMs),
+            processExternalCalendarSideEffects(sql, CALENDAR_SYNC_LIMIT, budgetMs),
             budgetMs,
             fallbackCalendarSync(budgetMs),
-            'processPendingCalendarSyncs',
+            'processExternalCalendarSideEffects',
           );
         })()
-      : calendarSyncDisabledSummary(dbHealthMaintenanceSkipReason);
+      : calendarSyncDisabledSummary(externalCalendarSkipReason);
     const overdueDetection = hasOverdueCandidates && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
@@ -1139,6 +1195,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       durationMs: scheduleDurationMs,
       stoppedByTimeLimit: scheduleStoppedByTimeLimit,
       hasMore: scheduleHasMore,
+      schedulesByKindProcessed: result.schedulesByKindProcessed,
     };
     logInfo('cron_notifications_completed', getRequestMeta(request, {
       durationMs,

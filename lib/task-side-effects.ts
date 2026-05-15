@@ -52,9 +52,20 @@ export interface ProcessTaskSideEffectsSummary {
   sideEffectDiagnostics: SideEffectDiagnostics;
 }
 
+export interface ExternalCalendarSideEffectsSummary {
+  scanned: number;
+  synced: number;
+  skipped: number;
+  failed: number;
+  stoppedByTimeLimit: boolean;
+  durationMs: number;
+  sideEffects: ProcessTaskSideEffectsSummary;
+}
+
 const TASK_SIDE_EFFECT_LIMIT = 10;
 const MAX_SIDE_EFFECT_DURATION_MS = 10000;
 const SIDE_EFFECT_JOB_TIMEOUT_MS = 3000;
+const EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS = 2500;
 const STUCK_SIDE_EFFECT_RECLAIM_LIMIT = 10;
 const MAX_SIDE_EFFECT_ATTEMPTS = 5;
 
@@ -261,13 +272,21 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
   };
 }
 
-async function reclaimStuckProcessingSideEffects(sql: SqlClient, limit: number) {
+async function reclaimStuckProcessingSideEffects(
+  sql: SqlClient,
+  limit: number,
+  options: { externalCalendarOnly?: boolean } = {},
+) {
   const rows = await sql`
     WITH stuck AS (
       SELECT id
       FROM task_side_effects
       WHERE status = 'processing'
         AND processing_started_at < NOW() - INTERVAL '10 minutes'
+        AND (
+          ${Boolean(options.externalCalendarOnly)} = FALSE
+          OR kind IN ('sync_external_calendar', 'delete_external_calendar_event')
+        )
       ORDER BY processing_started_at ASC NULLS FIRST, available_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -286,7 +305,11 @@ async function reclaimStuckProcessingSideEffects(sql: SqlClient, limit: number) 
   return rows.length;
 }
 
-async function claimDueSideEffects(sql: SqlClient, limit: number, options: { notificationSchedulesOnly?: boolean } = {}) {
+async function claimDueSideEffects(
+  sql: SqlClient,
+  limit: number,
+  options: { notificationSchedulesOnly?: boolean; externalCalendarOnly?: boolean } = {},
+) {
   const rows = await sql`
     WITH due AS (
       SELECT id
@@ -297,6 +320,10 @@ async function claimDueSideEffects(sql: SqlClient, limit: number, options: { not
         AND (
           ${Boolean(options.notificationSchedulesOnly)} = FALSE
           OR kind IN ('sync_notification_schedules', 'cancel_notification_schedules')
+        )
+        AND (
+          ${Boolean(options.externalCalendarOnly)} = FALSE
+          OR kind IN ('sync_external_calendar', 'delete_external_calendar_event')
         )
       ORDER BY
         CASE kind
@@ -358,6 +385,36 @@ function getRetryAvailableAt(attemptsBeforeFailure: number) {
   const nextAttempt = attemptsBeforeFailure + 1;
   const backoffMinutes = Math.min(30, 2 ** Math.max(0, nextAttempt - 1));
   return new Date(Date.now() + backoffMinutes * 60 * 1000);
+}
+
+function isExternalCalendarSideEffect(kind: TaskSideEffectKind) {
+  return kind === 'sync_external_calendar' || kind === 'delete_external_calendar_event';
+}
+
+function getJobTimeoutMs(job: TaskSideEffectJob) {
+  return isExternalCalendarSideEffect(job.kind)
+    ? EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS
+    : SIDE_EFFECT_JOB_TIMEOUT_MS;
+}
+
+function getJobTimeoutError(job: TaskSideEffectJob, timeoutMs: number) {
+  if (job.kind === 'sync_external_calendar') return `sync_external_calendar_timeout_after_${timeoutMs}ms`;
+  if (job.kind === 'delete_external_calendar_event') return `delete_external_calendar_event_timeout_after_${timeoutMs}ms`;
+  return 'side_effect_job_timeout';
+}
+
+async function markExternalCalendarTaskSyncFailed(sql: SqlClient, job: TaskSideEffectJob, message: string) {
+  if (job.kind !== 'sync_external_calendar') return;
+
+  await sql`
+    UPDATE tasks
+    SET
+      external_calendar_sync_status = 'failed',
+      external_calendar_last_error = ${message},
+      external_calendar_synced_at = NULL
+    WHERE id = ${job.taskId}
+      AND user_id = ${job.userId}
+  `;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
@@ -450,6 +507,7 @@ async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob): 
       sql,
       userId: job.userId,
       taskId: job.taskId,
+      ensureInfrastructure: false,
     });
     if (!result.ok) throw new Error(result.error ?? 'Falha ao sincronizar calendario externo');
     return;
@@ -460,6 +518,7 @@ async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob): 
     userId: job.userId,
     taskId: job.taskId,
     clearLocalState: true,
+    ensureInfrastructure: false,
   });
   if (!result.ok) throw new Error(result.error ?? 'Falha ao remover evento externo');
 }
@@ -471,6 +530,7 @@ export async function processTaskSideEffects(
   options: {
     ensureInfrastructure?: boolean;
     notificationSchedulesOnly?: boolean;
+    externalCalendarOnly?: boolean;
     precomputedDiagnostics?: SideEffectDiagnostics;
   } = {},
 ): Promise<ProcessTaskSideEffectsSummary> {
@@ -483,7 +543,9 @@ export async function processTaskSideEffects(
   }
   const reclaimed = options.notificationSchedulesOnly
     ? 0
-    : await reclaimStuckProcessingSideEffects(sql, STUCK_SIDE_EFFECT_RECLAIM_LIMIT);
+    : await reclaimStuckProcessingSideEffects(sql, STUCK_SIDE_EFFECT_RECLAIM_LIMIT, {
+        externalCalendarOnly: options.externalCalendarOnly,
+      });
   if (reclaimed > 0) {
     logWarn('task_side_effects_reclaimed', { reclaimed });
   }
@@ -491,6 +553,7 @@ export async function processTaskSideEffects(
   const sideEffectDiagnostics = options.precomputedDiagnostics ?? await getSideEffectDiagnostics(sql);
   const jobs = await claimDueSideEffects(sql, processLimit, {
     notificationSchedulesOnly: options.notificationSchedulesOnly,
+    externalCalendarOnly: options.externalCalendarOnly,
   });
   const summary: ProcessTaskSideEffectsSummary = {
     fetched: jobs.length,
@@ -524,17 +587,22 @@ export async function processTaskSideEffects(
     }
 
     try {
+      const jobTimeoutMs = Math.min(remainingMs, getJobTimeoutMs(job));
       const message = await withTimeout(
         processSingleSideEffect(sql, job),
-        Math.min(remainingMs, SIDE_EFFECT_JOB_TIMEOUT_MS),
-        'side_effect_job_timeout',
+        jobTimeoutMs,
+        getJobTimeoutError(job, jobTimeoutMs),
       );
       await updateJobStatus(sql, job.id, 'done', message);
       summary.done += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
       const attemptsAfterFailure = job.attempts + 1;
-      if (attemptsAfterFailure >= MAX_SIDE_EFFECT_ATTEMPTS) {
+      const failImmediately = isExternalCalendarSideEffect(job.kind);
+      if (failImmediately && job.kind === 'sync_external_calendar') {
+        await markExternalCalendarTaskSyncFailed(sql, job, message);
+      }
+      if (failImmediately || attemptsAfterFailure >= MAX_SIDE_EFFECT_ATTEMPTS) {
         await updateJobStatus(sql, job.id, 'failed', message);
         summary.failed += 1;
       } else {
@@ -548,6 +616,7 @@ export async function processTaskSideEffects(
         jobId: job.id,
         kind: job.kind,
         attempts: attemptsAfterFailure,
+        finalStatus: failImmediately || attemptsAfterFailure >= MAX_SIDE_EFFECT_ATTEMPTS ? 'failed' : 'pending',
       });
     } finally {
       summary.processed += 1;
@@ -569,4 +638,25 @@ export async function processTaskSideEffects(
   logInfo('side-effects:duration-ms', { durationMs: summary.durationMs });
 
   return summary;
+}
+
+export async function processExternalCalendarSideEffects(
+  sql: SqlClient,
+  limit = 1,
+  maxDurationMs = 3000,
+): Promise<ExternalCalendarSideEffectsSummary> {
+  const sideEffects = await processTaskSideEffects(sql, limit, maxDurationMs, {
+    ensureInfrastructure: false,
+    externalCalendarOnly: true,
+  });
+
+  return {
+    scanned: sideEffects.fetched,
+    synced: sideEffects.done,
+    skipped: 0,
+    failed: sideEffects.failed,
+    stoppedByTimeLimit: sideEffects.stoppedByTimeLimit,
+    durationMs: sideEffects.durationMs,
+    sideEffects,
+  };
 }

@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import {
+  NOTIFICATION_SCHEDULE_KINDS,
   type NotificationScheduleKind,
   type NotificationScheduleStatus,
   type NotificationTone,
@@ -68,6 +69,16 @@ interface ScheduleRow {
   intervalMinutes: number | null;
 }
 
+type ScheduleKindCounts = Record<NotificationScheduleKind, number>;
+
+interface DueScheduleSample {
+  id: string;
+  kind: NotificationScheduleKind;
+  notifyAt: string;
+  status: string;
+  taskId: string;
+}
+
 export interface ScheduleDiagnostics {
   postgresNow: string | null;
   oldestPendingNotifyAt: string | null;
@@ -78,6 +89,7 @@ export interface ScheduleDiagnostics {
   processingCount: number;
   failedCount: number;
   cancelledCount: number;
+  sampleDueSchedules?: DueScheduleSample[];
 }
 
 export interface ProcessNotificationSchedulesSummary {
@@ -98,6 +110,7 @@ export interface ProcessNotificationSchedulesSummary {
   failed: number;
   cancelled: number;
   scheduleDiagnostics: ScheduleDiagnostics;
+  schedulesByKindProcessed: ScheduleKindCounts;
 }
 
 export interface BackfillDiagnostics {
@@ -171,6 +184,17 @@ function toCount(value: unknown): number {
 
 function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, number> {
   return Object.fromEntries(rows.map((row) => [String(row.kind), toCount(row.count)]));
+}
+
+function emptyScheduleKindCounts(): ScheduleKindCounts {
+  return Object.fromEntries(NOTIFICATION_SCHEDULE_KINDS.map((kind) => [kind, 0])) as ScheduleKindCounts;
+}
+
+function withAllScheduleKinds(counts: Record<string, number>): ScheduleKindCounts {
+  return {
+    ...emptyScheduleKindCounts(),
+    ...counts,
+  };
 }
 
 function isSchedulableStatus(status: string): boolean {
@@ -995,6 +1019,7 @@ async function claimDueSchedules(sql: SqlClient, limit: number) {
       WHERE status = 'pending'
         AND notify_at <= NOW()
         AND sent_at IS NULL
+        AND failed_at IS NULL
         AND cancelled_at IS NULL
       ORDER BY notify_at ASC
       LIMIT ${limit}
@@ -1033,6 +1058,7 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
     processingRows,
     failedRows,
     cancelledRows,
+    sampleDueRows,
   ] = await Promise.all([
     sql`SELECT NOW() AS "postgresNow"`,
     sql`
@@ -1041,11 +1067,13 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
         COUNT(*) FILTER (
           WHERE notify_at <= NOW()
             AND sent_at IS NULL
+            AND failed_at IS NULL
             AND cancelled_at IS NULL
         ) AS "duePendingCount",
         COUNT(*) FILTER (
           WHERE notify_at > NOW()
             AND sent_at IS NULL
+            AND failed_at IS NULL
             AND cancelled_at IS NULL
         ) AS "futurePendingCount"
       FROM notification_schedules
@@ -1064,6 +1092,7 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
       WHERE status = 'pending'
         AND notify_at <= NOW()
         AND sent_at IS NULL
+        AND failed_at IS NULL
         AND cancelled_at IS NULL
       GROUP BY kind
       ORDER BY kind ASC
@@ -1071,6 +1100,22 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
     sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'processing'`,
     sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'failed'`,
     sql`SELECT COUNT(*) AS count FROM notification_schedules WHERE status = 'cancelled'`,
+    sql`
+      SELECT
+        id,
+        kind,
+        notify_at AS "notifyAt",
+        status,
+        task_id AS "taskId"
+      FROM notification_schedules
+      WHERE status = 'pending'
+        AND notify_at <= NOW()
+        AND sent_at IS NULL
+        AND failed_at IS NULL
+        AND cancelled_at IS NULL
+      ORDER BY notify_at ASC
+      LIMIT 5
+    `,
   ]);
 
   const now = nowRows[0] ?? {};
@@ -1080,11 +1125,18 @@ async function getScheduleDiagnostics(sql: SqlClient): Promise<ScheduleDiagnosti
     oldestPendingNotifyAt: toIso(overview.oldestPendingNotifyAt),
     duePendingCount: toCount(overview.duePendingCount),
     futurePendingCount: toCount(overview.futurePendingCount),
-    pendingByKind: mapCountByKind(pendingKindRows),
-    dueByKind: mapCountByKind(dueKindRows),
+    pendingByKind: withAllScheduleKinds(mapCountByKind(pendingKindRows)),
+    dueByKind: withAllScheduleKinds(mapCountByKind(dueKindRows)),
     processingCount: toCount(processingRows[0]?.count),
     failedCount: toCount(failedRows[0]?.count),
     cancelledCount: toCount(cancelledRows[0]?.count),
+    sampleDueSchedules: sampleDueRows.map((row) => ({
+      id: String(row.id),
+      kind: String(row.kind) as NotificationScheduleKind,
+      notifyAt: toIso(row.notifyAt) ?? String(row.notifyAt),
+      status: String(row.status),
+      taskId: String(row.taskId),
+    })),
   };
 }
 
@@ -1454,6 +1506,7 @@ function createScheduleSummary(input: {
     failed: 0,
     cancelled: 0,
     scheduleDiagnostics: input.diagnostics,
+    schedulesByKindProcessed: emptyScheduleKindCounts(),
   };
 }
 
@@ -1521,7 +1574,19 @@ export async function processDueNotificationSchedules(
 
   if (scheduleDiagnostics.duePendingCount > 0 && schedules.length === 0) {
     logError('notification_schedule_due_but_not_fetched', undefined, {
-      scheduleDiagnostics,
+      postgresNow: scheduleDiagnostics.postgresNow,
+      duePendingCount: scheduleDiagnostics.duePendingCount,
+      dueByKind: scheduleDiagnostics.dueByKind,
+      oldestPendingNotifyAt: scheduleDiagnostics.oldestPendingNotifyAt,
+      sampleDueSchedules: scheduleDiagnostics.sampleDueSchedules ?? [],
+      claimFilters: {
+        status: 'pending',
+        notifyAt: 'notify_at <= NOW()',
+        sentAt: 'sent_at IS NULL',
+        failedAt: 'failed_at IS NULL',
+        cancelledAt: 'cancelled_at IS NULL',
+        kinds: 'all',
+      },
       processLimit,
       reclaimedSchedules,
       outOfTimeBeforeClaim,
@@ -1544,12 +1609,14 @@ export async function processDueNotificationSchedules(
     try {
       const result = await processSingleSchedule(sql, schedule);
       summary.processedSchedules += 1;
+      summary.schedulesByKindProcessed[schedule.kind] += 1;
       if (result === 'sent') summary.sentSchedules += 1;
       if (result === 'cancelled') summary.cancelledSchedules += 1;
       if (result === 'rescheduled') summary.rescheduledSchedules += 1;
     } catch (error) {
       summary.processedSchedules += 1;
       summary.failedSchedules += 1;
+      summary.schedulesByKindProcessed[schedule.kind] += 1;
       await updateScheduleStatus(sql, schedule.id, 'failed', error instanceof Error ? error.message : 'Erro desconhecido');
       logError('notification_schedule_failed', error, {
         userId: schedule.userId,
@@ -1571,6 +1638,7 @@ export async function processDueNotificationSchedules(
     cancelledSchedules: summary.cancelledSchedules,
     rescheduledSchedules: summary.rescheduledSchedules,
     failedSchedules: summary.failedSchedules,
+    schedulesByKindProcessed: summary.schedulesByKindProcessed,
     durationMs: summary.durationMs,
     hasMore: summary.hasMore,
     stoppedByTimeLimit: summary.stoppedByTimeLimit,
