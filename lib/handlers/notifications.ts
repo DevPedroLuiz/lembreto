@@ -89,6 +89,7 @@ type CronDbHealth = {
     schedulesPendingMs: number | null;
     schedulesDueMs: number | null;
     tasksPendingMs: number | null;
+    overdueCandidatesMs: number | null;
   };
   counts: {
     taskSideEffectsPending: number | null;
@@ -97,6 +98,7 @@ type CronDbHealth = {
     schedulesPending: number | null;
     schedulesDue: number | null;
     tasksPending: number | null;
+    overdueCandidates: number | null;
   };
   steps: Record<string, MeasuredQueryStep>;
 };
@@ -604,6 +606,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     schedulesPending: null,
     schedulesDue: null,
     tasksPending: null,
+    overdueCandidates: null,
   };
   const db: CronDbHealth['db'] = {
     nowMs: null,
@@ -613,6 +616,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     schedulesPendingMs: null,
     schedulesDueMs: null,
     tasksPendingMs: null,
+    overdueCandidatesMs: null,
   };
 
   const now = await measureQuery('db_now', () => sql`SELECT NOW() AS now`);
@@ -627,6 +631,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     steps.schedulesPending = skippedStep();
     steps.schedulesDue = skippedStep();
     steps.tasksPending = skippedStep();
+    steps.overdueCandidates = skippedStep();
     return {
       ok: false,
       slow: true,
@@ -720,6 +725,26 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   steps.tasksPending = tasksPending.step;
   db.tasksPendingMs = tasksPending.step.durationMs;
   counts.tasksPending = tasksPending.step.ok ? toCount(tasksPending.rows[0]?.count) : null;
+
+  const overdueCandidates = await measureQuery(
+    'overdue_candidates',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM tasks
+      WHERE deleted_at IS NULL
+        AND COALESCE(reminder_mode, 'timed') = 'timed'
+        AND due_date IS NOT NULL
+        AND due_date < NOW()
+        AND status IN ('pending', 'overdue')
+        AND (
+          status = 'pending'
+          OR COALESCE(overdue_expires_at, due_date + INTERVAL '72 hours') > NOW()
+        )
+    `,
+  );
+  steps.overdueCandidates = overdueCandidates.step;
+  db.overdueCandidatesMs = overdueCandidates.step.durationMs;
+  counts.overdueCandidates = overdueCandidates.step.ok ? toCount(overdueCandidates.rows[0]?.count) : null;
 
   const ok = Object.values(steps).every((step) => step.ok);
   return {
@@ -976,7 +1001,11 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
     const result = hasDueSchedules
       ? await withTimeout(
-          processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false }),
+          processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, {
+            ensureInfrastructure: false,
+            precomputedDiagnostics: preliminaryScheduleDiagnostics,
+            reclaimStuckProcessing: false,
+          }),
           scheduleBudgetMs,
           fallbackSchedules(scheduleBudgetMs),
           'processDueNotificationSchedules',
@@ -1028,6 +1057,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           skippedReason: hasDueNotificationSideEffects ? 'time_limit' : 'no_notification_side_effects_due',
         };
     const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' && !dbHealth.slow;
+    const hasOverdueCandidates = (dbHealth.counts.overdueCandidates ?? 0) > 0;
     const dbHealthMaintenanceSkipReason = dbHealth.slow ? 'db_health_slow' : 'disabled_in_notification_cron';
     const backfill = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
@@ -1051,7 +1081,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           );
         })()
       : calendarSyncDisabledSummary(dbHealthMaintenanceSkipReason);
-    const overdueDetection = maintenanceStagesEnabled && hasCronBudget(deadline)
+    const overdueDetection = hasOverdueCandidates && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, OVERDUE_DURATION_MS);
           return withTimeout(
@@ -1065,7 +1095,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           ...fallbackOverdueDetection(0),
           hasMore: false,
           stoppedByTimeLimit: false,
-          skippedReason: dbHealthMaintenanceSkipReason,
+          skippedReason: hasOverdueCandidates ? 'time_limit' : 'no_overdue_candidates',
         };
 
     result.backfilledSchedules = backfill.backfilledSchedules;

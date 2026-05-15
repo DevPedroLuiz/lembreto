@@ -714,12 +714,47 @@ export async function scheduleOverdueRemindersForTask(
   const times = buildOverdueScheduleTimes(dueDate, overdueExpiresAt);
   const maxSchedules = options.maxSchedules ?? Number.POSITIVE_INFINITY;
   let created = 0;
+  let catchUpReminder: { notifyAt: Date; dedupeAt: Date; sequenceIndex: number; intervalMinutes: number } | null = null;
+
+  const insertOverdueReminder = async (item: {
+    notifyAt: Date;
+    dedupeAt?: Date;
+    sequenceIndex: number;
+    intervalMinutes: number;
+  }) => {
+    const minutesOverdue = Math.max(0, Math.floor((item.notifyAt.getTime() - dueDate.getTime()) / 60000));
+    return insertSchedule(sql, task, {
+      kind: 'overdue_reminder',
+      notifyAt: item.notifyAt,
+      title: 'Lembrete em atraso',
+      message: `"${task.title}" estÃ¡ em atraso hÃ¡ ${formatOverdueDuration(minutesOverdue)}. Marque como concluÃ­do quando finalizar.`,
+      tone: 'warning',
+      sequenceIndex: item.sequenceIndex,
+      intervalMinutes: item.intervalMinutes,
+      dedupeKey: item.dedupeAt
+        ? buildDedupeKey(task.userId, task.id, 'overdue_reminder', item.dedupeAt, item.sequenceIndex)
+        : undefined,
+    });
+  };
 
   for (const item of times) {
     if (created >= maxSchedules) break;
     const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
     if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt) continue;
-    if (options.notBefore && adjusted.notifyAt < options.notBefore) continue;
+    if (options.notBefore && adjusted.notifyAt < options.notBefore) {
+      catchUpReminder = {
+        notifyAt: options.notBefore,
+        dedupeAt: adjusted.notifyAt,
+        sequenceIndex: item.sequenceIndex,
+        intervalMinutes: item.intervalMinutes,
+      };
+      continue;
+    }
+    if (catchUpReminder && created === 0) {
+      const inserted = await insertOverdueReminder(catchUpReminder);
+      if (inserted) created += 1;
+      break;
+    }
     const minutesOverdue = Math.max(0, Math.floor((adjusted.notifyAt.getTime() - dueDate.getTime()) / 60000));
     const inserted = await insertSchedule(sql, task, {
       kind: 'overdue_reminder',
@@ -730,6 +765,11 @@ export async function scheduleOverdueRemindersForTask(
       sequenceIndex: item.sequenceIndex,
       intervalMinutes: item.intervalMinutes,
     });
+    if (inserted) created += 1;
+  }
+
+  if (created === 0 && catchUpReminder && catchUpReminder.notifyAt <= overdueExpiresAt) {
+    const inserted = await insertOverdueReminder(catchUpReminder);
     if (inserted) created += 1;
   }
 
@@ -1430,7 +1470,11 @@ export async function processDueNotificationSchedules(
   sql: SqlClient,
   limit = PROCESS_LIMIT,
   maxDurationMs = SCHEDULE_PROCESS_DURATION_MS,
-  options: { ensureInfrastructure?: boolean } = {},
+  options: {
+    ensureInfrastructure?: boolean;
+    precomputedDiagnostics?: ScheduleDiagnostics;
+    reclaimStuckProcessing?: boolean;
+  } = {},
 ): Promise<ProcessNotificationSchedulesSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), PROCESS_LIMIT);
@@ -1443,8 +1487,10 @@ export async function processDueNotificationSchedules(
   if (options.ensureInfrastructure !== false) {
     await ensureNotificationSchedulingInfrastructure(sql);
   }
-  const reclaimedSchedules = await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
-  const scheduleDiagnostics = await getScheduleDiagnostics(sql);
+  const reclaimedSchedules = options.reclaimStuckProcessing === false
+    ? 0
+    : await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT);
+  const scheduleDiagnostics = options.precomputedDiagnostics ?? await getScheduleDiagnostics(sql);
   const outOfTimeBeforeClaim = Date.now() - startedAt >= maxDurationMs;
   if (outOfTimeBeforeClaim) {
     logWarn('cron_notifications_claim_skipped_by_time_limit', {

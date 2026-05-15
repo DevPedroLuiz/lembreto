@@ -518,6 +518,7 @@ function createCronHealthSqlMock(options?: {
   schedulesPending?: number;
   schedulesDue?: number;
   tasksPending?: number;
+  overdueCandidates?: number;
 }) {
   const now = new Date('2026-05-14T21:30:00.000Z');
   const sql = (async (strings: TemplateStringsArray) => {
@@ -582,6 +583,10 @@ function createCronHealthSqlMock(options?: {
       return [{ count: options?.schedulesPending ?? 0 }];
     }
 
+    if (query.includes('FROM tasks') && query.includes('due_date < NOW()')) {
+      return [{ count: options?.overdueCandidates ?? 0 }];
+    }
+
     if (query.includes('FROM tasks')) {
       return [{ count: options?.tasksPending ?? 0 }];
     }
@@ -642,6 +647,7 @@ async function main() {
   const {
     backfillMissingNotificationSchedules,
     processDueNotificationSchedules,
+    scheduleOverdueRemindersForTask,
   } = await import('../lib/notification-schedules.js');
   const {
     processTaskSideEffects,
@@ -1176,6 +1182,29 @@ async function main() {
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
   });
 
+  await run('overdue scheduling catches up missed overdue reminder immediately', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: -20 });
+    const dueDate = '2026-05-14T14:40:00.000Z';
+    const notBefore = new Date('2026-05-14T15:00:00.000Z');
+    const created = await scheduleOverdueRemindersForTask(sql, {
+      ...task,
+      dueDate,
+      reminderMode: 'timed' as const,
+      status: 'overdue',
+      overdueSince: dueDate,
+      overdueExpiresAt: new Date(notBefore.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+    }, {
+      maxSchedules: 1,
+      notBefore,
+    });
+
+    const schedule = schedules.find((item) => item.kind === 'overdue_reminder');
+    assert.equal(created, 1);
+    assert.ok(schedule);
+    assert.equal(schedule?.taskId, task.id);
+    assert.equal(schedule?.notifyAt, notBefore.toISOString());
+  });
+
   await run('calendar side effect does not outrank notification schedule sync', async () => {
     const { sql, jobs, schedules } = createTaskSideEffectsSqlMock({
       includeExternalCalendarJob: true,
@@ -1215,8 +1244,10 @@ async function main() {
     assert.ok(cronHandler.includes('const schedules = {'));
     assert.ok(cronHandler.includes('return json(200, {'));
     assert.ok(cronHandler.includes('schedules,'));
-    assert.ok(cronHandler.includes('processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, { ensureInfrastructure: false })'));
+    assert.ok(cronHandler.includes('precomputedDiagnostics: preliminaryScheduleDiagnostics'));
+    assert.ok(cronHandler.includes('reclaimStuckProcessing: false'));
     assert.ok(cronHandler.includes('notificationSchedulesOnly: true'));
+    assert.ok(cronHandler.includes('precomputedDiagnostics: preliminarySideEffectDiagnostics'));
     assert.ok(cronHandler.includes('backfillDiagnostics'));
   });
 
