@@ -2404,7 +2404,7 @@ export default function App() {
   const derivedStatusNow = useMemo(() => new Date(notificationClock), [notificationClock]);
 
   const pendingTasks = useMemo(
-    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'pending'),
+    () => tasks.filter((task) => task.status !== 'draft' && getDerivedTaskStatus(task, derivedStatusNow) === 'pending'),
     [derivedStatusNow, tasks]
   );
 
