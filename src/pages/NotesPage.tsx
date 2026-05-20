@@ -1,32 +1,38 @@
 import React from 'react';
-import { NotebookPen, Plus, Search, StickyNote } from 'lucide-react';
+import { NotebookPen, Plus, Search, StickyNote, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { FilterTag } from '../components/FilterTag';
 import { NoteCard } from '../components/NoteCard';
 import type { Note, Task } from '../types';
 
 type NoteModeFilter = 'all' | 'fixed' | 'temporary';
+type NotesView = 'notes' | 'trash';
 
 interface NotesPageProps {
   notes: Note[];
+  trashedNotes: Note[];
   tasks: Task[];
   categories: string[];
   onNewNote: () => void;
   onEditNote: (note: Note) => void;
   onDeleteNote: (note: Note) => void;
+  onRestoreNote: (note: Note) => void;
 }
 
 export function NotesPage({
   notes,
+  trashedNotes,
   tasks,
   categories,
   onNewNote,
   onEditNote,
   onDeleteNote,
+  onRestoreNote,
 }: NotesPageProps) {
   const [search, setSearch] = React.useState('');
   const [modeFilter, setModeFilter] = React.useState<NoteModeFilter>('all');
   const [categoryFilter, setCategoryFilter] = React.useState('Todas');
+  const [activeView, setActiveView] = React.useState<NotesView>('notes');
 
   const tasksById = React.useMemo(() => {
     const map = new Map<string, Task>();
@@ -59,6 +65,7 @@ export function NotesPage({
 
   const fixedCount = notes.filter((note) => note.mode === 'fixed').length;
   const temporaryCount = notes.filter((note) => note.mode === 'temporary').length;
+  const isTrashView = activeView === 'trash';
 
   return (
     <motion.div
@@ -110,6 +117,53 @@ export function NotesPage({
             </div>
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              data-testid="notes-view-active"
+              onClick={() => setActiveView('notes')}
+              aria-pressed={activeView === 'notes'}
+              className={[
+                'flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all',
+                activeView === 'notes'
+                  ? 'border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-white'
+                  : 'border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300',
+              ].join(' ')}
+            >
+              <span>
+                <span className="block text-sm font-semibold">Notas</span>
+                <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Caderno ativo</span>
+              </span>
+              <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.08] dark:text-slate-200">
+                {notes.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-testid="notes-view-trash"
+              onClick={() => setActiveView('trash')}
+              aria-pressed={activeView === 'trash'}
+              className={[
+                'flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all',
+                activeView === 'trash'
+                  ? 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-white'
+                  : 'border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300',
+              ].join(' ')}
+            >
+              <span className="flex items-center gap-3">
+                <Trash2 size={18} />
+                <span>
+                  <span className="block text-sm font-semibold">Lixeira</span>
+                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Notas excluídas por 3 dias</span>
+                </span>
+              </span>
+              <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.08] dark:text-slate-200">
+                {trashedNotes.length}
+              </span>
+            </button>
+          </div>
+
+          {!isTrashView && (
           <div className="surface-soft p-4">
             <div className="relative">
               <Search className="field-icon" size={18} />
@@ -160,11 +214,34 @@ export function NotesPage({
               ))}
             </div>
           </div>
+          )}
         </div>
       </section>
 
       <section className="space-y-4">
-        {filteredNotes.length > 0 ? (
+        {isTrashView ? (
+          trashedNotes.length > 0 ? (
+            trashedNotes.map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                linkedTask={note.taskId ? tasksById.get(note.taskId) ?? null : null}
+                onEdit={onEditNote}
+                onDelete={onDeleteNote}
+                onRestore={onRestoreNote}
+                showDeletedMeta
+              />
+            ))
+          ) : (
+            <div className="surface-panel rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]">
+              <Trash2 size={34} className="mx-auto mb-4 text-slate-400" />
+              <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Lixeira vazia</h4>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Notas excluídas ficam aqui por 3 dias antes da remoção permanente.
+              </p>
+            </div>
+          )
+        ) : filteredNotes.length > 0 ? (
           filteredNotes.map((note) => (
             <NoteCard
               key={note.id}

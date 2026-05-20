@@ -35,6 +35,7 @@ import {
   buildDueDateFromForm,
   DEFAULT_NO_TIME_REMINDER_MINUTES,
   formatDateInputValue,
+  formatTimeInputValue,
   formatMinutesAsTimeInput,
   getTaskTimeLabel,
   normalizeNoTimeReminderMinutes,
@@ -262,6 +263,23 @@ function buildQuickRescheduleDate(task: Task, preset: QuickReschedulePreset): st
   );
 }
 
+function formatDateTimeLocalValue(isoDate: string | Date | null | undefined): string {
+  if (!isoDate) return '';
+  const date = isoDate instanceof Date ? isoDate : new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${formatDateInputValue(date)}T${formatTimeInputValue(date)}`;
+}
+
+function buildDefaultNoteExpiry(): string {
+  return formatDateTimeLocalValue(addDays(new Date(), 1));
+}
+
+function buildIsoFromDateTimeLocal(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function getMinutesDifference(targetDate: Date, referenceDate: Date) {
   return Math.floor((targetDate.getTime() - referenceDate.getTime()) / 60000);
 }
@@ -321,6 +339,7 @@ export default function App() {
   } = useCalendarIntegrations(isResetPasswordRoute ? null : auth.token);
   const {
     notes,
+    trashedNotes,
     notesByTask,
     createNote,
     updateNote,
@@ -427,6 +446,8 @@ export default function App() {
   const [noteCategory, setNoteCategory] = useState('Geral');
   const [noteTags, setNoteTags] = useState<string[]>([]);
   const [noteMode, setNoteMode] = useState<NoteMode>('temporary');
+  const [noteExpiresAt, setNoteExpiresAt] = useState('');
+  const [isRestoringNote, setIsRestoringNote] = useState(false);
   const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
 
   const [profName, setProfName] = useState('');
@@ -652,6 +673,20 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [auth.token, refreshNotifications]);
+
+  useEffect(() => {
+    if (!auth.token) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      void refreshNotes(auth.token)
+        .then(() => refreshNotifications(auth.token))
+        .catch(() => {
+          // keep current notes/notifications when the background sync fails
+        });
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, [auth.token, refreshNotes, refreshNotifications]);
 
   useEffect(() => {
     if (!auth.token || !notificationsEnabled) return undefined;
@@ -1095,6 +1130,8 @@ export default function App() {
     setNoteCategory('Geral');
     setNoteTags([]);
     setNoteMode('temporary');
+    setNoteExpiresAt(buildDefaultNoteExpiry());
+    setIsRestoringNote(false);
     setNoteTaskId(null);
     setNoteContextTaskId(null);
     setEditingNote(null);
@@ -1232,8 +1269,26 @@ export default function App() {
     setNoteCategory(note.category || 'Geral');
     setNoteTags(note.tags ?? []);
     setNoteMode(note.mode);
+    setNoteExpiresAt(formatDateTimeLocalValue(note.expiresAt));
+    setIsRestoringNote(false);
     setNoteTaskId(note.taskId ?? null);
     setNoteContextTaskId(options?.taskContextId ?? null);
+    setShowNoteDrawer(true);
+  }, []);
+
+  const openRestoreNote = useCallback((note: Note) => {
+    setShowNotificationsInbox(false);
+    setEditingNote(note);
+    setNoteTitle(note.title);
+    setNoteContent(note.content);
+    setNotePriority(note.priority);
+    setNoteCategory(note.category || 'Geral');
+    setNoteTags(note.tags ?? []);
+    setNoteMode(note.mode);
+    setNoteExpiresAt(note.mode === 'temporary' ? '' : formatDateTimeLocalValue(note.expiresAt));
+    setNoteTaskId(note.taskId ?? null);
+    setNoteContextTaskId(null);
+    setIsRestoringNote(true);
     setShowNoteDrawer(true);
   }, []);
 
@@ -1901,6 +1956,12 @@ export default function App() {
 
   const handleSubmitNote = useCallback(async () => {
     if (!noteTitle.trim() || isNoteSubmitting) return;
+    const expiresAt = noteMode === 'temporary' ? buildIsoFromDateTimeLocal(noteExpiresAt) : null;
+
+    if (noteMode === 'temporary' && !expiresAt) {
+      emitNotification('Validade obrigatória', 'Informe até quando a nota temporária deve permanecer no sistema.', 'warning');
+      return;
+    }
 
     const payload = {
       title: noteTitle,
@@ -1909,7 +1970,9 @@ export default function App() {
       category: noteCategory,
       tags: noteTags,
       mode: noteMode,
+      expiresAt,
       taskId: noteContextTaskId ?? noteTaskId,
+      ...(isRestoringNote ? { restore: true } : {}),
     };
 
     try {
@@ -1917,7 +1980,7 @@ export default function App() {
 
       if (editingNote) {
         await updateNote(editingNote.id, payload);
-        emitNotification('Nota atualizada', 'As informações da nota foram salvas.', 'success', {
+        emitNotification(isRestoringNote ? 'Nota reativada' : 'Nota atualizada', isRestoringNote ? 'A nota voltou para o seu caderno.' : 'As informações da nota foram salvas.', 'success', {
           target: payload.taskId ? { type: 'task', taskId: payload.taskId } : { type: 'notifications' },
         });
       } else {
@@ -1941,12 +2004,14 @@ export default function App() {
     noteCategory,
     noteContent,
     noteContextTaskId,
+    noteExpiresAt,
     noteMode,
     notePriority,
     noteTags,
     noteTaskId,
     noteTitle,
     resetNoteForm,
+    isRestoringNote,
     updateNote,
   ]);
 
@@ -2346,7 +2411,7 @@ export default function App() {
 
     try {
       await deleteNote(noteToDelete.id);
-      emitNotification('Nota removida', 'A nota foi excluida com sucesso.', 'info', { toastOnly: true });
+      emitNotification('Nota movida para a Lixeira', 'Ela pode ser reativada por 3 dias antes da exclusão permanente.', 'info', { toastOnly: true });
       if (editingNote?.id === noteToDelete.id) {
         resetNoteForm();
       }
@@ -3195,6 +3260,7 @@ export default function App() {
         setFilterCategory={setFilterCategory}
         categories={categoryOptions}
         pendingTasks={pendingTasks}
+        todayCount={pendingSummary.todayCount}
         overdueCount={pendingSummary.overdueCount}
         onOpenProfile={openProfile}
         onOpenSettings={openSettings}
@@ -3423,11 +3489,13 @@ export default function App() {
               {activeTab === 'notes' && (
                 <NotesPage
                   notes={notes}
+                  trashedNotes={trashedNotes}
                   tasks={tasks}
                   categories={categoryOptions}
                   onNewNote={() => openNewNote()}
                   onEditNote={(note) => openEditNote(note)}
                   onDeleteNote={handleDeleteNote}
+                  onRestoreNote={openRestoreNote}
                 />
               )}
               {activeTab === 'notifications' && (
@@ -3673,6 +3741,9 @@ export default function App() {
         tagOptions={tagOptions}
         mode={noteMode}
         setMode={setNoteMode}
+        expiresAt={noteExpiresAt}
+        setExpiresAt={setNoteExpiresAt}
+        isRestoring={isRestoringNote}
         taskId={noteTaskId}
         setTaskId={setNoteTaskId}
         tasks={tasks}
@@ -3779,7 +3850,7 @@ export default function App() {
             : pendingDeleteTaskSelection
               ? `Você está prestes a excluir ${pendingDeleteTaskSelection.count} lembrete${pendingDeleteTaskSelection.count === 1 ? '' : 's'} permanentemente.`
             : pendingDeleteNote
-              ? `Você está prestes a excluir "${pendingDeleteNote.title}" permanentemente.`
+              ? `Você está prestes a mover "${pendingDeleteNote.title}" para a Lixeira. A nota poderá ser reativada por 3 dias antes da exclusão permanente.`
               : ''
         }
         confirmLabel={

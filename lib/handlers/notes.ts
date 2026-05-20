@@ -5,6 +5,7 @@ import {
   formatZodError,
   updateNoteSchema,
 } from '../schemas.js';
+import { createNotification } from '../notifications.js';
 import {
   ensureTaskTaxonomySchema,
   sanitizeTaskTags,
@@ -29,6 +30,30 @@ function resolveNoteId(context: HandlerContext): string | null {
   return null;
 }
 
+function wantsTrash(request: HandlerContext['request']) {
+  const value = request.query?.trash;
+  if (Array.isArray(value)) return value[0] === '1' || value[0] === 'true';
+  return value === '1' || value === 'true';
+}
+
+function normalizeNoteExpiry(mode: 'temporary' | 'fixed', expiresAt: string | null | undefined) {
+  if (mode === 'fixed') return null;
+  if (!expiresAt) {
+    return { error: 'Defina por quanto tempo a nota temporária deve permanecer no sistema.' };
+  }
+
+  const expiresAtDate = new Date(expiresAt);
+  if (Number.isNaN(expiresAtDate.getTime())) {
+    return { error: 'Validade da nota inválida.' };
+  }
+
+  if (expiresAtDate.getTime() <= Date.now()) {
+    return { error: 'A validade da nota temporária precisa estar no futuro.' };
+  }
+
+  return expiresAtDate.toISOString();
+}
+
 async function ensureNotesSchema(sql: HandlerContext['sql']) {
   await ensureTaskTaxonomySchema(sql);
 
@@ -43,19 +68,60 @@ async function ensureNotesSchema(sql: HandlerContext['sql']) {
       category TEXT NOT NULL DEFAULT 'Geral',
       tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       mode TEXT NOT NULL DEFAULT 'temporary' CHECK (mode IN ('temporary', 'fixed')),
+      expires_at TIMESTAMPTZ,
+      deleted_at TIMESTAMPTZ,
+      delete_after TIMESTAMPTZ,
+      deletion_reason TEXT CHECK (deletion_reason IN ('manual', 'expired')),
+      expired_notification_sent_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
 
+  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS delete_after TIMESTAMPTZ`;
+  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS deletion_reason TEXT`;
+  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS expired_notification_sent_at TIMESTAMPTZ`;
+
+  await sql`
+    UPDATE notes
+    SET expires_at = NOW() + INTERVAL '7 days'
+    WHERE mode = 'temporary'
+      AND expires_at IS NULL
+      AND deleted_at IS NULL
+  `;
+
+  await sql`
+    DO $$
+    BEGIN
+      ALTER TABLE notes
+        ADD CONSTRAINT notes_deletion_reason_check CHECK (deletion_reason IN ('manual', 'expired'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `;
+
   await sql`
     CREATE INDEX IF NOT EXISTS idx_notes_user_created
-    ON notes(user_id, created_at DESC)
+    ON notes(user_id, deleted_at, created_at DESC)
   `;
 
   await sql`
     CREATE INDEX IF NOT EXISTS idx_notes_user_mode
-    ON notes(user_id, mode, updated_at DESC)
+    ON notes(user_id, deleted_at, mode, updated_at DESC)
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_notes_expiration
+    ON notes(user_id, expires_at)
+    WHERE deleted_at IS NULL AND mode = 'temporary'
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_notes_trash_cleanup
+    ON notes(user_id, delete_after)
+    WHERE deleted_at IS NOT NULL
   `;
 
   await sql`
@@ -108,6 +174,49 @@ async function syncNoteTaxonomy(sql: HandlerContext['sql'], userId: string, cate
   await upsertUserTags(sql, userId, tags);
 }
 
+async function purgeExpiredTrash(sql: HandlerContext['sql'], userId: string) {
+  await sql`
+    DELETE FROM notes
+    WHERE user_id = ${userId}
+      AND deleted_at IS NOT NULL
+      AND delete_after IS NOT NULL
+      AND delete_after <= NOW()
+  `;
+}
+
+async function moveExpiredTemporaryNotesToTrash(sql: HandlerContext['sql'], userId: string) {
+  const expiredNotes = await sql`
+    UPDATE notes
+    SET
+      deleted_at = NOW(),
+      delete_after = NOW() + INTERVAL '3 days',
+      deletion_reason = 'expired',
+      expired_notification_sent_at = NOW(),
+      updated_at = NOW()
+    WHERE user_id = ${userId}
+      AND deleted_at IS NULL
+      AND mode = 'temporary'
+      AND expires_at IS NOT NULL
+      AND expires_at <= NOW()
+    RETURNING id, title
+  `;
+
+  await Promise.allSettled(
+    expiredNotes.map(async (note) => {
+      await createNotification(sql, {
+        userId,
+        title: 'Nota temporária excluída',
+        message: `"${String(note.title)}" venceu e foi enviada para a Lixeira. Ela ficará disponível por 3 dias.`,
+        tone: 'warning',
+        target: { type: 'notifications' },
+        dedupeKey: `note-expired:${String(note.id)}`,
+      });
+    }),
+  );
+
+  return expiredNotes.length;
+}
+
 export async function handleNotesCollection(context: HandlerContext): Promise<HandlerResult> {
   const auth = await requireNotesAuth(context);
   if ('status' in auth) return auth;
@@ -118,6 +227,10 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
 
   if (request.method === 'GET') {
     try {
+      await purgeExpiredTrash(sql, user.id);
+      await moveExpiredTemporaryNotesToTrash(sql, user.id);
+
+      const includeTrash = wantsTrash(request);
       const rows = await sql`
         SELECT
           id,
@@ -129,12 +242,22 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           mode,
+          expires_at AS "expiresAt",
+          deleted_at AS "deletedAt",
+          delete_after AS "deleteAfter",
+          deletion_reason AS "deletionReason",
+          expired_notification_sent_at AS "expiredNotificationSentAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM notes
         WHERE user_id = ${user.id}
+          AND (
+            (${includeTrash}::boolean = FALSE AND deleted_at IS NULL)
+            OR (${includeTrash}::boolean = TRUE AND deleted_at IS NOT NULL)
+          )
         ORDER BY
-          CASE WHEN mode = 'fixed' THEN 0 ELSE 1 END,
+          CASE WHEN ${includeTrash}::boolean = TRUE THEN 0 WHEN mode = 'fixed' THEN 0 ELSE 1 END,
+          deleted_at DESC NULLS LAST,
           updated_at DESC
       `;
 
@@ -154,6 +277,11 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
     const { title, content, priority, category, mode } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
     const taskId = parsed.data.taskId ?? null;
+    const expiresAt = normalizeNoteExpiry(mode, parsed.data.expiresAt);
+
+    if (expiresAt && typeof expiresAt === 'object') {
+      return json(400, { error: expiresAt.error });
+    }
 
     try {
       const canLinkTask = await assertTaskOwnership(sql, user.id, taskId);
@@ -162,7 +290,7 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
       }
 
       const rows = await sql`
-        INSERT INTO notes (user_id, task_id, title, content, priority, category, tags, mode)
+        INSERT INTO notes (user_id, task_id, title, content, priority, category, tags, mode, expires_at)
         VALUES (
           ${user.id},
           ${taskId},
@@ -171,7 +299,8 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
           ${priority},
           ${category},
           ${tags},
-          ${mode}
+          ${mode},
+          ${expiresAt}
         )
         RETURNING
           id,
@@ -183,6 +312,11 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           mode,
+          expires_at AS "expiresAt",
+          deleted_at AS "deletedAt",
+          delete_after AS "deleteAfter",
+          deletion_reason AS "deletionReason",
+          expired_notification_sent_at AS "expiredNotificationSentAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
       `;
@@ -227,7 +361,9 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           mode,
-          task_id
+          expires_at,
+          task_id,
+          deleted_at
         FROM notes
         WHERE id = ${id} AND user_id = ${user.id}
       `;
@@ -243,6 +379,23 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
         return json(404, { error: 'Lembrete vinculado não encontrado' });
       }
 
+      const nextMode = parsed.data.mode !== undefined ? parsed.data.mode : (current.mode as 'temporary' | 'fixed');
+      const currentExpiresAt = current.expires_at instanceof Date
+        ? current.expires_at.toISOString()
+        : typeof current.expires_at === 'string'
+          ? current.expires_at
+          : null;
+      const nextExpiresAtInput = parsed.data.expiresAt !== undefined ? parsed.data.expiresAt : currentExpiresAt;
+      const expiresAt = normalizeNoteExpiry(nextMode, nextExpiresAtInput);
+
+      if (expiresAt && typeof expiresAt === 'object') {
+        return json(400, { error: expiresAt.error });
+      }
+
+      if (current.deleted_at && !parsed.data.restore) {
+        return json(409, { error: 'Restaure a nota antes de editá-la.' });
+      }
+
       const categoryValue = parsed.data.category !== undefined ? parsed.data.category : String(current.category ?? 'Geral');
       const tagsValue = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : ((current.tags as string[] | undefined) ?? []);
 
@@ -255,7 +408,12 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           priority = ${parsed.data.priority !== undefined ? parsed.data.priority : current.priority},
           category = ${categoryValue},
           tags = ${tagsValue},
-          mode = ${parsed.data.mode !== undefined ? parsed.data.mode : current.mode},
+          mode = ${nextMode},
+          expires_at = ${expiresAt},
+          deleted_at = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE deleted_at END,
+          delete_after = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE delete_after END,
+          deletion_reason = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE deletion_reason END,
+          expired_notification_sent_at = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE expired_notification_sent_at END,
           updated_at = NOW()
         WHERE id = ${id} AND user_id = ${user.id}
         RETURNING
@@ -268,6 +426,11 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           mode,
+          expires_at AS "expiresAt",
+          deleted_at AS "deletedAt",
+          delete_after AS "deleteAfter",
+          deletion_reason AS "deletionReason",
+          expired_notification_sent_at AS "expiredNotificationSentAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
       `;
@@ -284,7 +447,12 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
   if (request.method === 'DELETE') {
     try {
       await sql`
-        DELETE FROM notes
+        UPDATE notes
+        SET
+          deleted_at = COALESCE(deleted_at, NOW()),
+          delete_after = COALESCE(delete_after, NOW() + INTERVAL '3 days'),
+          deletion_reason = COALESCE(deletion_reason, 'manual'),
+          updated_at = NOW()
         WHERE id = ${id} AND user_id = ${user.id}
       `;
       logInfo('note_deleted', getRequestMeta(request, { userId: user.id, noteId: id }));

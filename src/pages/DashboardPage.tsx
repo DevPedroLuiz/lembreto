@@ -79,6 +79,36 @@ function getTaskSortValue(task: Task): Date {
   }
 }
 
+function getDashboardTaskGroup(task: Task): number {
+  if (getDerivedTaskStatus(task) === 'overdue') return 0;
+  if (!task.dueDate) return 3;
+
+  try {
+    if (isToday(parseISO(task.dueDate))) return 1;
+  } catch {
+    return 3;
+  }
+
+  return 2;
+}
+
+function compareDashboardTasks(left: Task, right: Task): number {
+  const groupOrder = getDashboardTaskGroup(left) - getDashboardTaskGroup(right);
+  if (groupOrder !== 0) return groupOrder;
+
+  const leftGroup = getDashboardTaskGroup(left);
+  const priorityOrder = PRIORITY_WEIGHT[left.priority] - PRIORITY_WEIGHT[right.priority];
+
+  if (leftGroup <= 1 && priorityOrder !== 0) return priorityOrder;
+
+  const dateOrder = compareAsc(getTaskSortValue(left), getTaskSortValue(right));
+  if (dateOrder !== 0) return dateOrder;
+
+  if (priorityOrder !== 0) return priorityOrder;
+
+  return left.title.localeCompare(right.title, 'pt-BR');
+}
+
 function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
   if (getDerivedTaskStatus(task) === 'overdue') return 'overdue';
   if (!task.dueDate) return 'upcoming';
@@ -138,11 +168,7 @@ export function DashboardPage({
     : Math.round((completedTasks.length / tasks.length) * 100);
 
   const activeTasks = React.useMemo(() => [...overdueTasks, ...pendingTasks], [overdueTasks, pendingTasks]);
-  const sortedPendingTasks = [...activeTasks].sort((left, right) => {
-    const dateOrder = compareAsc(getTaskSortValue(left), getTaskSortValue(right));
-    if (dateOrder !== 0) return dateOrder;
-    return PRIORITY_WEIGHT[left.priority] - PRIORITY_WEIGHT[right.priority];
-  });
+  const sortedPendingTasks = [...activeTasks].sort(compareDashboardTasks);
   const nextTasks = sortedPendingTasks.slice(0, 5);
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;

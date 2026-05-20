@@ -713,6 +713,93 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
+  test('shows the five most important dashboard reminders first', async ({ page }) => {
+    const user = buildE2ETestUser();
+    const today = new Date();
+    if (today.getHours() >= 22) {
+      today.setHours(23, 55, 0, 0);
+    } else {
+      today.setHours(today.getHours() + 1, 0, 0, 0);
+    }
+
+    const overdue = new Date();
+    overdue.setDate(overdue.getDate() - 1);
+    overdue.setHours(9, 0, 0, 0);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Futuro alta',
+          dueDate: tomorrow.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Hoje baixa',
+          dueDate: today.toISOString(),
+          priority: 'low',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Atrasado baixa',
+          dueDate: overdue.toISOString(),
+          priority: 'low',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Hoje média',
+          dueDate: today.toISOString(),
+          priority: 'medium',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Atrasado alta',
+          dueDate: overdue.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Futuro média',
+          dueDate: tomorrow.toISOString(),
+          priority: 'medium',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Hoje alta',
+          dueDate: today.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+        },
+        {
+          title: 'Atrasado média',
+          dueDate: overdue.toISOString(),
+          priority: 'medium',
+          category: 'Trabalho',
+        },
+      ]);
+
+      await refreshAuthenticatedPage(page);
+
+      const dashboardReminders = page.locator('[data-testid="task-item"]');
+      await expect(dashboardReminders).toHaveCount(5);
+      await expect(dashboardReminders.nth(0)).toHaveAttribute('data-task-title', 'Atrasado alta');
+      await expect(dashboardReminders.nth(1)).toHaveAttribute('data-task-title', 'Atrasado média');
+      await expect(dashboardReminders.nth(2)).toHaveAttribute('data-task-title', 'Atrasado baixa');
+      await expect(dashboardReminders.nth(3)).toHaveAttribute('data-task-title', 'Hoje alta');
+      await expect(dashboardReminders.nth(4)).toHaveAttribute('data-task-title', 'Hoje média');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Futuro alta"]')).toHaveCount(0);
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('highlights the next best action and supports quick reschedule from the reminder view', async ({ page }) => {
     const user = buildE2ETestUser();
     const overdue = new Date();
@@ -1064,6 +1151,14 @@ test.describe('Lembreto critical flows', () => {
           status: 'completed',
           tags: ['Casa'],
         },
+        {
+          title: 'Alta desativada',
+          dueDate: futureHighDueDate.toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+          status: 'inactive',
+          tags: ['Pausado'],
+        },
       ]);
 
       await page.reload();
@@ -1087,6 +1182,12 @@ test.describe('Lembreto critical flows', () => {
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta concluída"]')).toHaveCount(0);
 
+      await page.getByTestId('task-status-filter-inactive').click();
+      await expect(page.getByTestId('task-status-summary')).toContainText('Desativados');
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta desativada"]')).toBeVisible();
+      await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toHaveCount(0);
+
+      await page.getByTestId('task-status-filter-pending').click();
       await page.getByTestId('task-tag-filter-casa').click();
       await expect(page.getByTestId('task-tag-summary')).toContainText('Casa');
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();

@@ -36,10 +36,12 @@ const SEARCH_DEBOUNCE_MS = 200;
 
 type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
-type StatusFilter = 'all' | DerivedTaskStatus;
+type StatusFilter = 'all' | DerivedTaskStatus | 'inactive';
 type TagFilter = 'all' | string;
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
 export type TasksPageView = 'agenda' | 'holidays' | 'drafts';
+
+const DEFAULT_TASK_SORT_MODE: SortMode = 'dueDate';
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: 'created', label: 'Recentes' },
@@ -60,6 +62,7 @@ const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'pending', label: 'Pendentes' },
   { value: 'overdue', label: 'Atrasados' },
   { value: 'completed', label: 'Concluídos' },
+  { value: 'inactive', label: 'Desativados' },
   { value: 'cancelled', label: 'Cancelados' },
 ];
 
@@ -89,7 +92,7 @@ function isPriorityFilter(value: unknown): value is PriorityFilter {
 }
 
 function isStatusFilter(value: unknown): value is StatusFilter {
-  return value === 'all' || value === 'pending' || value === 'overdue' || value === 'completed' || value === 'cancelled';
+  return value === 'all' || value === 'pending' || value === 'overdue' || value === 'completed' || value === 'inactive' || value === 'cancelled';
 }
 
 function isDateFilterMode(value: unknown): value is DateFilterMode {
@@ -367,6 +370,15 @@ function matchesTaskFilters(
   return matchesSearch && matchesCategory && matchesPriority && matchesTag && matchesDate;
 }
 
+function matchesStatusFilter(task: Task, statusFilter: Exclude<StatusFilter, 'all'>): boolean {
+  if (statusFilter === 'inactive') return task.status === 'inactive';
+  if (statusFilter === 'cancelled') {
+    return task.status !== 'inactive' && getDerivedTaskStatus(task) === 'cancelled';
+  }
+
+  return getDerivedTaskStatus(task) === statusFilter;
+}
+
 function hasStoredCustomFilters(
   search: string,
   filterCategory: string,
@@ -379,7 +391,7 @@ function hasStoredCustomFilters(
   return (
     search.trim().length > 0 ||
     filterCategory !== 'Todas' ||
-    sortMode !== 'created' ||
+    sortMode !== DEFAULT_TASK_SORT_MODE ||
     priorityFilter !== 'all' ||
     statusFilter !== 'all' ||
     tagFilter !== 'all' ||
@@ -502,7 +514,7 @@ export function TasksPage({
     [completedTasks, pendingTasks, tags],
   );
   const config = React.useMemo(() => LS.getConfig(), []);
-  const initialSortMode = isSortMode(config.taskSortMode) ? config.taskSortMode : 'created';
+  const initialSortMode = isSortMode(config.taskSortMode) ? config.taskSortMode : DEFAULT_TASK_SORT_MODE;
   const initialPriorityFilter = isPriorityFilter(config.taskPriorityFilter) ? config.taskPriorityFilter : 'all';
   const initialStatusFilter = isStatusFilter(config.taskStatusFilter) ? config.taskStatusFilter : 'all';
   const initialTagFilter = normalizeTagFilter(config.taskTagFilter, availableTags);
@@ -720,7 +732,7 @@ export function TasksPage({
     () => {
       if (statusFilter === 'completed') return [];
       if (statusFilter === 'all') return locallyFilteredPendingTasks;
-      return locallyFilteredPendingTasks.filter((task) => getDerivedTaskStatus(task) === statusFilter);
+      return locallyFilteredPendingTasks.filter((task) => matchesStatusFilter(task, statusFilter));
     },
     [locallyFilteredPendingTasks, statusFilter],
   );
@@ -820,7 +832,7 @@ export function TasksPage({
   }, [completedPage, sortedCompletedTasks]);
 
   const activeSortLabel = React.useMemo(
-    () => SORT_OPTIONS.find((option) => option.value === sortMode)?.label ?? 'Recentes',
+    () => SORT_OPTIONS.find((option) => option.value === sortMode)?.label ?? 'Prazo',
     [sortMode],
   );
 
@@ -859,7 +871,7 @@ export function TasksPage({
   );
   const activeFilterCount = [
     filterCategory !== 'Todas',
-    sortMode !== 'created',
+    sortMode !== DEFAULT_TASK_SORT_MODE,
     priorityFilter !== 'all',
     statusFilter !== 'all',
     tagFilter !== 'all',
@@ -903,7 +915,7 @@ export function TasksPage({
     setSearchInput('');
     setSearch('');
     setFilterCategory('Todas');
-    setSortMode('created');
+    setSortMode(DEFAULT_TASK_SORT_MODE);
     setPriorityFilter('all');
     setStatusFilter('all');
     setTagFilter('all');
@@ -916,7 +928,7 @@ export function TasksPage({
     const currentConfig = LS.getConfig();
     LS.saveConfig({
       ...currentConfig,
-      taskSortMode: 'created',
+      taskSortMode: DEFAULT_TASK_SORT_MODE,
       taskPriorityFilter: 'all',
       taskStatusFilter: 'all',
       taskTagFilter: 'all',

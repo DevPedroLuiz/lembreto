@@ -28,6 +28,7 @@ interface SidebarProps {
   filterCategory: string;
   setFilterCategory: (cat: string) => void;
   pendingTasks: Task[];
+  todayCount: number;
   overdueCount: number;
   onOpenProfile: () => void;
   onOpenSettings: () => void;
@@ -44,6 +45,7 @@ export function Sidebar({
   filterCategory,
   setFilterCategory,
   pendingTasks,
+  todayCount,
   overdueCount,
   onOpenProfile,
   onOpenSettings,
@@ -157,12 +159,12 @@ export function Sidebar({
 
           <div className="mt-6 grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pendentes</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{pendingTasks.length}</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Hoje</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{todayCount}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Categorias</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{categories.length}</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Atrasados</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{overdueCount}</p>
             </div>
           </div>
         </div>

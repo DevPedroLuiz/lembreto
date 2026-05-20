@@ -4,6 +4,7 @@ import {
   Link2,
   PencilLine,
   Pin,
+  RotateCcw,
   Tag,
   Trash2,
 } from 'lucide-react';
@@ -28,6 +29,8 @@ export interface NoteCardProps {
   compact?: boolean;
   onEdit: (note: Note) => void;
   onDelete: (note: Note) => void;
+  onRestore?: (note: Note) => void;
+  showDeletedMeta?: boolean;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
@@ -36,7 +39,16 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   compact = false,
   onEdit,
   onDelete,
+  onRestore,
+  showDeletedMeta = false,
 }) => {
+  const expiresAtLabel = note.expiresAt
+    ? new Date(note.expiresAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+    : null;
+  const deleteAfterLabel = note.deleteAfter
+    ? new Date(note.deleteAfter).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+    : null;
+
   return (
     <article
       data-testid="note-card"
@@ -58,6 +70,18 @@ export const NoteCard: React.FC<NoteCardProps> = ({
               {note.mode === 'fixed' ? <Pin size={12} /> : <Clock3 size={12} />}
               {note.mode === 'fixed' ? 'Fixa' : 'Temporária'}
             </span>
+            {expiresAtLabel && !showDeletedMeta && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                <Clock3 size={12} />
+                Até {expiresAtLabel}
+              </span>
+            )}
+            {showDeletedMeta && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
+                <Trash2 size={12} />
+                {note.deletionReason === 'expired' ? 'Vencida' : 'Na lixeira'}
+              </span>
+            )}
             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
               <Tag size={12} />
               {note.category}
@@ -93,9 +117,27 @@ export const NoteCard: React.FC<NoteCardProps> = ({
               )}
             </div>
           )}
+
+          {showDeletedMeta && deleteAfterLabel && (
+            <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+              Esta nota será excluída permanentemente em {deleteAfterLabel}.
+            </p>
+          )}
         </div>
 
         <div className="flex shrink-0 gap-2">
+          {showDeletedMeta ? (
+            <button
+              type="button"
+              data-testid="note-restore-button"
+              onClick={() => onRestore?.(note)}
+              aria-label={`Reativar nota ${note.title}`}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-600 transition-colors hover:bg-emerald-100 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15"
+            >
+              <RotateCcw size={16} />
+            </button>
+          ) : (
+            <>
           <button
             type="button"
             data-testid="note-edit-button"
@@ -114,6 +156,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           >
             <Trash2 size={16} />
           </button>
+            </>
+          )}
         </div>
       </div>
     </article>

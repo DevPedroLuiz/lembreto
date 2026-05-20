@@ -35,6 +35,9 @@ interface NoteDrawerProps {
   tagOptions: string[];
   mode: NoteMode;
   setMode: (value: NoteMode) => void;
+  expiresAt: string;
+  setExpiresAt: (value: string) => void;
+  isRestoring?: boolean;
   taskId: string | null;
   setTaskId: (value: string | null) => void;
   tasks: Task[];
@@ -66,6 +69,9 @@ export function NoteDrawer({
   tagOptions,
   mode,
   setMode,
+  expiresAt,
+  setExpiresAt,
+  isRestoring = false,
   taskId,
   setTaskId,
   tasks,
@@ -170,7 +176,7 @@ export function NoteDrawer({
                       {isEditing ? 'Edição' : 'Anotação'}
                     </span>
                     <h2 id="note-drawer-title" className="mt-2 text-[1.4rem] font-semibold leading-tight text-white sm:mt-4 sm:text-2xl md:text-[2rem]">
-                      {isEditing ? 'Editar nota' : 'Nova nota'}
+                      {isRestoring ? 'Reativar nota' : isEditing ? 'Editar nota' : 'Nova nota'}
                     </h2>
                     <p className="mt-1 hidden max-w-2xl text-[12px] leading-5 text-blue-50/88 sm:mt-2 sm:block sm:text-sm sm:leading-6">
                       Registre contexto e apoio sem perder a ligação com seus lembretes.
@@ -359,6 +365,24 @@ export function NoteDrawer({
                             Fixa
                           </button>
                         </div>
+                        {mode === 'temporary' && (
+                          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+                              Validade da nota
+                            </label>
+                            <input
+                              type="datetime-local"
+                              required
+                              value={expiresAt}
+                              data-testid="note-expires-at-input"
+                              onChange={(event) => setExpiresAt(event.target.value)}
+                              className="field-control"
+                            />
+                            <p className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-200">
+                              Notas temporárias permanecem ativas até este horário. Ao vencer, a nota vai para a Lixeira, você recebe uma notificação e ela fica disponível para reativação por 3 dias antes da exclusão permanente.
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -501,8 +525,10 @@ export function NoteDrawer({
                       {isSubmitting ? (
                         <>
                           <Loader2 size={18} className="animate-spin" />
-                          {isEditing ? 'Salvando nota...' : 'Criando nota...'}
+                          {isRestoring ? 'Reativando nota...' : isEditing ? 'Salvando nota...' : 'Criando nota...'}
                         </>
+                      ) : isRestoring ? (
+                        'Reativar nota'
                       ) : isEditing ? (
                         'Salvar nota'
                       ) : (

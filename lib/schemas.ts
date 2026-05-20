@@ -170,6 +170,7 @@ export const createNoteSchema = z.object({
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
   mode: z.enum(NOTE_MODES).default('temporary'),
+  expiresAt: z.string().datetime('Validade da nota inválida').nullable().optional(),
   taskId: z.string().uuid('Identificador do lembrete inválido').nullable().optional(),
 }).strict();
 
@@ -180,7 +181,9 @@ export const updateNoteSchema = z.object({
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
   mode: z.enum(NOTE_MODES).optional(),
+  expiresAt: z.string().datetime('Validade da nota inválida').nullable().optional(),
   taskId: z.string().uuid('Identificador do lembrete inválido').nullable().optional(),
+  restore: z.boolean().optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
   'Envie ao menos um campo para atualizar',

@@ -137,6 +137,11 @@ export interface Note {
   category: string;
   tags: string[];
   mode: NoteMode;
+  expiresAt?: string | null;
+  deletedAt?: string | null;
+  deleteAfter?: string | null;
+  deletionReason?: 'manual' | 'expired' | null;
+  expiredNotificationSentAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
