@@ -37,6 +37,7 @@ export function useAppConfig() {
   }, [darkMode]);
 
   const saveConfig = useCallback((patch: AppConfigPatch) => {
+    const persistedConfig = LS.getConfig();
     const current: AppConfig = {
       darkMode,
       notifications: notificationsEnabled,
@@ -45,7 +46,7 @@ export function useAppConfig() {
       showCompleted: configShowCompleted,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
     };
-    const next = { ...current, ...patch };
+    const next = { ...persistedConfig, ...current, ...patch };
 
     LS.saveConfig(next);
     setDarkMode(next.darkMode);
