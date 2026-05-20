@@ -912,6 +912,7 @@ test.describe('Lembreto critical flows', () => {
       await expect(taskDetailsDialog.getByTestId('task-history-list')).toContainText('Categoria alterada.');
       await page.getByTestId('task-details-toggle').click();
       await expect(taskDetailsDialog).toHaveCount(0);
+      await page.getByTestId('task-view-completed').click();
       await expect(updatedTask).toHaveAttribute('data-task-status', 'completed');
 
       await updatedTask.hover();
