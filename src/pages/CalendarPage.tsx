@@ -26,7 +26,7 @@ import type { Priority, Task } from '../types';
 
 type StatusFilter = 'all' | DerivedTaskStatus;
 type PriorityFilter = 'all' | Priority;
-type CalendarPanel = 'calendar' | 'timeline';
+type CalendarPanel = 'calendar' | 'timeline' | 'day-timeline';
 type TimelineGroup = { dateKey: string; date: Date; tasks: Task[] };
 
 interface CalendarPageProps {
@@ -243,6 +243,7 @@ export function CalendarPage({
   const today = React.useMemo(() => new Date(), []);
   const [cursorDate, setCursorDate] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = React.useState(today);
+  const [dayTimelineDate, setDayTimelineDate] = React.useState<Date | null>(null);
   const [activePanel, setActivePanel] = React.useState<CalendarPanel>('calendar');
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
@@ -298,6 +299,12 @@ export function CalendarPage({
   const selectedPendingCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'pending').length;
   const selectedOverdueCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
   const selectedCompletedCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'completed').length;
+  const dayTimelineDateValue = dayTimelineDate ?? selectedDate;
+  const dayTimelineKey = formatDateKey(dayTimelineDateValue);
+  const dayTimelineTasks = tasksByDay.get(dayTimelineKey) ?? [];
+  const dayTimelinePendingCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'pending').length;
+  const dayTimelineOverdueCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
+  const dayTimelineCompletedCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'completed').length;
   const monthPrefix = `${cursorDate.getFullYear()}-${`${cursorDate.getMonth() + 1}`.padStart(2, '0')}`;
   const monthTaskCount = filteredTasks.filter((task) => {
     const dueDate = parseTaskDate(task);
@@ -331,6 +338,13 @@ export function CalendarPage({
     const nextToday = new Date();
     setCursorDate(new Date(nextToday.getFullYear(), nextToday.getMonth(), 1));
     setSelectedDate(nextToday);
+  };
+
+  const openDayTimeline = (date: Date) => {
+    const nextDate = new Date(date);
+    setSelectedDate(nextDate);
+    setDayTimelineDate(nextDate);
+    setActivePanel('day-timeline');
   };
 
   const clearFilters = () => {
@@ -518,7 +532,12 @@ export function CalendarPage({
         </div>
 
         <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="inline-grid grid-cols-2 rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05] md:w-auto">
+          <div
+            className={cn(
+              'inline-grid rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05] md:w-auto',
+              dayTimelineDate ? 'grid-cols-3' : 'grid-cols-2',
+            )}
+          >
             <button
               type="button"
               onClick={() => setActivePanel('calendar')}
@@ -547,6 +566,22 @@ export function CalendarPage({
               <Clock3 size={16} />
               Linha do tempo
             </button>
+            {dayTimelineDate && (
+              <button
+                type="button"
+                onClick={() => setActivePanel('day-timeline')}
+                aria-pressed={activePanel === 'day-timeline'}
+                className={cn(
+                  'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all',
+                  activePanel === 'day-timeline'
+                    ? 'bg-white text-slate-950 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] dark:bg-white/[0.12] dark:text-white'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
+                )}
+              >
+                <Clock3 size={16} />
+                Linha do dia
+              </button>
+            )}
           </div>
 
           <button type="button" onClick={onNewTask} className="action-primary">
@@ -620,6 +655,7 @@ export function CalendarPage({
                     tabIndex={0}
                     aria-label={`${format(day, "dd 'de' MMMM", { locale: ptBR })}, ${dayTasks.length} lembretes`}
                     onClick={() => setSelectedDate(day)}
+                    onDoubleClick={() => openDayTimeline(day)}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
                       event.preventDefault();
@@ -672,6 +708,7 @@ export function CalendarPage({
                               event.stopPropagation();
                               onEdit(task);
                             }}
+                            onDoubleClick={(event) => event.stopPropagation()}
                             className={cn(
                               'block w-full truncate rounded-lg border px-1.5 py-1 text-left text-[10px] font-semibold transition-transform hover:-translate-y-0.5 sm:text-[11px]',
                               getDerivedTaskStatus(task) === 'completed'
@@ -746,6 +783,64 @@ export function CalendarPage({
             </AnimatePresence>
               </section>
             </>
+          ) : activePanel === 'day-timeline' ? (
+            <section className="surface-panel p-5 md:p-6">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <span className="section-eyebrow">
+                    <Clock3 size={14} />
+                    Linha do dia
+                  </span>
+                  <h3 className="mt-4 text-xl font-semibold capitalize text-slate-950 dark:text-white">
+                    {formatSelectedDateLabel(dayTimelineDateValue)}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    {dayTimelinePendingCount} pendente{dayTimelinePendingCount === 1 ? '' : 's'}, {dayTimelineOverdueCount} atrasado
+                    {dayTimelineOverdueCount === 1 ? '' : 's'} e {dayTimelineCompletedCount} concluído
+                    {dayTimelineCompletedCount === 1 ? '' : 's'} nos filtros atuais.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel('calendar')}
+                    className="action-secondary h-11 rounded-xl px-4 py-0 text-sm"
+                  >
+                    <CalendarDays size={16} />
+                    Voltar
+                  </button>
+                  <button type="button" onClick={onNewTask} className="action-secondary h-11 rounded-xl px-4 py-0 text-sm">
+                    <Plus size={16} />
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+
+              {dayTimelineTasks.length > 0 ? (
+                <div className="relative border-l border-slate-200 pl-4 dark:border-white/10">
+                  <div className="space-y-3">
+                    {dayTimelineTasks.map((task) => (
+                      <div key={task.id} className="relative">
+                        <span className="absolute -left-[21px] top-5 h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)] dark:border-slate-950" />
+                        <TaskItem
+                          task={task}
+                          onToggle={onToggle}
+                          onDelete={onDelete}
+                          onEdit={onEdit}
+                          showToggleControl
+                          compact
+                          isDeleting={deletingTaskIds?.has(task.id)}
+                          isToggling={togglingTaskIds?.has(task.id)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <EmptyDayState onNewTask={onNewTask} />
+              )}
+            </section>
           ) : (
             <section className="surface-panel p-5 md:p-6">
               <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

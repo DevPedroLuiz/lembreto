@@ -499,7 +499,7 @@ export async function syncTaskToExternalCalendar(input: {
       eventId: task.externalCalendarEventId,
       status: task.externalCalendarEventId ? 'failed' : 'idle',
       error: task.externalCalendarEventId
-        ? 'CalendÃ¡rio externo desconectado. Reconecte para remover o evento espelhado.'
+        ? 'Calendário externo desconectado. Reconecte para remover o evento espelhado.'
         : null,
     });
     return { ok: true, provider: null };

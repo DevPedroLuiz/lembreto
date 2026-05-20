@@ -509,7 +509,7 @@ async function processSingleSideEffect(sql: SqlClient, job: TaskSideEffectJob): 
       taskId: job.taskId,
       ensureInfrastructure: false,
     });
-    if (!result.ok) throw new Error(result.error ?? 'Falha ao sincronizar calendario externo');
+    if (!result.ok) throw new Error(result.error ?? 'Falha ao sincronizar calendário externo');
     return;
   }
 

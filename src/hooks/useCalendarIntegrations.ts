@@ -87,7 +87,7 @@ export function useCalendarIntegrations(token: string | null) {
     provider: CalendarIntegrationProvider,
     requestToken = token,
   ) => {
-    if (!requestToken) throw new Error('NÃ£o autenticado');
+    if (!requestToken) throw new Error('Não autenticado');
     const data = await apiPost<CalendarSyncAllResponse>(`/api/calendar/${provider}/sync-all`, {}, requestToken);
     setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
     return data.result;

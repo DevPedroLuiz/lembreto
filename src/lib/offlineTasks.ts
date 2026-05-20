@@ -118,7 +118,7 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
         id: `offline-history-${item.id}`,
         action: 'created',
         title: 'Lembrete salvo offline',
-        description: 'Este lembrete sera sincronizado quando a conexao voltar.',
+        description: 'Este lembrete será sincronizado quando a conexão voltar.',
         createdAt: item.createdAt,
       },
     ],

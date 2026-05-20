@@ -188,7 +188,7 @@ export function HolidaysPanel({
               {calendar?.today.length ?? 0}
             </p>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Eventos do dia que ja podem impactar a agenda.
+              Eventos do dia que já podem impactar a agenda.
             </p>
           </div>
 
@@ -211,12 +211,12 @@ export function HolidaysPanel({
           title="Próximos feriados"
           description="Uma visão clara do que pode alterar expediente, deslocamento ou disponibilidade."
           entries={calendar?.upcoming.filter((entry) => entry.type === 'public' || entry.type === 'bank') ?? []}
-          emptyLabel="Nenhum feriado oficial encontrado para o periodo consultado."
+          emptyLabel="Nenhum feriado oficial encontrado para o período consultado."
         />
 
         <HolidayList
           title="Datas comemorativas"
-          description="Datas observadas e comemorativas que tambem podem orientar seu planejamento."
+          description="Datas observadas e comemorativas que também podem orientar seu planejamento."
           entries={calendar?.commemorative ?? []}
           emptyLabel="Não encontramos datas comemorativas relevantes para este recorte."
         />

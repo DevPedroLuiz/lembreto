@@ -573,7 +573,7 @@ export async function handleAlarmSnooze(context: HandlerContext): Promise<Handle
 
   const scheduleId = resolveNotificationId(context);
   if (!scheduleId) {
-    return json(400, { error: 'Alarme nÃ£o encontrado' });
+    return json(400, { error: 'Alarme não encontrado' });
   }
 
   const parsed = snoozeAlarmSchema.safeParse(request.body ?? {});
@@ -583,7 +583,7 @@ export async function handleAlarmSnooze(context: HandlerContext): Promise<Handle
 
   try {
     const result = await snoozeAlarmSchedule(sql, auth.user.id, scheduleId, parsed.data.minutes);
-    if (!result) return json(404, { error: 'Alarme nÃ£o encontrado' });
+    if (!result) return json(404, { error: 'Alarme não encontrado' });
     return json(201, result);
   } catch (error) {
     logError('alarm_snooze_failed', error, getRequestMeta(request, { userId: auth.user.id, scheduleId }));
@@ -987,7 +987,7 @@ export async function handleCronHealth(context: HandlerContext): Promise<Handler
   if (request.method !== 'GET') return methodNotAllowed();
 
   if (!isAuthorizedCronSecretRequest(context)) {
-    return json(401, { error: 'NÃ£o autorizado' });
+    return json(401, { error: 'Não autorizado' });
   }
 
   const dbHealth = await runCronDbHealth(sql, { includeLocks: true });

@@ -37,7 +37,7 @@ async function getUserIdByEmail(email: string): Promise<string> {
 
   const user = users[0];
   if (!user) {
-    throw new Error(`Usuario de teste nao encontrado para ${email}`);
+    throw new Error(`Usuário de teste não encontrado para ${email}`);
   }
 
   return user.id;

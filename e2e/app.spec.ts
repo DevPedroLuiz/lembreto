@@ -1,4 +1,4 @@
-﻿import { test, expect, type Page, type Response } from '@playwright/test';
+import { test, expect, type Page, type Response } from '@playwright/test';
 import {
   blacklistToken,
   buildE2ETestUser,
@@ -585,9 +585,9 @@ test.describe('Lembreto critical flows', () => {
       expect((await createTagResponsePromise).ok()).toBeTruthy();
       await page.getByRole('button', { name: /fechar configura/i }).click();
 
-      await createTask(page, 'Reuniao com cliente');
+      await createTask(page, 'Reunião com cliente');
 
-      const createdTask = taskCard(page, 'Reuniao com cliente');
+      const createdTask = taskCard(page, 'Reunião com cliente');
       await createdTask.click();
       await expect(page.getByTestId('task-details-dialog')).toBeVisible();
 
@@ -626,7 +626,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-notes').click();
       const noteCard = page.locator('[data-testid="note-card"][data-note-title="Ata final"]').first();
       await expect(noteCard).toBeVisible();
-      await expect(noteCard.getByTestId('note-linked-task')).toContainText('Reuniao com cliente');
+      await expect(noteCard.getByTestId('note-linked-task')).toContainText('Reunião com cliente');
 
       await noteCard.getByTestId('note-delete-button').click();
       await expect(page.getByTestId('confirm-dialog')).toBeVisible();
@@ -1173,10 +1173,12 @@ test.describe('Lembreto critical flows', () => {
       await expect(page.locator('[data-testid="task-item"][data-task-title="Baixa pendente"]')).toHaveCount(0);
 
       await page.getByTestId('task-status-filter-completed').click();
+      await page.getByTestId('task-view-completed').click();
       await expect(page.getByTestId('task-status-summary')).toContainText('Concluídos');
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta concluída"]')).toBeVisible();
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toHaveCount(0);
 
+      await page.getByTestId('task-view-agenda').click();
       await page.getByTestId('task-status-filter-pending').click();
       await expect(page.getByTestId('task-status-summary')).toContainText('Pendentes');
       await expect(page.locator('[data-testid="task-item"][data-task-title="Alta pendente"]')).toBeVisible();
@@ -1219,7 +1221,7 @@ test.describe('Lembreto critical flows', () => {
           category: 'Pessoal',
         },
         {
-          title: 'Atrasada com horario',
+          title: 'Atrasada com horário',
           dueDate: overdueTimed.toISOString(),
           priority: 'high',
           category: 'Trabalho',
@@ -1236,7 +1238,7 @@ test.describe('Lembreto critical flows', () => {
       await expect(allDayTask.getByTestId('task-all-day-badge')).toHaveText('Dia todo');
       await expect(allDayTask.getByTestId('task-time-badge')).toHaveCount(0);
 
-      const timedTask = taskCard(page, 'Atrasada com horario');
+      const timedTask = taskCard(page, 'Atrasada com horário');
       await expect(timedTask.getByTestId('task-due-badge')).toHaveAttribute('data-overdue-kind', 'timed');
       await expect(timedTask.getByTestId('task-time-badge')).toHaveText('08:00');
       await expect(timedTask.getByTestId('task-all-day-badge')).toHaveCount(0);
@@ -1275,7 +1277,7 @@ test.describe('Lembreto critical flows', () => {
       await registerUser(page, user);
       await seedNotificationForUser(user.email, {
         title: 'Bem-vindo!',
-        message: `Ola, ${user.name}!`,
+        message: `Olá, ${user.name}!`,
         tone: 'success',
         target: { type: 'notifications' },
         dedupeKey: `test:welcome:${user.email}`,
@@ -1302,7 +1304,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByRole('button', { name: /Fechar configura/i }).click();
 
       await page.getByTestId('sidebar-tasks').click();
-      await createTask(page, 'Nao deve notificar');
+      await createTask(page, 'Não deve notificar');
 
       await page.getByTestId('header-notifications-button').click();
       await expect(page.getByTestId('recent-notification-item').first()).toContainText('Bem-vindo!');
@@ -1405,4 +1407,3 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 });
-

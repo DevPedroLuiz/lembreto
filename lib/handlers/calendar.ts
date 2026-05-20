@@ -233,7 +233,7 @@ export async function handleCalendarSyncAll(context: HandlerContext): Promise<Ha
   if (context.request.method !== 'POST') return methodNotAllowed();
 
   const provider = resolveProvider(context);
-  if (!provider) return json(400, { error: 'Provedor de calendÃ¡rio invÃ¡lido' });
+  if (!provider) return json(400, { error: 'Provedor de calendário inválido' });
 
   const auth = await requireCalendarAuth(context);
   if ('status' in auth) return auth;
@@ -260,7 +260,7 @@ export async function handleCalendarSyncAll(context: HandlerContext): Promise<Ha
     });
   } catch (error) {
     logError('calendar_sync_all_failed', error, getRequestMeta(context.request, { userId: auth.user.id, provider }));
-    return json(500, { error: 'Falha ao sincronizar calendÃ¡rio externo' });
+    return json(500, { error: 'Falha ao sincronizar calendário externo' });
   }
 }
 

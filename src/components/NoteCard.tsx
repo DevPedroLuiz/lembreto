@@ -13,7 +13,7 @@ import type { Note, Task } from '../types';
 
 const PRIORITY_LABELS = {
   low: 'Baixa',
-  medium: 'Media',
+  medium: 'Média',
   high: 'Alta',
 } as const;
 

@@ -58,7 +58,7 @@ interface TaskHistoryEntry {
 
 const PRIORITY_HISTORY_LABELS: Record<string, string> = {
   low: 'baixa',
-  medium: 'media',
+  medium: 'média',
   high: 'alta',
 };
 const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
@@ -120,11 +120,11 @@ async function requireTaskCalendarAuth(context: HandlerContext) {
     try {
       const payload = verifyCalendarFeedToken(feedToken);
       const user = await getSafeUserById(context.sql, payload.sub);
-      if (!user) return json(401, { error: 'UsuÃ¡rio nÃ£o encontrado' });
+      if (!user) return json(401, { error: 'Usuário não encontrado' });
       return { payload, user, token: feedToken };
     } catch (error) {
       logError('task_calendar_feed_auth_failed', error, getRequestMeta(context.request));
-      return json(401, { error: 'Link de calendÃ¡rio invÃ¡lido' });
+      return json(401, { error: 'Link de calendário inválido' });
     }
   }
 
@@ -326,7 +326,7 @@ function buildUpdateHistoryEntry(
     changedDetails.push('Preferência de notificações em feriados alterada.');
   }
   if (Boolean(current.alarm_enabled) !== Boolean(next.alarmEnabled)) {
-    changedDetails.push('ConfiguraÃ§Ã£o de alarme alterada.');
+    changedDetails.push('Configuração de alarme alterada.');
   }
   if (String(current.status ?? '') !== String(next.status ?? '')) changedDetails.push('Status alterado.');
 
@@ -936,7 +936,7 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
     };
   } catch (error) {
     logError('task_calendar_export_failed', error, getRequestMeta(request, { userId: user.id }));
-    return json(500, { error: 'Erro ao exportar calendÃ¡rio' });
+    return json(500, { error: 'Erro ao exportar calendário' });
   }
 }
 

@@ -843,7 +843,7 @@ export async function generateScheduledNotifications(sql: SqlClient): Promise<Sc
       const result = await createNotification(sql, {
         userId: task.userId,
         title: 'Lembrete para agora',
-        message: `"${task.title}" chegou ao horÃ¡rio definido.`,
+        message: `"${task.title}" chegou ao horário definido.`,
         tone: 'info',
         target: { type: 'task', taskId: task.id },
         dedupeKey: `user:${task.userId}:due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,

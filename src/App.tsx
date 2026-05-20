@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useCallback,
   useEffect,
   useMemo,
@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ListTodo,
   NotebookPen,
+  PanelLeftOpen,
   Plus,
   Settings,
   Sparkles,
@@ -385,6 +386,7 @@ export default function App() {
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
+  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [settingsInitialView, setSettingsInitialView] = useState<SettingsView>('appearance');
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -777,7 +779,7 @@ export default function App() {
     previousPendingOfflineTaskCountRef.current = pendingOfflineTaskCount;
 
     if (previousCount > 0 && pendingOfflineTaskCount === 0 && auth.token) {
-      triggerToastOnly('Lembretes sincronizados', 'Tudo que foi criado offline ja esta salvo na sua conta.');
+      triggerToastOnly('Lembretes sincronizados', 'Tudo que foi criado offline já está salvo na sua conta.');
     }
   }, [auth.token, pendingOfflineTaskCount, triggerToastOnly]);
 
@@ -787,16 +789,16 @@ export default function App() {
     welcomedUserIdRef.current = auth.currentUser.id;
     void createNotification({
       title: 'Bem-vindo!',
-      message: `Ola, ${auth.currentUser.name}!`,
+      message: `Olá, ${auth.currentUser.name}!`,
       tone: 'success',
       target: { type: 'notifications' },
       dedupeKey: `user:${auth.currentUser.id}:welcome:${format(new Date(), 'yyyy-MM-dd')}`,
     }).then((result) => {
       if (!result.created) return;
       seenNotificationIdsRef.current.add(result.notification.id);
-      triggerToastNotification('Bem-vindo!', `Ola, ${auth.currentUser.name}!`);
+      triggerToastNotification('Bem-vindo!', `Olá, ${auth.currentUser.name}!`);
     }).catch(() => {
-      triggerToastNotification('Bem-vindo!', `Ola, ${auth.currentUser.name}!`);
+      triggerToastNotification('Bem-vindo!', `Olá, ${auth.currentUser.name}!`);
     });
   }, [auth.currentUser, auth.token, createNotification, triggerToastNotification]);
 
@@ -1161,11 +1163,18 @@ export default function App() {
 
     setDashboardMetricDialog(null);
     setTaskDetailsReturnMetric(null);
-    setTasksPageView(relatedTask.status === 'draft' ? 'drafts' : 'agenda');
+    const relatedTaskStatus = getDerivedTaskStatus(relatedTask);
+    setTasksPageView(
+      relatedTask.status === 'draft'
+        ? 'drafts'
+        : relatedTaskStatus === 'completed' && configShowCompleted
+          ? 'completed'
+          : 'agenda',
+    );
     setSelectedTask(relatedTask);
     setShowTaskDetails(true);
     setPendingNotificationTaskId(null);
-  }, [pendingNotificationTaskId, tasks]);
+  }, [configShowCompleted, pendingNotificationTaskId, tasks]);
 
   const openNewTask = useCallback(() => {
     resetTaskForm();
@@ -1351,7 +1360,7 @@ export default function App() {
   const downloadCalendarExport = useCallback(async () => {
     if (!auth.token) {
       emitNotification('Faça login primeiro', 'Entre na sua conta para exportar a agenda.', 'warning');
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     const response = await fetch('/api/tasks/calendar.ics', {
@@ -1360,7 +1369,7 @@ export default function App() {
 
     if (!response.ok) {
       emitNotification('Exportação indisponível', 'Não foi possível gerar o arquivo .ics agora.', 'error');
-      throw new Error('Falha ao exportar calendario');
+      throw new Error('Falha ao exportar calendário');
     }
 
     const blob = await response.blob();
@@ -1384,7 +1393,7 @@ export default function App() {
   const copyCalendarFeed = useCallback(async () => {
     if (!auth.token) {
       emitNotification('Faça login primeiro', 'Entre na sua conta para copiar o feed da agenda.', 'warning');
-      throw new Error('Nao autenticado');
+      throw new Error('Não autenticado');
     }
 
     const feed = await apiGet<CalendarFeedResponse>('/api/tasks/calendar/feed', auth.token);
@@ -1805,7 +1814,7 @@ export default function App() {
                   ? 'Lembretes criados com aviso'
                   : 'Lembretes criados!',
               offlineCount > 0
-                ? `${offlineCount} lembrete${offlineCount === 1 ? '' : 's'} ficara${offlineCount === 1 ? '' : 'o'} na fila e sincronizara${offlineCount === 1 ? '' : 'o'} quando a conexao voltar.`
+                ? `${offlineCount} lembrete${offlineCount === 1 ? '' : 's'} ficar${offlineCount === 1 ? 'á' : 'ão'} na fila e sincronizar${offlineCount === 1 ? 'á' : 'ão'} quando a conexão voltar.`
                 : calendarFailedCount > 0
                   ? `${calendarFailedCount} lembrete${calendarFailedCount === 1 ? '' : 's'} foi salvo, mas não sincronizou com o calendário externo.`
                 : `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
@@ -1816,7 +1825,7 @@ export default function App() {
             if (created.syncStatus === 'pending') {
               emitNotification(
                 'Lembrete salvo offline',
-                `"${created.title}" sera sincronizado quando a conexao voltar.`,
+                `"${created.title}" será sincronizado quando a conexão voltar.`,
                 'info',
                 { toastOnly: true },
               );
@@ -3249,25 +3258,41 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] min-h-[100dvh] w-full overflow-hidden text-slate-900 dark:text-slate-100">
-      <Sidebar
-        currentUser={auth.currentUser}
-        activeTab={activeTab}
-        setActiveTab={(tab) => {
-          if (tab === 'tasks') setTasksPageView('agenda');
-          setActiveTab(tab);
-        }}
-        filterCategory={filterCategory}
-        setFilterCategory={setFilterCategory}
-        categories={categoryOptions}
-        pendingTasks={pendingTasks}
-        todayCount={pendingSummary.todayCount}
-        overdueCount={pendingSummary.overdueCount}
-        onOpenProfile={openProfile}
-        onOpenSettings={openSettings}
-        onCreateCategory={createCategory}
-        onDeleteCategory={handleDeleteCategory}
-        onLogout={auth.logout}
-      />
+      {!isSidebarHidden && (
+        <Sidebar
+          currentUser={auth.currentUser}
+          activeTab={activeTab}
+          setActiveTab={(tab) => {
+            if (tab === 'tasks') setTasksPageView('agenda');
+            setActiveTab(tab);
+          }}
+          filterCategory={filterCategory}
+          setFilterCategory={setFilterCategory}
+          categories={categoryOptions}
+          pendingTasks={pendingTasks}
+          todayCount={pendingSummary.todayCount}
+          overdueCount={pendingSummary.overdueCount}
+          onOpenProfile={openProfile}
+          onOpenSettings={openSettings}
+          onCreateCategory={createCategory}
+          onDeleteCategory={handleDeleteCategory}
+          onToggleVisibility={() => setIsSidebarHidden(true)}
+          onLogout={auth.logout}
+        />
+      )}
+
+      {isSidebarHidden && (
+        <button
+          type="button"
+          onClick={() => setIsSidebarHidden(false)}
+          aria-label="Mostrar sidebar"
+          title="Mostrar sidebar"
+          data-testid="sidebar-show-button"
+          className="fixed left-4 top-4 z-50 hidden h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white/90 text-slate-600 shadow-[0_18px_40px_-26px_rgba(15,23,42,0.45)] backdrop-blur transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-white/10 dark:bg-slate-950/88 dark:text-slate-200 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300 lg:flex"
+        >
+          <PanelLeftOpen size={20} />
+        </button>
+      )}
 
       <main className="relative flex h-full flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="pointer-events-none absolute inset-0 bg-grid opacity-40 dark:opacity-20" />

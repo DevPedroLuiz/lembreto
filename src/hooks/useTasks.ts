@@ -35,7 +35,7 @@ function normalizeTaxonomy(data: TaskTaxonomy): TaskTaxonomy {
 
 function findOfflineTask(queueId: string, userId: string): Task {
   const item = loadOfflineTaskCreates(userId).find((current) => current.id === queueId);
-  if (!item) throw new Error('Lembrete offline nao encontrado');
+  if (!item) throw new Error('Lembrete offline não encontrado');
   return buildOfflineTask(item);
 }
 
@@ -344,7 +344,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [syncOfflineTasks, token, userId]);
 
   const createTask = useCallback(async (payload: TaskPayload) => {
-    if (!userId) throw new Error('Nao autenticado');
+    if (!userId) throw new Error('Não autenticado');
     const startedAt = Date.now();
     console.info('createTask:start', {
       hasToken: Boolean(token),
@@ -414,7 +414,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       status: Status;
     }>,
   ) => {
-    if (!userId) throw new Error('Nao autenticado');
+    if (!userId) throw new Error('Não autenticado');
 
     const queueId = getQueueIdFromOfflineTaskId(id);
     if (queueId) {
@@ -426,7 +426,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       return updatedOfflineTask;
     }
 
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     const updated = await apiPut<Task>(`/api/tasks/${id}`, payload, token);
     tasksMutationVersionRef.current += 1;
@@ -447,7 +447,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       return;
     }
 
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     let snapshot: Task[] = [];
     tasksMutationVersionRef.current += 1;
@@ -475,7 +475,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     }
 
     if (task.syncStatus === 'pending') {
-      throw new Error('Aguarde a sincronizacao deste lembrete.');
+      throw new Error('Aguarde a sincronização deste lembrete.');
     }
 
     const newStatus: Status = task.status === 'pending' || task.status === 'overdue' ? 'completed' : 'pending';
@@ -512,7 +512,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [token]);
 
   const createCategory = useCallback(async (name: string) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     const created = await apiPost<{ category: string }>('/api/tasks/categories', { name }, token);
     taxonomyMutationVersionRef.current += 1;
@@ -521,7 +521,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [token]);
 
   const createTag = useCallback(async (name: string) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     const created = await apiPost<{ tag: string }>('/api/tasks/tags', { name }, token);
     taxonomyMutationVersionRef.current += 1;
@@ -530,7 +530,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [token]);
 
   const deleteCategory = useCallback(async (name: string) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     const normalized = name.trim();
     if (!normalized) return;
@@ -541,7 +541,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [refreshTasksAndTaxonomy, token, userId]);
 
   const deleteTag = useCallback(async (name: string) => {
-    if (!token) throw new Error('Nao autenticado');
+    if (!token) throw new Error('Não autenticado');
 
     const normalized = name.trim();
     if (!normalized) return;

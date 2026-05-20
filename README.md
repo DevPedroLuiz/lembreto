@@ -12,7 +12,7 @@ Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação
 
 ## Funcionalidades
 
-- Dashboard com metricas do dia
+- Dashboard com métricas do dia
 - CRUD completo de tarefas
 - Perfil com avatar
 - Login, cadastro, logout e restauração de sessão
@@ -20,7 +20,7 @@ Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação
 - Rate limit em login e cadastro
 - Blacklist de token no logout
 
-## Variaveis de ambiente
+## Variáveis de ambiente
 
 Crie `.env.local` na raiz:
 
@@ -147,27 +147,27 @@ Se quiser uma camada extra de segurança, configure o ambiente `production` no G
 O projeto inclui um scheduler externo em [`.github/workflows/reminder-scheduler.yml`](.github/workflows/reminder-scheduler.yml).
 Ele chama `GET /api/cron/notifications` pelo GitHub Actions a cada 1 minuto para:
 
-- enviar o pre-aviso de 15 minutos;
-- avisar no horario definido no lembrete;
-- disparar alarmes e sonecas no horario correto;
-- processar lembretes sem horario (`floating_reminder`);
+- enviar o pré-aviso de 15 minutos;
+- avisar no horário definido no lembrete;
+- disparar alarmes e sonecas no horário correto;
+- processar lembretes sem horário (`floating_reminder`);
 - repetir alertas de lembretes atrasados em intervalos regulares;
-- persistir esses avisos na central de notificacoes.
+- persistir esses avisos na central de notificações.
 
-Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento frequente fica fora do cron nativo da Vercel. O `vercel.json` deve manter apenas `/api/cron/cleanup` como cron diario; um cron diario em `/api/cron/notifications` quebra a logica de notificacoes no horario correto.
+Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento frequente fica fora do cron nativo da Vercel. O `vercel.json` deve manter apenas `/api/cron/cleanup` como cron diário; um cron diário em `/api/cron/notifications` quebra a lógica de notificações no horário correto.
 
-### Frequencia recomendada
+### Frequência recomendada
 
-Para producao, chame:
+Para produção, chame:
 
 ```text
 GET https://SEU-DOMINIO.com/api/cron/notifications
 Authorization: Bearer {CRON_SECRET}
 ```
 
-Use a frequencia de 1 minuto para reduzir atraso perceptivel em pre-avisos, notificacoes e alarmes.
+Use a frequência de 1 minuto para reduzir atraso perceptível em pré-avisos, notificações e alarmes.
 
-Servicos que podem chamar esse endpoint:
+Serviços que podem chamar esse endpoint:
 
 - cron-job.org
 - EasyCron
@@ -181,7 +181,7 @@ No GitHub Actions, configure:
 - `APP_URL`
 - `CRON_SECRET`
 
-Na Vercel, configure o mesmo `CRON_SECRET` nas variaveis de ambiente do projeto. O valor de `CRON_SECRET` nos GitHub Actions Secrets precisa ser igual ao valor configurado na Vercel.
+Na Vercel, configure o mesmo `CRON_SECRET` nas variáveis de ambiente do projeto. O valor de `CRON_SECRET` nos GitHub Actions Secrets precisa ser igual ao valor configurado na Vercel.
 
 Exemplo:
 
@@ -191,7 +191,7 @@ Exemplo:
 ### Como funciona
 
 O workflow roda a cada 1 minuto.
-Cada execucao faz uma chamada autenticada para:
+Cada execução faz uma chamada autenticada para:
 
 ```text
 GET {APP_URL}/api/cron/notifications
@@ -200,13 +200,13 @@ Authorization: Bearer {CRON_SECRET}
 
 Se quiser testar manualmente, abra a aba `Actions` no GitHub e rode `Reminder Scheduler` com `workflow_dispatch`.
 
-O `vercel.json` deve manter apenas `/api/cron/cleanup` no Vercel Cron diario, com schedule como `0 3 * * *`. Nao recoloque `/api/cron/notifications` no Vercel Cron; esse endpoint e acionado pelo GitHub Actions.
+O `vercel.json` deve manter apenas `/api/cron/cleanup` no Vercel Cron diário, com schedule como `0 3 * * *`. Não recoloque `/api/cron/notifications` no Vercel Cron; esse endpoint é acionado pelo GitHub Actions.
 
 ## Operação
 
-### Limpeza periodica do banco
+### Limpeza periódica do banco
 
-As tabelas abaixo precisam de limpeza periodica:
+As tabelas abaixo precisam de limpeza periódica:
 
 - `token_blacklist`
 - `auth_rate_limit`
@@ -220,7 +220,7 @@ npm run cleanup:db
 
 Em produção, o ideal é agendar esse script com cron. No plano Hobby da Vercel, o cron precisa rodar no máximo uma vez por dia.
 
-### Seguranca aplicada
+### Segurança aplicada
 
 - validação de payload com schemas compartilhados
 - limite de tamanho e formato para avatar

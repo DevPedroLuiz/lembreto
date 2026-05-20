@@ -85,7 +85,7 @@ export function getDatabaseConnectionMetadata(databaseUrl = process.env.DATABASE
 
 export function createSqlClient(databaseUrl = process.env.DATABASE_URL): SqlClient {
   if (!databaseUrl) {
-    throw new Error('DATABASE_URL nao definida nas variaveis de ambiente.');
+    throw new Error('DATABASE_URL não definida nas variáveis de ambiente.');
   }
 
   const metadata = getDatabaseConnectionMetadata(databaseUrl);

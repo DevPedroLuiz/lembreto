@@ -9,6 +9,7 @@ import {
   Loader2,
   LogOut,
   NotebookPen,
+  PanelLeftClose,
   Plus,
   Settings,
   Target,
@@ -34,6 +35,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onCreateCategory: (name: string) => Promise<string>;
   onDeleteCategory: (name: string) => Promise<void>;
+  onToggleVisibility: () => void;
   onLogout: () => void;
 }
 
@@ -51,6 +53,7 @@ export function Sidebar({
   onOpenSettings,
   onCreateCategory,
   onDeleteCategory,
+  onToggleVisibility,
   onLogout,
 }: SidebarProps) {
   const categoryManagerRef = React.useRef<HTMLDivElement | null>(null);
@@ -107,7 +110,7 @@ export function Sidebar({
       setCategoryDraft('');
       setCategoryFeedback(`Categoria "${created}" criada com sucesso.`);
     } catch {
-      setCategoryFeedback('Nao foi possivel criar a categoria agora. Tente novamente.');
+      setCategoryFeedback('Não foi possível criar a categoria agora. Tente novamente.');
     } finally {
       setIsCreatingCategory(false);
     }
@@ -122,12 +125,12 @@ export function Sidebar({
       if (filterCategory === name) {
         setFilterCategory('Todas');
       }
-      setCategoryFeedback(`Categoria "${name}" excluida com sucesso.`);
+      setCategoryFeedback(`Categoria "${name}" excluída com sucesso.`);
     } catch (error) {
       setCategoryFeedback(
         error instanceof Error
           ? error.message
-          : 'Nao foi possivel excluir a categoria agora. Tente novamente.',
+          : 'Não foi possível excluir a categoria agora. Tente novamente.',
       );
     } finally {
       setDeletingCategoryName(null);
@@ -147,7 +150,7 @@ export function Sidebar({
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,0.7)]">
               <Target size={24} />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                 Organização pessoal
               </p>
@@ -155,6 +158,16 @@ export function Sidebar({
                 Lembreto
               </h1>
             </div>
+            <button
+              type="button"
+              onClick={onToggleVisibility}
+              aria-label="Ocultar sidebar"
+              title="Ocultar sidebar"
+              data-testid="sidebar-hide-button"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+            >
+              <PanelLeftClose size={18} />
+            </button>
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-3">
@@ -268,7 +281,7 @@ export function Sidebar({
                             void handleCreateCategory();
                           }
                         }}
-                        placeholder="Ex.: Saude, Financeiro..."
+                        placeholder="Ex.: Saúde, Financeiro..."
                         className="field-control min-h-[44px] px-3 py-2 text-sm"
                       />
                       <button

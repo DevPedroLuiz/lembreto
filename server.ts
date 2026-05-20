@@ -61,7 +61,7 @@ import {
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
-    'DATABASE_URL nao definida.\n' +
+    'DATABASE_URL não definida.\n' +
     'Crie o arquivo .env.local na raiz do projeto com:\n' +
     'DATABASE_URL=postgresql://user:senha@host/dbname?sslmode=require'
   );
@@ -142,7 +142,7 @@ async function startServer() {
 
   app.all('/api/tasks/notes', async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'POST') {
-      res.status(405).json({ error: 'Metodo nao permitido' });
+      res.status(405).json({ error: 'Método não permitido' });
       return;
     }
 
@@ -151,7 +151,7 @@ async function startServer() {
 
   app.all('/api/tasks/notes/:id', async (req, res) => {
     if (req.method !== 'PUT' && req.method !== 'DELETE') {
-      res.status(405).json({ error: 'Metodo nao permitido' });
+      res.status(405).json({ error: 'Método não permitido' });
       return;
     }
 

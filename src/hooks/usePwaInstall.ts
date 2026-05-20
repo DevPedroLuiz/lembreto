@@ -24,13 +24,13 @@ function isIosLike() {
 }
 
 function getInstallHelpText() {
-  if (isStandaloneDisplay()) return 'O Lembreto ja esta instalado neste dispositivo.';
+  if (isStandaloneDisplay()) return 'O Lembreto já está instalado neste dispositivo.';
 
   if (isIosLike()) {
     return 'No Safari, toque em Compartilhar e depois em Adicionar a Tela de Inicio.';
   }
 
-  return 'Se o botao nao aparecer, use o menu do navegador e escolha Instalar app ou Adicionar a tela inicial.';
+  return 'Se o botão não aparecer, use o menu do navegador e escolha Instalar app ou Adicionar à tela inicial.';
 }
 
 export function usePwaInstall() {

@@ -39,7 +39,7 @@ type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | DerivedTaskStatus | 'inactive';
 type TagFilter = 'all' | string;
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
-export type TasksPageView = 'agenda' | 'holidays' | 'drafts';
+export type TasksPageView = 'agenda' | 'completed' | 'holidays' | 'drafts';
 
 const DEFAULT_TASK_SORT_MODE: SortMode = 'dueDate';
 
@@ -566,6 +566,12 @@ export function TasksPage({
   }, [search]);
 
   React.useEffect(() => {
+    if (!showCompleted && activeView === 'completed') {
+      onActiveViewChange('agenda');
+    }
+  }, [activeView, onActiveViewChange, showCompleted]);
+
+  React.useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       if (search !== searchInput) setSearch(searchInput);
     }, SEARCH_DEBOUNCE_MS);
@@ -752,10 +758,11 @@ export function TasksPage({
     [sortMode, visibleCompletedTasks],
   );
 
-  const selectableTasks = React.useMemo(
-    () => [...sortedPendingTasks, ...sortedCompletedTasks],
-    [sortedCompletedTasks, sortedPendingTasks],
-  );
+  const selectableTasks = React.useMemo(() => {
+    if (activeView === 'completed' && showCompleted) return sortedCompletedTasks;
+    if (activeView === 'agenda') return sortedPendingTasks;
+    return [];
+  }, [activeView, showCompleted, sortedCompletedTasks, sortedPendingTasks]);
 
   const selectableTaskIds = React.useMemo(
     () => buildSelectableTaskIds(selectableTasks),
@@ -859,7 +866,9 @@ export function TasksPage({
     [calendarCursor],
   );
 
-  const totalVisibleTasks = sortedPendingTasks.length + sortedCompletedTasks.length;
+  const totalVisibleTasks = activeView === 'completed' && showCompleted
+    ? sortedCompletedTasks.length
+    : sortedPendingTasks.length;
   const hasCustomFilters = hasStoredCustomFilters(
     search,
     filterCategory,
@@ -878,6 +887,7 @@ export function TasksPage({
     dateFilterMode !== 'all',
     search.trim().length > 0,
   ].filter(Boolean).length;
+  const showFiltersForCurrentView = activeView === 'agenda' || (activeView === 'completed' && showCompleted);
   const pageTabs = React.useMemo<Array<{
     value: TasksPageView;
     label: string;
@@ -891,14 +901,21 @@ export function TasksPage({
         label: 'Agenda',
         description: 'Lembretes ativos, filtros e pendencias do dia a dia.',
         icon: <ArrowUpDown size={18} />,
-        countLabel: `${totalVisibleTasks} item${totalVisibleTasks === 1 ? '' : 's'}`,
+        countLabel: `${sortedPendingTasks.length} item${sortedPendingTasks.length === 1 ? '' : 's'}`,
       },
+      ...(showCompleted ? [{
+        value: 'completed' as const,
+        label: 'Concluídos',
+        description: 'Histórico separado dos lembretes que já foram finalizados.',
+        icon: <CheckCheck size={18} />,
+        countLabel: `${sortedCompletedTasks.length} concluído${sortedCompletedTasks.length === 1 ? '' : 's'}`,
+      }] : []),
       {
         value: 'holidays',
         label: 'Datas e feriados',
-        description: 'Calendario de feriados e datas importantes para planejar melhor.',
+        description: 'Calendário de feriados e datas importantes para planejar melhor.',
         icon: <Sparkles size={18} />,
-        countLabel: 'Calendario',
+        countLabel: 'Calendário',
       },
       {
         value: 'drafts',
@@ -908,7 +925,7 @@ export function TasksPage({
         countLabel: `${drafts.length} rascunho${drafts.length === 1 ? '' : 's'}`,
       },
     ],
-    [drafts.length, totalVisibleTasks],
+    [drafts.length, showCompleted, sortedCompletedTasks.length, sortedPendingTasks.length],
   );
 
   const handleResetFilters = React.useCallback(() => {
@@ -942,7 +959,7 @@ export function TasksPage({
     <div className="surface-soft max-w-6xl overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b border-slate-200/70 bg-slate-50/70 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:px-5">
         <div>
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">Filtros da agenda</p>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">Filtros de lembretes</p>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Combine busca, data, categoria e status para chegar no lembrete certo.
           </p>
@@ -1056,7 +1073,7 @@ export function TasksPage({
             <div className="mb-3 flex items-center justify-between gap-2">
               <button
                 type="button"
-                aria-label="Mes anterior"
+                aria-label="Mês anterior"
                 onClick={() => handleCalendarMonthChange(-1)}
                 className="action-ghost h-9 w-9 rounded-xl p-0"
               >
@@ -1312,7 +1329,7 @@ export function TasksPage({
             </p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {pageTabs.map((tab) => {
               const isActive = activeView === tab.value;
 
@@ -1349,7 +1366,7 @@ export function TasksPage({
                           : 'bg-slate-100 text-slate-500 dark:bg-white/[0.06] dark:text-slate-400',
                       ].join(' ')}
                     >
-                      Pagina
+                      Página
                     </span>
                   </span>
                   <span className="mt-4 block text-base font-semibold text-slate-950 dark:text-white">
@@ -1373,7 +1390,7 @@ export function TasksPage({
             })}
           </div>
 
-          {activeView === 'agenda' && (
+          {showFiltersForCurrentView && (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
@@ -1475,7 +1492,7 @@ export function TasksPage({
           )}
         </div>
 
-        {activeView === 'agenda' && (
+        {showFiltersForCurrentView && (
         <div className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:hidden">
           <FilterTag
             active={filterCategory === 'Todas'}
@@ -1495,7 +1512,7 @@ export function TasksPage({
       </section>
 
       <AnimatePresence>
-        {activeView === 'agenda' && filtersOpen && isMobileViewport && (
+        {showFiltersForCurrentView && filtersOpen && isMobileViewport && (
           <>
             <motion.div
               initial={{ opacity: 0 }}
@@ -1519,7 +1536,7 @@ export function TasksPage({
               <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-4 dark:border-white/10">
                 <div>
                   <p id="mobile-filters-title" className="text-sm font-semibold text-slate-900 dark:text-white">
-                    Filtros da agenda
+                    Filtros de lembretes
                   </p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     {activeFilterCount} ativo{activeFilterCount === 1 ? '' : 's'}
@@ -1565,7 +1582,7 @@ export function TasksPage({
                 Lembretes salvos para revisar
               </h4>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Esta pagina fica separada da agenda: nada daqui entra na lista principal ate voce adicionar como lembrete.
+                Esta página fica separada da agenda: nada daqui entra na lista principal até você adicionar como lembrete.
               </p>
             </div>
 
@@ -1701,8 +1718,8 @@ export function TasksPage({
         </section>
       )}
 
-      {activeView === 'agenda' && showCompleted && (statusFilter === 'all' || statusFilter === 'completed') && sortedCompletedTasks.length > 0 && (
-        <section className="surface-panel p-5 opacity-90 md:p-6">
+      {activeView === 'completed' && showCompleted && sortedCompletedTasks.length > 0 && (
+        <section className="surface-panel p-5 md:p-6" data-testid="completed-panel">
           <div className="mb-5">
             <h4 className="text-lg font-semibold text-slate-900 dark:text-white">
               Concluídos ({sortedCompletedTasks.length})
@@ -1740,6 +1757,22 @@ export function TasksPage({
               testIdPrefix="completed-pagination"
             />
           </div>
+        </section>
+      )}
+
+      {activeView === 'completed' && showCompleted && sortedCompletedTasks.length === 0 && (
+        <section className="surface-panel p-5 md:p-6" data-testid="completed-panel">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-[28px] border border-dashed border-slate-200 bg-slate-50/70 px-6 py-16 text-center dark:border-white/10 dark:bg-white/[0.03]"
+          >
+            <CheckCheck size={34} className="mx-auto mb-4 text-slate-400" />
+            <h4 className="text-lg font-semibold text-slate-900 dark:text-white">Nenhum concluído por aqui</h4>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              Não encontramos lembretes concluídos com os filtros atuais.
+            </p>
+          </motion.div>
         </section>
       )}
     </motion.div>

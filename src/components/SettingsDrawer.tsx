@@ -129,6 +129,7 @@ export type SettingsView =
   | 'appearance'
   | 'notifications'
   | 'organization'
+  | 'integrations'
   | 'safety'
   | 'account';
 
@@ -162,6 +163,12 @@ const settingsViews: Array<{
     title: 'Organização',
     description: 'Agenda, tags e categorias.',
     icon: FolderPlus,
+  },
+  {
+    key: 'integrations',
+    title: 'Integrações',
+    description: 'Calendários externos.',
+    icon: Plug,
   },
   {
     key: 'safety',
@@ -265,7 +272,7 @@ function ActionPanel({
   testId?: string;
 }) {
   return (
-    <section className="surface-soft p-5">
+    <section className="rounded-[26px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_18px_50px_-40px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-white/[0.04]">
       <h3 className="text-lg font-semibold text-slate-950 dark:text-white">{title}</h3>
       <p className="mt-2 text-sm leading-7 text-slate-500 dark:text-slate-400">
         {description}
@@ -275,7 +282,7 @@ function ActionPanel({
         type="button"
         onClick={onAction}
         data-testid={testId}
-        className="action-secondary mt-5 w-full justify-between"
+        className="action-secondary mt-5 min-h-[48px] w-full justify-between rounded-2xl"
       >
         {buttonLabel}
         <ArrowRight size={16} />
@@ -489,7 +496,7 @@ export function SettingsDrawer({
       await onDownloadCalendar();
       setCalendarFeedback('Arquivo .ics gerado com seus lembretes pendentes.');
     } catch {
-      setCalendarFeedback('NÃ£o foi possÃ­vel exportar a agenda agora.');
+      setCalendarFeedback('Não foi possível exportar a agenda agora.');
     } finally {
       setIsDownloadingCalendar(false);
     }
@@ -503,7 +510,7 @@ export function SettingsDrawer({
       await onCopyCalendarFeed();
       setCalendarFeedback('Link do feed copiado para assinatura no Google ou Outlook.');
     } catch {
-      setCalendarFeedback('NÃ£o foi possÃ­vel copiar o feed agora.');
+      setCalendarFeedback('Não foi possível copiar o feed agora.');
     } finally {
       setIsCopyingCalendarFeed(false);
     }
@@ -555,7 +562,7 @@ export function SettingsDrawer({
           : `${providerName}: sincronização concluída. ${result.pushed} lembrete${result.pushed === 1 ? '' : 's'} enviado${result.pushed === 1 ? '' : 's'}, ${result.imported} evento${result.imported === 1 ? '' : 's'} importado${result.imported === 1 ? '' : 's'} e ${result.deduplicated} duplicata${result.deduplicated === 1 ? '' : 's'} resolvida${result.deduplicated === 1 ? '' : 's'}.`,
       );
     } catch {
-      setCalendarFeedback('NÃ£o foi possÃ­vel sincronizar todos os lembretes agora.');
+      setCalendarFeedback('Não foi possível sincronizar todos os lembretes agora.');
     } finally {
       setBusyCalendarProvider(null);
     }
@@ -630,10 +637,10 @@ export function SettingsDrawer({
         return (
           <section
             key={card.key}
-            className="flex h-full flex-col justify-between gap-5 rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]"
+            className="flex h-full flex-col justify-between gap-5 rounded-[26px] border border-slate-200/80 bg-white/90 p-5 shadow-[0_18px_48px_-42px_rgba(15,23,42,0.55)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_22px_58px_-42px_rgba(37,99,235,0.55)] dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-400/25"
           >
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                 <Icon size={18} />
               </div>
 
@@ -674,7 +681,7 @@ export function SettingsDrawer({
   );
 
   const renderHolidayRegionPanel = () => (
-    <section className="surface-soft p-5">
+    <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
       <SectionHeader
         eyebrow="Feriados"
         title="Região para feriados"
@@ -784,11 +791,11 @@ export function SettingsDrawer({
   );
 
   const renderCalendarSyncPanel = () => (
-    <section className="surface-soft p-5">
+    <section className="rounded-[28px] border border-blue-100 bg-blue-50/50 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
       <SectionHeader
-        eyebrow="Agenda externa"
-        title="Google Calendar e Outlook"
-        description="Exporte um arquivo .ics ou copie um feed assinÃ¡vel com os lembretes pendentes."
+        eyebrow="Exportação"
+        title="Feed e arquivo de calendário"
+        description="Exporte um arquivo .ics ou copie um feed assinável com os lembretes pendentes."
       />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -819,7 +826,7 @@ export function SettingsDrawer({
       <div className="mt-4 flex items-start gap-3 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
         <CalendarDays size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
         <p>
-          O feed inclui lembretes pendentes com prazo definido e atualiza conforme o aplicativo publicar novas alteraÃ§Ãµes.
+          O feed inclui lembretes pendentes com prazo definido e é atualizado conforme o aplicativo publica novas alterações.
         </p>
       </div>
 
@@ -850,11 +857,11 @@ export function SettingsDrawer({
     ];
 
     return (
-      <section className="surface-soft p-5">
+      <section className="rounded-[28px] border border-blue-100 bg-blue-50/50 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
         <SectionHeader
           eyebrow="Calendários conectados"
           title="Sincronização real"
-          description="Conecte Google Calendar ou Outlook Calendar. Apenas lembretes autorizados e com prazo definido são enviados."
+          description="Conecte o Google Calendar ou o Outlook Calendar. Apenas lembretes autorizados e com prazo definido são enviados."
         />
 
         <div className="space-y-3">
@@ -866,7 +873,7 @@ export function SettingsDrawer({
             return (
               <div
                 key={provider}
-                className="rounded-[26px] border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]"
+                className="rounded-[26px] border border-slate-200/80 bg-white/92 p-4 shadow-[0_18px_48px_-42px_rgba(15,23,42,0.5)] dark:border-white/10 dark:bg-slate-950/42"
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex min-w-0 items-start gap-3">
@@ -959,7 +966,7 @@ export function SettingsDrawer({
           })}
         </div>
 
-        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+        <div className="mt-4 rounded-2xl border border-blue-200/80 bg-white/86 px-4 py-3 text-sm text-slate-600 dark:border-blue-400/20 dark:bg-slate-950/40 dark:text-slate-300">
           A permissão solicitada é a mínima necessária para criar, atualizar e remover os eventos gerados pelo Lembreto.
         </div>
       </section>
@@ -967,7 +974,7 @@ export function SettingsDrawer({
   };
 
   const renderInstallPanel = () => (
-    <section className="surface-soft p-5">
+    <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
       <SectionHeader
         eyebrow="PWA"
         title="Instalar app"
@@ -978,7 +985,7 @@ export function SettingsDrawer({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-3">
             <span className="inline-flex rounded-full border border-slate-200/80 bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-400">
-              {isInstalled ? 'Instalado' : canInstall ? 'Disponivel' : 'Manual'}
+              {isInstalled ? 'Instalado' : canInstall ? 'Disponível' : 'Manual'}
             </span>
             <div>
               <h3 className="text-base font-semibold text-slate-900 dark:text-white">
@@ -1017,12 +1024,12 @@ export function SettingsDrawer({
       case 'appearance':
         return (
           <section className="space-y-4">
-            <section className="surface-soft p-5">
-            <SectionHeader
-              eyebrow="Aparência"
-              title="Visual do sistema"
-              description="Ajuste o visual para deixar o uso mais confortável."
-            />
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+              <SectionHeader
+                eyebrow="Aparência"
+                title="Visual do sistema"
+                description="Ajuste o visual para deixar o uso mais confortável."
+              />
               {renderToggleCards(appearanceCards)}
             </section>
 
@@ -1047,7 +1054,7 @@ export function SettingsDrawer({
               badge: 'Pendente',
               title: 'Push ainda não configurado',
               description:
-                'As chaves do ambiente ainda não foram carregadas, então este navegador não pode se conectar ao Windows.',
+                'As chaves do ambiente ainda não foram carregadas; portanto, este navegador não pode se conectar ao Windows.',
               buttonLabel: null as string | null,
             };
           }
@@ -1093,7 +1100,7 @@ export function SettingsDrawer({
 
         return (
           <section className="space-y-4">
-            <section className="surface-soft p-5">
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Notificações"
                 title="Alertas e sinais"
@@ -1102,7 +1109,7 @@ export function SettingsDrawer({
               {renderToggleCards(notificationCards)}
             </section>
 
-            <section className="surface-soft p-5">
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Windows"
                 title="Notificações do sistema"
@@ -1164,7 +1171,7 @@ export function SettingsDrawer({
       case 'organization':
         return (
           <section className="space-y-4">
-            <section className="surface-soft p-5">
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Organização"
                 title="Visibilidade dos lembretes"
@@ -1173,19 +1180,19 @@ export function SettingsDrawer({
               {renderToggleCards(organizationCards)}
             </section>
 
-            <section className="surface-soft p-5">
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Prazos"
-                title="HorÃ¡rio padrÃ£o sem registro"
-                description="Defina hora e minutos para lembretes salvos sem horÃ¡rio."
+                title="Horário padrão sem registro"
+                description="Defina hora e minutos para lembretes salvos sem horário."
               />
 
-              <div className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-5 dark:border-white/10 dark:bg-white/[0.04]">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                       <Clock3 size={16} />
-                      PadrÃ£o atual
+                      Padrão atual
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                       {`${`${noTimeReminderParts.hours}`.padStart(2, '0')}:${`${noTimeReminderParts.minutes}`.padStart(2, '0')}`}
@@ -1229,11 +1236,7 @@ export function SettingsDrawer({
               </div>
             </section>
 
-            {renderConnectedCalendarsPanel()}
-
-            {renderCalendarSyncPanel()}
-
-            <section className="surface-soft p-5">
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Taxonomia"
                 title="Categorias e tags"
@@ -1258,7 +1261,7 @@ export function SettingsDrawer({
                           void handleCreateCategory();
                         }
                       }}
-                      placeholder="Ex.: Saude, Financeiro..."
+                      placeholder="Ex.: Saúde, Financeiro..."
                       className="field-control"
                     />
                     <button
@@ -1385,13 +1388,48 @@ export function SettingsDrawer({
 
       case 'safety':
         return (
-          <section className="surface-soft p-5">
+          <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
             <SectionHeader
               eyebrow="Segurança"
               title="Proteção de ações"
               description="Reduza o risco de mudanças acidentais e mantenha os lembretes mais protegidos no uso diário."
             />
             {renderToggleCards(safetyCards)}
+          </section>
+        );
+
+      case 'integrations':
+        return (
+          <section className="space-y-4">
+            <section className="rounded-[28px] border border-blue-100 bg-blue-50/60 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
+              <SectionHeader
+                eyebrow="Integrações"
+                title="Calendários externos"
+                description="Conecte serviços externos, exporte sua agenda e sincronize lembretes com mais controle."
+              />
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-blue-100 bg-white/86 px-4 py-3 dark:border-blue-400/20 dark:bg-slate-950/40">
+                  <p className="text-xs font-semibold uppercase text-blue-600 dark:text-blue-300">Conexões</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">
+                    {calendarIntegrations.filter((item) => item.connected).length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-blue-100 bg-white/86 px-4 py-3 dark:border-blue-400/20 dark:bg-slate-950/40">
+                  <p className="text-xs font-semibold uppercase text-blue-600 dark:text-blue-300">Envio automático</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">
+                    {calendarIntegrations.filter((item) => item.connected && item.syncEnabled).length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-blue-100 bg-white/86 px-4 py-3 dark:border-blue-400/20 dark:bg-slate-950/40">
+                  <p className="text-xs font-semibold uppercase text-blue-600 dark:text-blue-300">Formatos</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">.ics</p>
+                </div>
+              </div>
+            </section>
+
+            {renderConnectedCalendarsPanel()}
+
+            {renderCalendarSyncPanel()}
           </section>
         );
 
@@ -1445,7 +1483,7 @@ export function SettingsDrawer({
               </div>
             )}
 
-            <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
+            <div className="border-b border-slate-200/80 bg-slate-50/80 px-6 py-5 dark:border-white/10 dark:bg-white/[0.03] md:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <span className="section-eyebrow">
@@ -1456,7 +1494,7 @@ export function SettingsDrawer({
                     Configurações
                   </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-                    Ajuste notificações, organização e comportamento do aplicativo.
+                    Ajuste notificações, organização, integrações e comportamento do aplicativo.
                   </p>
                 </div>
 
@@ -1473,7 +1511,7 @@ export function SettingsDrawer({
 
             <div className="flex-1 overflow-y-auto px-6 py-6 md:px-7">
               <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]">
-                <aside className="surface-soft h-fit p-4">
+                <aside className="h-fit rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03]">
                   <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Seções de configurações">
                     {settingsViews.map((view) => {
                       const Icon = view.icon;
@@ -1486,7 +1524,7 @@ export function SettingsDrawer({
                           onClick={() => setActiveView(view.key)}
                           data-testid={view.key === 'notifications' ? 'settings-nav-center' : `settings-nav-${view.key}`}
                           className={[
-                            'flex min-w-[200px] items-start gap-3 rounded-[22px] border px-4 py-3 text-left transition-all lg:w-full lg:min-w-0',
+                            'flex min-w-[200px] items-start gap-3 rounded-[22px] border px-4 py-3 text-left transition-all hover:-translate-y-0.5 lg:w-full lg:min-w-0',
                             isActive
                               ? 'border-blue-500/30 bg-blue-50 text-blue-700 shadow-[0_20px_40px_-28px_rgba(37,99,235,0.8)] dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300'
                               : 'border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300 dark:hover:border-white/15 dark:hover:bg-white/[0.06]',
@@ -1495,7 +1533,7 @@ export function SettingsDrawer({
                         >
                           {view.key === 'notifications' && (
                             <span data-testid="settings-nav-notifications" className="sr-only">
-                              Notificacoes
+                              Notificações
                             </span>
                           )}
                           <span className={[
@@ -1519,10 +1557,10 @@ export function SettingsDrawer({
                   </nav>
                 </aside>
 
-                <section className="space-y-4">
-                  <div className="surface-soft p-5">
+                <section className="space-y-5">
+                  <div className="rounded-[28px] border border-slate-200/80 bg-white/88 p-5 shadow-[0_18px_60px_-48px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-white/[0.04]">
                     <div className="flex items-start gap-4">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-blue-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-blue-300">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                         <activeViewMeta.icon size={20} />
                       </div>
                       <div>
@@ -1537,10 +1575,8 @@ export function SettingsDrawer({
                         </p>
                       </div>
                     </div>
-                    <div className="mt-6">
-                      {renderActiveView()}
-                    </div>
                   </div>
+                  {renderActiveView()}
                 </section>
               </div>
             </div>
