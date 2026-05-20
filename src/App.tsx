@@ -1,4 +1,6 @@
 import React, {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -24,22 +26,21 @@ import { apiGet, apiPost, buildHeaders } from './api/client';
 import { useAuth } from './hooks/useAuth';
 import { useCalendarIntegrations } from './hooks/useCalendarIntegrations';
 import { useHolidays } from './hooks/useHolidays';
+import { useAlarmSound } from './hooks/useAlarmSound';
+import { useAppConfig } from './hooks/useAppConfig';
 import { useNotes } from './hooks/useNotes';
 import { useNotifications } from './hooks/useNotifications';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
-import { LS, type AppConfig } from './lib/storage';
 import { cn } from './lib/cn';
 import { AUTH_UNAUTHORIZED_EVENT } from './lib/authEvents';
 import {
   buildDueDateFromForm,
-  DEFAULT_NO_TIME_REMINDER_MINUTES,
   formatDateInputValue,
   formatTimeInputValue,
   formatMinutesAsTimeInput,
   getTaskTimeLabel,
-  normalizeNoTimeReminderMinutes,
   parseDueDateToForm,
 } from './lib/taskDueDate';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from './lib/taskStatus';
@@ -61,32 +62,46 @@ import {
   type Task,
 } from './types';
 import { LoadingScreen } from './components/LoadingScreen';
-import { NoteDrawer } from './components/NoteDrawer';
 import { Sidebar } from './components/Sidebar';
-import { TaskDrawer } from './components/TaskDrawer';
-import { TaskDetailsDialog } from './components/TaskDetailsDialog';
-import { DashboardMetricDialog } from './components/DashboardMetricDialog';
-import { NotificationsInboxDrawer } from './components/NotificationsInboxDrawer';
-import { ProfileDrawer } from './components/ProfileDrawer';
-import { SettingsDrawer, type SettingsView } from './components/SettingsDrawer';
+import type { SettingsView } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { AuthPage } from './pages/AuthPage';
-import { NotesPage } from './pages/NotesPage';
-import { NotificationsPage } from './pages/NotificationsPage';
-import { ResetPage } from './pages/ResetPage';
-import { DashboardPage, type QuickStartTemplate } from './pages/DashboardPage';
-import { TasksPage, type TasksPageView } from './pages/TasksPage';
-import { CalendarPage } from './pages/CalendarPage';
+import type { QuickStartTemplate } from './pages/DashboardPage';
+import type { TasksPageView } from './pages/TasksPage';
 
-type AppConfigPatch = Partial<{
-  darkMode: boolean;
-  notifications: boolean;
-  sound: boolean;
-  confirmDelete: boolean;
-  showCompleted: boolean;
-  noTimeReminderMinutes: number;
-}>;
+const AuthPage = lazy(() => import('./pages/AuthPage').then((module) => ({ default: module.AuthPage })));
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((module) => ({ default: module.CalendarPage })));
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })));
+const NotesPage = lazy(() => import('./pages/NotesPage').then((module) => ({ default: module.NotesPage })));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then((module) => ({ default: module.NotificationsPage })));
+const ResetPage = lazy(() => import('./pages/ResetPage').then((module) => ({ default: module.ResetPage })));
+const TasksPage = lazy(() => import('./pages/TasksPage').then((module) => ({ default: module.TasksPage })));
+
+const DashboardMetricDialog = lazy(() => import('./components/DashboardMetricDialog').then((module) => ({ default: module.DashboardMetricDialog })));
+const NoteDrawer = lazy(() => import('./components/NoteDrawer').then((module) => ({ default: module.NoteDrawer })));
+const NotificationsInboxDrawer = lazy(() => import('./components/NotificationsInboxDrawer').then((module) => ({ default: module.NotificationsInboxDrawer })));
+const ProfileDrawer = lazy(() => import('./components/ProfileDrawer').then((module) => ({ default: module.ProfileDrawer })));
+const SettingsDrawer = lazy(() => import('./components/SettingsDrawer').then((module) => ({ default: module.SettingsDrawer })));
+const TaskDetailsDialog = lazy(() => import('./components/TaskDetailsDialog').then((module) => ({ default: module.TaskDetailsDialog })));
+const TaskDrawer = lazy(() => import('./components/TaskDrawer').then((module) => ({ default: module.TaskDrawer })));
+
+function PageChunkFallback() {
+  return (
+    <div className="surface-panel flex min-h-[320px] items-center justify-center p-8 text-sm font-medium text-slate-500 dark:text-slate-400">
+      Carregando area...
+    </div>
+  );
+}
+
+function useHasBeenOpened(open: boolean) {
+  const [hasBeenOpened, setHasBeenOpened] = useState(open);
+
+  useEffect(() => {
+    if (open) setHasBeenOpened(true);
+  }, [open]);
+
+  return hasBeenOpened;
+}
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
 type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
@@ -106,6 +121,8 @@ type LocalNotificationOptions = Pick<EmitNotificationOptions, 'skipToast' | 'tar
 
 type CalendarFeedResponse = {
   feedPath: string;
+  expiresAt: string;
+  revokedCount: number;
 };
 
 const UPCOMING_REMINDER_MINUTES = 15;
@@ -374,8 +391,18 @@ export default function App() {
     isLoading: isHolidayLoading,
     refresh: refreshHolidays,
   } = useHolidays(isResetPasswordRoute ? null : auth.token, isResetPasswordRoute ? null : auth.currentUser);
+  const {
+    darkMode,
+    notificationsEnabled,
+    setNotificationsEnabled,
+    configSound,
+    configConfirmDelete,
+    configShowCompleted,
+    configNoTimeReminderMinutes,
+    saveConfig,
+    toggleDarkMode,
+  } = useAppConfig();
 
-  const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
   const [tasksPageView, setTasksPageView] = useState<TasksPageView>('agenda');
   const [filterCategory, setFilterCategory] = useState('Todas');
@@ -388,15 +415,15 @@ export default function App() {
   const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [settingsInitialView, setSettingsInitialView] = useState<SettingsView>('appearance');
+  const shouldRenderTaskDrawer = useHasBeenOpened(showTaskDrawer);
+  const shouldRenderNoteDrawer = useHasBeenOpened(showNoteDrawer);
+  const shouldRenderProfileDrawer = useHasBeenOpened(showProfileDrawer);
+  const shouldRenderSettingsDrawer = useHasBeenOpened(showSettings);
+  const shouldRenderNotificationsInbox = useHasBeenOpened(showNotificationsInbox);
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [isOnline, setIsOnline] = useState(() => (
     typeof navigator === 'undefined' ? true : navigator.onLine
   ));
-  const [configSound, setConfigSound] = useState(true);
-  const [configConfirmDelete, setConfigConfirmDelete] = useState(true);
-  const [configShowCompleted, setConfigShowCompleted] = useState(true);
-  const [configNoTimeReminderMinutes, setConfigNoTimeReminderMinutes] = useState(DEFAULT_NO_TIME_REMINDER_MINUTES);
 
   const [formTitle, setFormTitle] = useState('');
   const [formDesc, setFormDesc] = useState('');
@@ -419,6 +446,8 @@ export default function App() {
   const [isNoteSubmitting, setIsNoteSubmitting] = useState(false);
   const [showTaskDetails, setShowTaskDetails] = useState(false);
   const [dashboardMetricDialog, setDashboardMetricDialog] = useState<DashboardMetricKey | null>(null);
+  const shouldRenderTaskDetails = useHasBeenOpened(showTaskDetails);
+  const shouldRenderDashboardMetric = useHasBeenOpened(Boolean(dashboardMetricDialog));
   const [taskDetailsReturnMetric, setTaskDetailsReturnMetric] = useState<DashboardMetricKey | null>(null);
   const [pendingNotificationTaskId, setPendingNotificationTaskId] = useState<string | null>(null);
   const [deletingTaskIds, setDeletingTaskIds] = useState<Set<string>>(new Set());
@@ -479,8 +508,21 @@ export default function App() {
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
   const alarmDismissedKeysRef = useRef<Set<string>>(new Set());
   const alarmSnoozeUntilRef = useRef<Map<string, number>>(new Map());
-  const alarmSoundStopRef = useRef<(() => void) | null>(null);
   const alarmAutoCloseTimerRef = useRef<number | null>(null);
+  const {
+    playSuccessSound,
+    startAlarmSound,
+    stopAlarmSound: stopAlarmTone,
+  } = useAlarmSound(configSound);
+
+  const stopAlarmSound = useCallback(() => {
+    stopAlarmTone();
+
+    if (alarmAutoCloseTimerRef.current) {
+      window.clearTimeout(alarmAutoCloseTimerRef.current);
+      alarmAutoCloseTimerRef.current = null;
+    }
+  }, [stopAlarmTone]);
 
   const minimumTaskDate = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const categoryOptions = useMemo(
@@ -591,13 +633,6 @@ export default function App() {
   });
 
   useEffect(() => {
-    const cfg = LS.getConfig();
-    if (typeof cfg.darkMode === 'boolean') setDarkMode(cfg.darkMode);
-    if (typeof cfg.notifications === 'boolean') setNotificationsEnabled(cfg.notifications);
-    if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
-    if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
-    if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
-    setConfigNoTimeReminderMinutes(normalizeNoTimeReminderMinutes(cfg.noTimeReminderMinutes));
     alarmDismissedKeysRef.current = new Set(readDismissedAlarmKeys());
     localNotificationDedupeRef.current = new Set(readStringListFromLocalStorage(LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY));
   }, []);
@@ -728,21 +763,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-  }, [darkMode]);
-
-  useEffect(() => {
     if (serverNotificationsEnabled === null) return;
 
     if (notificationPreferenceHydratedRef.current) return;
 
     notificationPreferenceHydratedRef.current = true;
-    setNotificationsEnabled(serverNotificationsEnabled);
-    LS.saveConfig({
-      ...LS.getConfig(),
-      notifications: serverNotificationsEnabled,
-    });
-  }, [serverNotificationsEnabled]);
+    saveConfig({ notifications: serverNotificationsEnabled });
+  }, [saveConfig, serverNotificationsEnabled]);
 
   useEffect(() => {
     if (!auth.token) {
@@ -857,39 +884,6 @@ export default function App() {
     return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
   }, [auth.logout, auth.token, triggerToastOnly]);
 
-  const saveConfig = useCallback((patch: AppConfigPatch) => {
-    const persistedConfig = LS.getConfig();
-    const next: AppConfig = {
-      ...persistedConfig,
-      darkMode,
-      notifications: notificationsEnabled,
-      sound: configSound,
-      confirmDelete: configConfirmDelete,
-      showCompleted: configShowCompleted,
-      noTimeReminderMinutes: configNoTimeReminderMinutes,
-      ...patch,
-    };
-    next.noTimeReminderMinutes = normalizeNoTimeReminderMinutes(next.noTimeReminderMinutes);
-    if (typeof next.darkMode === 'boolean') setDarkMode(next.darkMode);
-    setNotificationsEnabled(Boolean(next.notifications));
-    setConfigSound(Boolean(next.sound));
-    setConfigConfirmDelete(Boolean(next.confirmDelete));
-    setConfigShowCompleted(Boolean(next.showCompleted));
-    setConfigNoTimeReminderMinutes(next.noTimeReminderMinutes);
-    LS.saveConfig(next);
-  }, [
-    configConfirmDelete,
-    configNoTimeReminderMinutes,
-    configShowCompleted,
-    configSound,
-    darkMode,
-    notificationsEnabled,
-  ]);
-
-  const toggleDarkMode = useCallback(() => {
-    saveConfig({ darkMode: !darkMode });
-  }, [darkMode, saveConfig]);
-
   const handleDeleteCategory = useCallback(async (name: string) => {
     await deleteCategory(name);
     await refreshNotes();
@@ -899,105 +893,6 @@ export default function App() {
     await deleteTag(name);
     await refreshNotes();
   }, [deleteTag, refreshNotes]);
-
-  const playSuccessSound = useCallback(() => {
-    if (!configSound) return;
-
-    try {
-      const audioContext = window.AudioContext || (window as typeof window & {
-        webkitAudioContext?: typeof AudioContext;
-      }).webkitAudioContext;
-
-      if (!audioContext) return;
-
-      const ctx = new audioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(800, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.4);
-    } catch {
-      // best effort sound
-    }
-  }, [configSound]);
-
-  const stopAlarmSound = useCallback(() => {
-    alarmSoundStopRef.current?.();
-    alarmSoundStopRef.current = null;
-
-    if (alarmAutoCloseTimerRef.current) {
-      window.clearTimeout(alarmAutoCloseTimerRef.current);
-      alarmAutoCloseTimerRef.current = null;
-    }
-  }, []);
-
-  const startAlarmSound = useCallback(() => {
-    stopAlarmSound();
-
-    try {
-      const audioContext = window.AudioContext || (window as typeof window & {
-        webkitAudioContext?: typeof AudioContext;
-      }).webkitAudioContext;
-
-      if (!audioContext) return;
-
-      const ctx = new audioContext();
-      let stopped = false;
-      let activeOscillator: OscillatorNode | null = null;
-      let activeGain: GainNode | null = null;
-
-      const playPulse = () => {
-        if (stopped) return;
-
-        if (ctx.state === 'suspended') {
-          void ctx.resume().catch(() => undefined);
-        }
-
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-        oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.16);
-        gain.gain.setValueAtTime(0.001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.32, ctx.currentTime + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-
-        oscillator.connect(gain);
-        gain.connect(ctx.destination);
-        oscillator.start();
-        oscillator.stop(ctx.currentTime + 0.5);
-        activeOscillator = oscillator;
-        activeGain = gain;
-      };
-
-      playPulse();
-      const pulseInterval = window.setInterval(playPulse, 1000);
-
-      alarmSoundStopRef.current = () => {
-        stopped = true;
-        window.clearInterval(pulseInterval);
-        try {
-          activeOscillator?.stop();
-        } catch {
-          // oscillator may already be stopped
-        }
-        activeOscillator?.disconnect();
-        activeGain?.disconnect();
-        void ctx.close().catch(() => undefined);
-      };
-    } catch {
-      // alarm sound is best effort; the visible alarm stays available.
-    }
-  }, [stopAlarmSound]);
 
   useEffect(() => {
     if (!activeAlarm?.scheduleId) return;
@@ -1406,6 +1301,24 @@ export default function App() {
     }
 
     emitNotification('Feed copiado', 'Use o link para assinar os lembretes no Google Calendar ou Outlook.', 'success');
+  }, [auth.token, emitNotification]);
+
+  const rotateCalendarFeed = useCallback(async () => {
+    if (!auth.token) {
+      emitNotification('Faça login primeiro', 'Entre na sua conta para rotacionar o feed da agenda.', 'warning');
+      throw new Error('Não autenticado');
+    }
+
+    const feed = await apiPost<CalendarFeedResponse>('/api/tasks/calendar/feed', {}, auth.token);
+    const feedUrl = new URL(feed.feedPath, window.location.origin).toString();
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(feedUrl);
+    } else {
+      fallbackCopyText(feedUrl);
+    }
+
+    emitNotification('Feed rotacionado', 'Links anteriores foram revogados e o novo feed foi copiado.', 'success');
   }, [auth.token, emitNotification]);
 
   const handleConnectCalendar = useCallback((provider: 'google' | 'outlook') => {
@@ -3189,7 +3102,11 @@ export default function App() {
   }, []);
 
   if (isResetPasswordRoute) {
-    return <ResetPage onBackToLogin={() => navigateTo('/')} />;
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <ResetPage onBackToLogin={() => navigateTo('/')} />
+      </Suspense>
+    );
   }
 
   if (auth.restoring) {
@@ -3198,12 +3115,14 @@ export default function App() {
 
   if (!auth.currentUser) {
     return (
-      <AuthPage
-        auth={auth}
-        toastNotify={(title, message) => emitNotification(title, message, 'success', {
-          target: { type: 'notifications' },
-        })}
-      />
+      <Suspense fallback={<LoadingScreen />}>
+        <AuthPage
+          auth={auth}
+          toastNotify={(title, message) => emitNotification(title, message, 'success', {
+            target: { type: 'notifications' },
+          })}
+        />
+      </Suspense>
     );
   }
 
@@ -3439,98 +3358,100 @@ export default function App() {
               exit={isMobileViewport ? { opacity: 0, x: tabAnimationDirection * -28 } : { opacity: 0, y: -10 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
             >
-              {activeTab === 'dashboard' && (
-                <DashboardPage
-                  tasks={dashboardTasks}
-                  pendingTasks={pendingTasks}
-                  overdueTasks={overdueTasks}
-                  completedTasks={completedTasks}
-                  todayCount={pendingSummary.todayCount}
-                  overdueCount={pendingSummary.overdueCount}
-                  onViewAll={openTasksTab}
-                  onOpenCompleted={() => openDashboardMetric('completed')}
-                  onOpenToday={() => openDashboardMetric('today')}
-                  onOpenOverdue={() => openDashboardMetric('overdue')}
-                  onNewTask={openNewTask}
-                  onApplyTemplate={openTaskFromTemplate}
-                  onToggle={handleToggle}
-                  onDelete={handleDelete}
-                  onEdit={openTaskDetails}
-                  deletingTaskIds={deletingTaskIds}
-                  togglingTaskIds={togglingTaskIds}
-                />
-              )}
-              {activeTab === 'calendar' && (
-                <CalendarPage
-                  tasks={calendarTasks}
-                  categories={categoryOptions}
-                  tags={tagOptions}
-                  onNewTask={openNewTask}
-                  onToggle={handleToggle}
-                  onDelete={handleDelete}
-                  onEdit={openTaskDetails}
-                  deletingTaskIds={deletingTaskIds}
-                  togglingTaskIds={togglingTaskIds}
-                />
-              )}
-              {activeTab === 'tasks' && (
-                <TasksPage
-                  pendingTasks={taskListRows}
-                  completedTasks={completedTasks}
-                  categories={categoryOptions}
-                  tags={tagOptions}
-                  filterCategory={filterCategory}
-                  setFilterCategory={setFilterCategory}
-                  search={search}
-                  setSearch={setSearch}
-                  showCompleted={configShowCompleted}
-                  onNewTask={openNewTask}
-                  onToggle={handleToggle}
-                  onToggleActive={handleToggleActiveTask}
-                  onDelete={handleDelete}
-                  onDeleteSelected={handleDeleteSelectedTasks}
-                  onEdit={openTaskDetails}
-                  drafts={draftTasks}
-                  onEditDraft={openEditTask}
-                  onPromoteDraft={handlePromoteDraft}
-                  activeView={tasksPageView}
-                  onActiveViewChange={setTasksPageView}
-                  deletingTaskIds={deletingTaskIds}
-                  promotingDraftIds={promotingDraftIds}
-                  togglingTaskIds={togglingTaskIds}
-                  togglingActiveTaskIds={togglingActiveTaskIds}
-                  holidayCalendar={holidayCalendar}
-                  isHolidayLoading={isHolidayLoading}
-                  isDetectingHolidayLocation={isDetectingHolidayLocation}
-                  onRefreshHolidays={() => {
-                    void refreshHolidays();
-                  }}
-                  onDetectHolidayLocation={() => {
-                    void detectHolidayLocation();
-                  }}
-                  onOpenHolidaySettings={openHolidaySettings}
-                />
-              )}
-              {activeTab === 'notes' && (
-                <NotesPage
-                  notes={notes}
-                  trashedNotes={trashedNotes}
-                  tasks={tasks}
-                  categories={categoryOptions}
-                  onNewNote={() => openNewNote()}
-                  onEditNote={(note) => openEditNote(note)}
-                  onDeleteNote={handleDeleteNote}
-                  onRestoreNote={openRestoreNote}
-                />
-              )}
-              {activeTab === 'notifications' && (
-                <NotificationsPage
-                  notifications={notifications}
-                  onMarkAllRead={markAllNotificationsRead}
-                  onClearAll={clearNotifications}
-                  onOpenNotification={handleOpenNotification}
-                />
-              )}
+              <Suspense fallback={<PageChunkFallback />}>
+                {activeTab === 'dashboard' && (
+                  <DashboardPage
+                    tasks={dashboardTasks}
+                    pendingTasks={pendingTasks}
+                    overdueTasks={overdueTasks}
+                    completedTasks={completedTasks}
+                    todayCount={pendingSummary.todayCount}
+                    overdueCount={pendingSummary.overdueCount}
+                    onViewAll={openTasksTab}
+                    onOpenCompleted={() => openDashboardMetric('completed')}
+                    onOpenToday={() => openDashboardMetric('today')}
+                    onOpenOverdue={() => openDashboardMetric('overdue')}
+                    onNewTask={openNewTask}
+                    onApplyTemplate={openTaskFromTemplate}
+                    onToggle={handleToggle}
+                    onDelete={handleDelete}
+                    onEdit={openTaskDetails}
+                    deletingTaskIds={deletingTaskIds}
+                    togglingTaskIds={togglingTaskIds}
+                  />
+                )}
+                {activeTab === 'calendar' && (
+                  <CalendarPage
+                    tasks={calendarTasks}
+                    categories={categoryOptions}
+                    tags={tagOptions}
+                    onNewTask={openNewTask}
+                    onToggle={handleToggle}
+                    onDelete={handleDelete}
+                    onEdit={openTaskDetails}
+                    deletingTaskIds={deletingTaskIds}
+                    togglingTaskIds={togglingTaskIds}
+                  />
+                )}
+                {activeTab === 'tasks' && (
+                  <TasksPage
+                    pendingTasks={taskListRows}
+                    completedTasks={completedTasks}
+                    categories={categoryOptions}
+                    tags={tagOptions}
+                    filterCategory={filterCategory}
+                    setFilterCategory={setFilterCategory}
+                    search={search}
+                    setSearch={setSearch}
+                    showCompleted={configShowCompleted}
+                    onNewTask={openNewTask}
+                    onToggle={handleToggle}
+                    onToggleActive={handleToggleActiveTask}
+                    onDelete={handleDelete}
+                    onDeleteSelected={handleDeleteSelectedTasks}
+                    onEdit={openTaskDetails}
+                    drafts={draftTasks}
+                    onEditDraft={openEditTask}
+                    onPromoteDraft={handlePromoteDraft}
+                    activeView={tasksPageView}
+                    onActiveViewChange={setTasksPageView}
+                    deletingTaskIds={deletingTaskIds}
+                    promotingDraftIds={promotingDraftIds}
+                    togglingTaskIds={togglingTaskIds}
+                    togglingActiveTaskIds={togglingActiveTaskIds}
+                    holidayCalendar={holidayCalendar}
+                    isHolidayLoading={isHolidayLoading}
+                    isDetectingHolidayLocation={isDetectingHolidayLocation}
+                    onRefreshHolidays={() => {
+                      void refreshHolidays();
+                    }}
+                    onDetectHolidayLocation={() => {
+                      void detectHolidayLocation();
+                    }}
+                    onOpenHolidaySettings={openHolidaySettings}
+                  />
+                )}
+                {activeTab === 'notes' && (
+                  <NotesPage
+                    notes={notes}
+                    trashedNotes={trashedNotes}
+                    tasks={tasks}
+                    categories={categoryOptions}
+                    onNewNote={() => openNewNote()}
+                    onEditNote={(note) => openEditNote(note)}
+                    onDeleteNote={handleDeleteNote}
+                    onRestoreNote={openRestoreNote}
+                  />
+                )}
+                {activeTab === 'notifications' && (
+                  <NotificationsPage
+                    notifications={notifications}
+                    onMarkAllRead={markAllNotificationsRead}
+                    onClearAll={clearNotifications}
+                    onOpenNotification={handleOpenNotification}
+                  />
+                )}
+              </Suspense>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -3653,210 +3574,227 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <TaskDetailsDialog
-        open={showTaskDetails && Boolean(selectedTask)}
-        task={selectedTask}
-        linkedNotes={selectedTask ? notesByTask.get(selectedTask.id) ?? [] : []}
-        isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
-        isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
-        isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
-        isSyncingCalendar={selectedTask ? syncingCalendarTaskIds.has(selectedTask.id) : false}
-        isTogglingActive={selectedTask ? togglingActiveTaskIds.has(selectedTask.id) : false}
-        backLabel={taskDetailsBackLabel || undefined}
-        onClose={closeTaskDetails}
-        onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
-        onEdit={openEditTask}
-        onDuplicate={openDuplicateTask}
-        onShare={handleShareTask}
-        onSyncCalendar={handleSyncTaskCalendar}
-        onQuickReschedule={handleQuickReschedule}
-        onToggle={handleToggleFromDetails}
-        onToggleActive={handleToggleActiveTask}
-        onDelete={handleDeleteFromDetails}
-        onCreateLinkedNote={openNewNote}
-        onEditLinkedNote={(note, task) => openEditNote(note, { taskContextId: task.id })}
-        onDeleteLinkedNote={handleDeleteNote}
-      />
+      <Suspense fallback={null}>
+        {shouldRenderTaskDetails && (
+          <TaskDetailsDialog
+            open={showTaskDetails && Boolean(selectedTask)}
+            task={selectedTask}
+            linkedNotes={selectedTask ? notesByTask.get(selectedTask.id) ?? [] : []}
+            isDeleting={selectedTask ? deletingTaskIds.has(selectedTask.id) : false}
+            isToggling={selectedTask ? togglingTaskIds.has(selectedTask.id) : false}
+            isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
+            isSyncingCalendar={selectedTask ? syncingCalendarTaskIds.has(selectedTask.id) : false}
+            isTogglingActive={selectedTask ? togglingActiveTaskIds.has(selectedTask.id) : false}
+            backLabel={taskDetailsBackLabel || undefined}
+            onClose={closeTaskDetails}
+            onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
+            onEdit={openEditTask}
+            onDuplicate={openDuplicateTask}
+            onShare={handleShareTask}
+            onSyncCalendar={handleSyncTaskCalendar}
+            onQuickReschedule={handleQuickReschedule}
+            onToggle={handleToggleFromDetails}
+            onToggleActive={handleToggleActiveTask}
+            onDelete={handleDeleteFromDetails}
+            onCreateLinkedNote={openNewNote}
+            onEditLinkedNote={(note, task) => openEditNote(note, { taskContextId: task.id })}
+            onDeleteLinkedNote={handleDeleteNote}
+          />
+        )}
 
-      <DashboardMetricDialog
-        open={Boolean(dashboardMetricContent)}
-        title={dashboardMetricContent?.title ?? ''}
-        description={dashboardMetricContent?.description ?? ''}
-        tasks={dashboardMetricContent?.tasks ?? []}
-        countLabel={dashboardMetricContent?.countLabel ?? ''}
-        onClose={closeDashboardMetric}
-        onOpenAll={() => {
-          closeDashboardMetric();
-          openTasksTab();
-        }}
-        onToggle={handleToggle}
-        onDelete={handleDelete}
-        onEdit={(task) => {
-          if (dashboardMetricDialog) {
-            openTaskDetailsFromMetric(task, dashboardMetricDialog);
-          }
-        }}
-        deletingTaskIds={deletingTaskIds}
-        togglingTaskIds={togglingTaskIds}
-      />
+        {shouldRenderDashboardMetric && (
+          <DashboardMetricDialog
+            open={Boolean(dashboardMetricContent)}
+            title={dashboardMetricContent?.title ?? ''}
+            description={dashboardMetricContent?.description ?? ''}
+            tasks={dashboardMetricContent?.tasks ?? []}
+            countLabel={dashboardMetricContent?.countLabel ?? ''}
+            onClose={closeDashboardMetric}
+            onOpenAll={() => {
+              closeDashboardMetric();
+              openTasksTab();
+            }}
+            onToggle={handleToggle}
+            onDelete={handleDelete}
+            onEdit={(task) => {
+              if (dashboardMetricDialog) {
+                openTaskDetailsFromMetric(task, dashboardMetricDialog);
+              }
+            }}
+            deletingTaskIds={deletingTaskIds}
+            togglingTaskIds={togglingTaskIds}
+          />
+        )}
 
-      <TaskDrawer
-        open={showTaskDrawer}
-        onClose={resetTaskForm}
-        onSubmit={handleSubmitTask}
-        onSaveDraft={handleSaveTaskDraft}
-        editingTask={editingTask}
-        darkMode={darkMode}
-        isSubmitting={isTaskSubmitting}
-        title={formTitle}
-        setTitle={setFormTitle}
-        description={formDesc}
-        setDescription={setFormDesc}
-        date={formDate}
-        setDate={setFormDate}
-        time={formTime}
-        setTime={setFormTime}
-        endTime={formEndTime}
-        setEndTime={setFormEndTime}
-        noTimeReminderFallbackTime={noTimeReminderFallbackTime}
-        dueDateError={taskDueDateError}
-        endTimeError={taskEndTimeError}
-        minimumDate={minimumTaskDate}
-        priority={formPriority}
-        setPriority={setFormPriority}
-        category={formCategory}
-        setCategory={setFormCategory}
-        categoryOptions={categoryOptions}
-        tags={formTags}
-        setTags={setFormTags}
-        tagOptions={tagOptions}
-        recurrenceEnabled={formRecurrenceEnabled}
-        setRecurrenceEnabled={setFormRecurrenceEnabled}
-        recurrenceMode={formRecurrenceMode}
-        setRecurrenceMode={setFormRecurrenceMode}
-        recurrenceUntil={formRecurrenceUntil}
-        setRecurrenceUntil={setFormRecurrenceUntil}
-        suppressHolidayNotifications={formSuppressHolidayNotifications}
-        setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
-        alarmEnabled={formAlarmEnabled}
-        setAlarmEnabled={setFormAlarmEnabled}
-        recurrenceError={recurrenceError}
-        recurrencePreviewCount={recurringDates.length}
-        holidaySuppressedCount={recurringHolidaySuppressedCount}
-        onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}
-      />
+        {shouldRenderTaskDrawer && (
+          <TaskDrawer
+            open={showTaskDrawer}
+            onClose={resetTaskForm}
+            onSubmit={handleSubmitTask}
+            onSaveDraft={handleSaveTaskDraft}
+            editingTask={editingTask}
+            darkMode={darkMode}
+            isSubmitting={isTaskSubmitting}
+            title={formTitle}
+            setTitle={setFormTitle}
+            description={formDesc}
+            setDescription={setFormDesc}
+            date={formDate}
+            setDate={setFormDate}
+            time={formTime}
+            setTime={setFormTime}
+            endTime={formEndTime}
+            setEndTime={setFormEndTime}
+            noTimeReminderFallbackTime={noTimeReminderFallbackTime}
+            dueDateError={taskDueDateError}
+            endTimeError={taskEndTimeError}
+            minimumDate={minimumTaskDate}
+            priority={formPriority}
+            setPriority={setFormPriority}
+            category={formCategory}
+            setCategory={setFormCategory}
+            categoryOptions={categoryOptions}
+            tags={formTags}
+            setTags={setFormTags}
+            tagOptions={tagOptions}
+            recurrenceEnabled={formRecurrenceEnabled}
+            setRecurrenceEnabled={setFormRecurrenceEnabled}
+            recurrenceMode={formRecurrenceMode}
+            setRecurrenceMode={setFormRecurrenceMode}
+            recurrenceUntil={formRecurrenceUntil}
+            setRecurrenceUntil={setFormRecurrenceUntil}
+            suppressHolidayNotifications={formSuppressHolidayNotifications}
+            setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
+            alarmEnabled={formAlarmEnabled}
+            setAlarmEnabled={setFormAlarmEnabled}
+            recurrenceError={recurrenceError}
+            recurrencePreviewCount={recurringDates.length}
+            holidaySuppressedCount={recurringHolidaySuppressedCount}
+            onApplyRecurrenceSuggestion={applyRecurrenceSuggestion}
+          />
+        )}
 
-      <NoteDrawer
-        open={showNoteDrawer}
-        onClose={resetNoteForm}
-        onSubmit={handleSubmitNote}
-        editingNote={editingNote}
-        isSubmitting={isNoteSubmitting}
-        title={noteTitle}
-        setTitle={setNoteTitle}
-        content={noteContent}
-        setContent={setNoteContent}
-        priority={notePriority}
-        setPriority={setNotePriority}
-        category={noteCategory}
-        setCategory={setNoteCategory}
-        categoryOptions={categoryOptions}
-        tags={noteTags}
-        setTags={setNoteTags}
-        tagOptions={tagOptions}
-        mode={noteMode}
-        setMode={setNoteMode}
-        expiresAt={noteExpiresAt}
-        setExpiresAt={setNoteExpiresAt}
-        isRestoring={isRestoringNote}
-        taskId={noteTaskId}
-        setTaskId={setNoteTaskId}
-        tasks={tasks}
-        lockedTask={noteContextTask}
-        lockedTaskId={noteContextTaskId}
-      />
+        {shouldRenderNoteDrawer && (
+          <NoteDrawer
+            open={showNoteDrawer}
+            onClose={resetNoteForm}
+            onSubmit={handleSubmitNote}
+            editingNote={editingNote}
+            isSubmitting={isNoteSubmitting}
+            title={noteTitle}
+            setTitle={setNoteTitle}
+            content={noteContent}
+            setContent={setNoteContent}
+            priority={notePriority}
+            setPriority={setNotePriority}
+            category={noteCategory}
+            setCategory={setNoteCategory}
+            categoryOptions={categoryOptions}
+            tags={noteTags}
+            setTags={setNoteTags}
+            tagOptions={tagOptions}
+            mode={noteMode}
+            setMode={setNoteMode}
+            expiresAt={noteExpiresAt}
+            setExpiresAt={setNoteExpiresAt}
+            isRestoring={isRestoringNote}
+            taskId={noteTaskId}
+            setTaskId={setNoteTaskId}
+            tasks={tasks}
+            lockedTask={noteContextTask}
+            lockedTaskId={noteContextTaskId}
+          />
+        )}
 
-      <ProfileDrawer
-        open={showProfileDrawer}
-        onClose={closeProfileDrawer}
-        onSubmit={handleUpdateProfile}
-        onLogout={auth.logout}
-        currentUser={auth.currentUser}
-        isSubmitting={isProfileSubmitting}
-        saveSuccess={profileSaveSuccess}
-        name={profName}
-        setName={setProfName}
-        email={profEmail}
-        setEmail={setProfEmail}
-        password={profPassword}
-        setPassword={setProfPassword}
-        avatar={profAvatar}
-        setAvatar={setProfAvatar}
-      />
+        {shouldRenderProfileDrawer && (
+          <ProfileDrawer
+            open={showProfileDrawer}
+            onClose={closeProfileDrawer}
+            onSubmit={handleUpdateProfile}
+            onLogout={auth.logout}
+            currentUser={auth.currentUser}
+            isSubmitting={isProfileSubmitting}
+            saveSuccess={profileSaveSuccess}
+            name={profName}
+            setName={setProfName}
+            email={profEmail}
+            setEmail={setProfEmail}
+            password={profPassword}
+            setPassword={setProfPassword}
+            avatar={profAvatar}
+            setAvatar={setProfAvatar}
+          />
+        )}
 
-      <SettingsDrawer
-        open={showSettings}
-        onClose={closeSettingsDrawer}
-        initialView={settingsInitialView}
-        darkMode={darkMode}
-        onToggleDarkMode={toggleDarkMode}
-        notificationsEnabled={notificationsEnabled}
-        onToggleNotifications={() => {
-          void handleToggleNotifications();
-        }}
-        desktopNotificationsSupported={pushSupported}
-        desktopNotificationsReady={desktopNotificationsReady}
-        desktopNotificationsPermission={notifPerm}
-        desktopNotificationsConfigured={pushConfigured}
-        desktopNotificationsError={desktopPushError}
-        isSyncingDesktopNotifications={isSyncingDesktopNotifications}
-        onEnableDesktopNotifications={() => {
-          void handleEnableDesktopNotifications();
-        }}
-        onOpenNotificationsCenter={openNotificationsCenter}
-        onOpenProfile={openProfile}
-        sound={configSound}
-        onToggleSound={() => saveConfig({ sound: !configSound })}
-        confirmDelete={configConfirmDelete}
-        onToggleConfirmDelete={() => saveConfig({ confirmDelete: !configConfirmDelete })}
-        showCompleted={configShowCompleted}
-        onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
-        noTimeReminderMinutes={configNoTimeReminderMinutes}
-        onChangeNoTimeReminderMinutes={(minutes) => saveConfig({ noTimeReminderMinutes: minutes })}
-        categories={categoryOptions}
-        tags={tagOptions}
-        onCreateCategory={createCategory}
-        onCreateTag={createTag}
-        onDeleteCategory={handleDeleteCategory}
-        onDeleteTag={handleDeleteTag}
-        onDownloadCalendar={downloadCalendarExport}
-        onCopyCalendarFeed={copyCalendarFeed}
-        calendarIntegrations={calendarIntegrations}
-        isLoadingCalendarIntegrations={isLoadingCalendarIntegrations}
-        onConnectCalendar={handleConnectCalendar}
-        onDisconnectCalendar={handleDisconnectCalendar}
-        onToggleCalendarSync={handleToggleCalendarSync}
-        onSyncAllCalendar={handleSyncAllCalendar}
-        holidayStateCode={auth.currentUser?.stateCode ?? null}
-        holidayCityName={auth.currentUser?.cityName ?? null}
-        holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}
-        holidayMunicipalSupported={holidayCalendar?.location.municipalSupported ?? false}
-        holidaySupportedCities={holidayCalendar?.supportedCities ?? []}
-        isSavingHolidayLocation={isSavingHolidayLocation}
-        isDetectingHolidayLocation={isDetectingHolidayLocation}
-        onSaveHolidayLocation={saveHolidayLocation}
-        onDetectHolidayLocation={detectHolidayLocation}
-      />
+        {shouldRenderSettingsDrawer && (
+          <SettingsDrawer
+            open={showSettings}
+            onClose={closeSettingsDrawer}
+            initialView={settingsInitialView}
+            darkMode={darkMode}
+            onToggleDarkMode={toggleDarkMode}
+            notificationsEnabled={notificationsEnabled}
+            onToggleNotifications={() => {
+              void handleToggleNotifications();
+            }}
+            desktopNotificationsSupported={pushSupported}
+            desktopNotificationsReady={desktopNotificationsReady}
+            desktopNotificationsPermission={notifPerm}
+            desktopNotificationsConfigured={pushConfigured}
+            desktopNotificationsError={desktopPushError}
+            isSyncingDesktopNotifications={isSyncingDesktopNotifications}
+            onEnableDesktopNotifications={() => {
+              void handleEnableDesktopNotifications();
+            }}
+            onOpenNotificationsCenter={openNotificationsCenter}
+            onOpenProfile={openProfile}
+            sound={configSound}
+            onToggleSound={() => saveConfig({ sound: !configSound })}
+            confirmDelete={configConfirmDelete}
+            onToggleConfirmDelete={() => saveConfig({ confirmDelete: !configConfirmDelete })}
+            showCompleted={configShowCompleted}
+            onToggleShowCompleted={() => saveConfig({ showCompleted: !configShowCompleted })}
+            noTimeReminderMinutes={configNoTimeReminderMinutes}
+            onChangeNoTimeReminderMinutes={(minutes) => saveConfig({ noTimeReminderMinutes: minutes })}
+            categories={categoryOptions}
+            tags={tagOptions}
+            onCreateCategory={createCategory}
+            onCreateTag={createTag}
+            onDeleteCategory={handleDeleteCategory}
+            onDeleteTag={handleDeleteTag}
+            onDownloadCalendar={downloadCalendarExport}
+            onCopyCalendarFeed={copyCalendarFeed}
+            onRotateCalendarFeed={rotateCalendarFeed}
+            calendarIntegrations={calendarIntegrations}
+            isLoadingCalendarIntegrations={isLoadingCalendarIntegrations}
+            onConnectCalendar={handleConnectCalendar}
+            onDisconnectCalendar={handleDisconnectCalendar}
+            onToggleCalendarSync={handleToggleCalendarSync}
+            onSyncAllCalendar={handleSyncAllCalendar}
+            holidayStateCode={auth.currentUser?.stateCode ?? null}
+            holidayCityName={auth.currentUser?.cityName ?? null}
+            holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}
+            holidayMunicipalSupported={holidayCalendar?.location.municipalSupported ?? false}
+            holidaySupportedCities={holidayCalendar?.supportedCities ?? []}
+            isSavingHolidayLocation={isSavingHolidayLocation}
+            isDetectingHolidayLocation={isDetectingHolidayLocation}
+            onSaveHolidayLocation={saveHolidayLocation}
+            onDetectHolidayLocation={detectHolidayLocation}
+          />
+        )}
 
-      <NotificationsInboxDrawer
-        open={showNotificationsInbox}
-        notifications={notifications}
-        unreadCount={unreadNotifications}
-        onClose={closeNotificationsInbox}
-        onOpenNotification={handleOpenNotification}
-        onPreviewNotification={handlePreviewNotification}
-        onOpenCenter={openNotificationsCenter}
-      />
+        {shouldRenderNotificationsInbox && (
+          <NotificationsInboxDrawer
+            open={showNotificationsInbox}
+            notifications={notifications}
+            unreadCount={unreadNotifications}
+            onClose={closeNotificationsInbox}
+            onOpenNotification={handleOpenNotification}
+            onPreviewNotification={handlePreviewNotification}
+            onOpenCenter={openNotificationsCenter}
+          />
+        )}
+      </Suspense>
 
       <Toast toast={toastMsg} onDismiss={dismissToast} />
 
@@ -3921,5 +3859,3 @@ export default function App() {
     </div>
   );
 }
-
-

@@ -130,7 +130,7 @@ async function startServer() {
   app.post('/api/tasks', run(handleTasksCollection));
   app.get('/api/tasks/metadata', run(handleTaskTaxonomy));
   app.get('/api/tasks/calendar.ics', run(handleTaskCalendarExport));
-  app.get('/api/tasks/calendar/feed', run(handleTaskCalendarFeed));
+  app.all('/api/tasks/calendar/feed', run(handleTaskCalendarFeed));
   app.get('/api/tasks/holidays', run(handleTaskHolidays));
   app.post('/api/tasks/holidays/location', run(handleTaskHolidayLocationDetect));
   app.post('/api/tasks/categories', run(handleTaskCategoriesCollection));

@@ -2,10 +2,16 @@ import type { SqlClient } from './handlers/core.js';
 import { cleanupExpiredNotificationTasks } from './notification-schedules.js';
 
 export async function cleanupDatabase(sql: SqlClient) {
-  const [blacklist, rateLimit, resetTokens, notifications, notificationTasks] = await Promise.all([
+  const [blacklist, rateLimit, resetTokens, calendarFeeds, notifications, notificationTasks] = await Promise.all([
     sql`DELETE FROM token_blacklist WHERE expires_at < NOW() RETURNING token_jti`,
     sql`DELETE FROM auth_rate_limit WHERE attempted_at < NOW() - INTERVAL '1 hour' RETURNING id`,
     sql`DELETE FROM password_reset_tokens WHERE expires_at < NOW() OR used = TRUE RETURNING id`,
+    sql`
+      DELETE FROM calendar_feeds
+      WHERE expires_at < NOW()
+         OR revoked_at < NOW() - INTERVAL '30 days'
+      RETURNING id
+    `.catch(() => []),
     sql`
       DELETE FROM notifications
       WHERE created_at < NOW() - INTERVAL '180 days'
@@ -22,6 +28,7 @@ export async function cleanupDatabase(sql: SqlClient) {
     tokenBlacklistRows: blacklist.length,
     authRateLimitRows: rateLimit.length,
     passwordResetRows: resetTokens.length,
+    calendarFeedRows: calendarFeeds.length,
     notificationRows: notifications.length,
     floatingAutoDeletedRows: notificationTasks.floatingTasks,
     overdueAutoDeletedRows: notificationTasks.overdueTasks,

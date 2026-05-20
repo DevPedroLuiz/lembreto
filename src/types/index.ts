@@ -53,6 +53,26 @@ export interface Task {
   history?: TaskHistoryEvent[];
 }
 
+export interface TaskListResponse {
+  items: Task[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  sort: 'created' | 'dueDate' | 'priority' | 'category';
+  filters: {
+    status: 'pending' | 'overdue' | 'completed' | 'inactive' | 'cancelled' | null;
+    search: string | null;
+    priority: Priority | null;
+    category: string | null;
+    tag: string | null;
+    dueStart?: string | null;
+    dueEnd?: string | null;
+  };
+}
+
 export type CalendarIntegrationProvider = CalendarProvider;
 
 export interface CalendarIntegrationStatus {

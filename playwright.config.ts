@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
-import dotenv from 'dotenv';
+import { configureE2EDatabaseEnv } from './e2e/support/e2e-env';
 
-dotenv.config({ path: '.env.local' });
+configureE2EDatabaseEnv();
 
 process.env.VITE_DISABLE_RECAPTCHA = 'true';
 process.env.RECAPTCHA_SKIP_VERIFY = 'true';
@@ -28,7 +28,7 @@ export default defineConfig({
     video: 'off',
   },
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run dev:e2e',
     url: baseURL,
     reuseExistingServer,
     timeout: 120_000,

@@ -10,6 +10,7 @@ test-results/
 # ENV
 .env*
 !.env.example
+!.env.e2e.example
 
 # Database backups
 backups/

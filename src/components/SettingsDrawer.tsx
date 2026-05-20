@@ -108,6 +108,7 @@ interface SettingsDrawerProps {
   onDeleteTag: (name: string) => Promise<void>;
   onDownloadCalendar: () => Promise<void>;
   onCopyCalendarFeed: () => Promise<void>;
+  onRotateCalendarFeed: () => Promise<void>;
   calendarIntegrations: CalendarIntegrationStatus[];
   isLoadingCalendarIntegrations: boolean;
   onConnectCalendar: (provider: CalendarIntegrationProvider) => void;
@@ -324,6 +325,7 @@ export function SettingsDrawer({
   onDeleteTag,
   onDownloadCalendar,
   onCopyCalendarFeed,
+  onRotateCalendarFeed,
   calendarIntegrations,
   isLoadingCalendarIntegrations,
   onConnectCalendar,
@@ -351,6 +353,7 @@ export function SettingsDrawer({
   const [deletingTagName, setDeletingTagName] = React.useState<string | null>(null);
   const [isDownloadingCalendar, setIsDownloadingCalendar] = React.useState(false);
   const [isCopyingCalendarFeed, setIsCopyingCalendarFeed] = React.useState(false);
+  const [isRotatingCalendarFeed, setIsRotatingCalendarFeed] = React.useState(false);
   const [busyCalendarProvider, setBusyCalendarProvider] = React.useState<CalendarIntegrationProvider | null>(null);
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
   const [calendarFeedback, setCalendarFeedback] = React.useState('');
@@ -515,6 +518,20 @@ export function SettingsDrawer({
       setIsCopyingCalendarFeed(false);
     }
   }, [isCopyingCalendarFeed, onCopyCalendarFeed]);
+
+  const handleRotateCalendarFeed = React.useCallback(async () => {
+    if (isRotatingCalendarFeed) return;
+
+    try {
+      setIsRotatingCalendarFeed(true);
+      await onRotateCalendarFeed();
+      setCalendarFeedback('Feed rotacionado. Links anteriores foram revogados e o novo link foi copiado.');
+    } catch {
+      setCalendarFeedback('Não foi possível rotacionar o feed agora.');
+    } finally {
+      setIsRotatingCalendarFeed(false);
+    }
+  }, [isRotatingCalendarFeed, onRotateCalendarFeed]);
 
   const handleDisconnectCalendar = React.useCallback(async (provider: CalendarIntegrationProvider) => {
     if (busyCalendarProvider) return;
@@ -798,7 +815,7 @@ export function SettingsDrawer({
         description="Exporte um arquivo .ics ou copie um feed assinável com os lembretes pendentes."
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <button
           type="button"
           onClick={() => {
@@ -821,12 +838,23 @@ export function SettingsDrawer({
           {isCopyingCalendarFeed ? <Loader2 size={16} className="animate-spin" /> : <Link size={16} />}
           Copiar feed
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            void handleRotateCalendarFeed();
+          }}
+          disabled={isRotatingCalendarFeed}
+          className="action-secondary min-h-[52px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isRotatingCalendarFeed ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+          Rotacionar
+        </button>
       </div>
 
       <div className="mt-4 flex items-start gap-3 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
         <CalendarDays size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
         <p>
-          O feed inclui lembretes pendentes com prazo definido e é atualizado conforme o aplicativo publica novas alterações.
+          O feed inclui lembretes pendentes com prazo definido, expira automaticamente e pode ser rotacionado se o link for compartilhado por engano.
         </p>
       </div>
 

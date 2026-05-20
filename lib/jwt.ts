@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 
 const SECRET = process.env.JWT_SECRET;
+export const CALENDAR_FEED_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 if (!SECRET) {
   throw new Error(
@@ -19,8 +20,11 @@ export interface JwtPayload {
 export interface CalendarFeedJwtPayload {
   sub: string;
   email: string;
+  fid: string;
+  jti: string;
   scope: 'calendar-feed';
   iat?: number;
+  exp?: number;
 }
 
 export interface CalendarOAuthStateJwtPayload {
@@ -42,14 +46,22 @@ export function verifyToken(token: string): JwtPayload {
   return jwt.verify(token, SECRET as string) as JwtPayload;
 }
 
-export function signCalendarFeedToken(payload: Omit<CalendarFeedJwtPayload, 'iat' | 'scope'>): string {
-  return jwt.sign({ ...payload, scope: 'calendar-feed' }, SECRET as string);
+export function signCalendarFeedToken(payload: Omit<CalendarFeedJwtPayload, 'iat' | 'exp' | 'scope'>): string {
+  const { jti, ...claims } = payload;
+  return jwt.sign(
+    { ...claims, scope: 'calendar-feed' },
+    SECRET as string,
+    { expiresIn: CALENDAR_FEED_TOKEN_TTL_SECONDS, jwtid: jti },
+  );
 }
 
 export function verifyCalendarFeedToken(token: string): CalendarFeedJwtPayload {
   const payload = jwt.verify(token, SECRET as string) as CalendarFeedJwtPayload;
   if (payload.scope !== 'calendar-feed') {
     throw new Error('Invalid calendar feed token scope');
+  }
+  if (!payload.fid || !payload.jti) {
+    throw new Error('Invalid calendar feed token identifiers');
   }
 
   return payload;

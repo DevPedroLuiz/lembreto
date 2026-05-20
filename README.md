@@ -59,6 +59,7 @@ Notas:
 - `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha. Em produção, `RECAPTCHA_SITE_KEY` pode ser usada como fallback runtime pela rota `/api/auth/config`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
 - Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no frontend; o app usa somente `DATABASE_URL` no backend.
+- Para E2E, use `.env.e2e` com `DATABASE_URL_TEST`; o Playwright e os helpers recusam hosts que nao parecam ser de teste.
 
 ## Setup local
 
@@ -115,6 +116,17 @@ npm run test
 npm run test:e2e
 ```
 
+Antes do E2E, crie `.env.e2e` a partir de `.env.e2e.example`:
+
+```env
+DATABASE_URL_TEST=postgres://postgres:postgres@127.0.0.1:5432/lembreto_test?sslmode=disable
+JWT_SECRET=uma_chave_longa_e_aleatoria_com_pelo_menos_32_caracteres
+PORT=3001
+APP_URL=http://127.0.0.1:3001
+```
+
+O host de `DATABASE_URL_TEST` precisa ser `localhost`, `127.0.0.1` ou conter `test`/`e2e` no nome. Para um banco remoto dedicado a E2E, declare o host exato em `E2E_DATABASE_HOST_ALLOWLIST`.
+
 ## CI
 
 O repositório agora inclui pipeline em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) para rodar:
@@ -126,7 +138,6 @@ O repositório agora inclui pipeline em [`.github/workflows/ci.yml`](.github/wor
 
 Para o workflow funcionar no GitHub Actions, configure estes secrets no repositório:
 
-- `DATABASE_URL`
 - `JWT_SECRET`
 
 ## Deploy

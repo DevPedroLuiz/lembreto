@@ -1,5 +1,5 @@
-import sql from '../../api/_db';
 import { buildTokenJti } from '../../lib/auth';
+import { createSqlClient } from '../../lib/db';
 import {
   createNotification,
   generateScheduledNotifications,
@@ -8,6 +8,9 @@ import {
 import { verifyToken } from '../../lib/jwt';
 import { createPasswordResetToken } from '../../lib/password-reset';
 import type { NotificationTone } from '../../lib/contracts';
+import { getRequiredE2EDatabaseUrl } from './e2e-env';
+
+const sql = createSqlClient(getRequiredE2EDatabaseUrl());
 
 export interface E2ETestUser {
   name: string;

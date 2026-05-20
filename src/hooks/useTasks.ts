@@ -16,7 +16,7 @@ import {
   updateOfflineTaskCreate,
   type TaskCreatePayload,
 } from '../lib/offlineTasks';
-import type { Priority, Status, Task, TaskTaxonomy, User } from '../types';
+import type { Priority, Status, Task, TaskListResponse, TaskTaxonomy, User } from '../types';
 
 type TaskPayload = TaskCreatePayload;
 type InFlightRequest<T> = {
@@ -25,12 +25,17 @@ type InFlightRequest<T> = {
 };
 
 const SYNC_REFRESH_DEBOUNCE_MS = 3000;
+const TASK_FETCH_PAGE_SIZE = 100;
 
 function normalizeTaxonomy(data: TaskTaxonomy): TaskTaxonomy {
   return {
     categories: Array.isArray(data.categories) ? data.categories : [],
     tags: Array.isArray(data.tags) ? data.tags : [],
   };
+}
+
+function isTaskListResponse(data: TaskListResponse | Task[]): data is TaskListResponse {
+  return typeof data === 'object' && data !== null && !Array.isArray(data) && Array.isArray(data.items);
 }
 
 function findOfflineTask(queueId: string, userId: string): Task {
@@ -86,8 +91,24 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       await existingRequest.promise.catch(() => undefined);
     }
 
-    const promise = apiGet<Task[]>('/api/tasks', requestToken)
-      .then((data) => (Array.isArray(data) ? data : []))
+    const promise = (async () => {
+      const firstPage = await apiGet<TaskListResponse | Task[]>(
+        `/api/tasks?page=1&limit=${TASK_FETCH_PAGE_SIZE}&sort=created`,
+        requestToken,
+      );
+      if (!isTaskListResponse(firstPage)) return Array.isArray(firstPage) ? firstPage : [];
+
+      const allTasks = [...firstPage.items];
+      for (let page = 2; page <= firstPage.totalPages; page += 1) {
+        const response = await apiGet<TaskListResponse>(
+          `/api/tasks?page=${page}&limit=${TASK_FETCH_PAGE_SIZE}&sort=created`,
+          requestToken,
+        );
+        allTasks.push(...response.items);
+      }
+
+      return allTasks;
+    })()
       .finally(() => {
         if (tasksFetchInFlightRef.current?.promise === promise) {
           tasksFetchInFlightRef.current = null;

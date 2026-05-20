@@ -1,12 +1,8 @@
 import { readFileSync } from 'node:fs';
 import postgres from 'postgres';
+import { getRequiredE2EDatabaseUrl } from '../e2e/support/e2e-env.ts';
 
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error('DATABASE_URL não definida para preparar o banco de teste.');
-}
-
+const databaseUrl = getRequiredE2EDatabaseUrl();
 const schema = readFileSync('schema.sql', 'utf8');
 const indexes = readFileSync('migrate_supabase_indexes.sql', 'utf8');
 const shouldDisableSsl =

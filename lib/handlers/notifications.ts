@@ -29,6 +29,7 @@ import {
   processTaskSideEffects,
   type ProcessTaskSideEffectsSummary,
   type SideEffectDiagnostics,
+  type TaskSideEffectKind,
 } from '../task-side-effects.js';
 import {
   createNotificationSchema,
@@ -92,6 +93,7 @@ type CronDbHealth = {
     taskSideEffectsPendingMs: number | null;
     taskSideEffectsDueMs: number | null;
     taskSideEffectsNotificationDueMs: number | null;
+    taskSideEffectsDueByKindMs: number | null;
     schedulesPendingMs: number | null;
     schedulesDueMs: number | null;
     tasksPendingMs: number | null;
@@ -101,6 +103,7 @@ type CronDbHealth = {
     taskSideEffectsPending: number | null;
     taskSideEffectsDue: number | null;
     taskSideEffectsNotificationDue: number | null;
+    taskSideEffectsDueByKind: SideEffectKindCounts;
     schedulesPending: number | null;
     schedulesDue: number | null;
     schedulesDueByKind: ScheduleKindCounts;
@@ -121,6 +124,16 @@ type LockDiagnostics = {
 };
 
 type ScheduleKindCounts = Record<NotificationScheduleKind, number>;
+type SideEffectKindCounts = Record<string, number>;
+
+type CronBacklogWarning = {
+  message: string;
+  kind: 'has_more' | 'schedule_backlog' | 'side_effect_backlog' | 'calendar_backlog' | 'overdue_backlog';
+  dueCount?: number;
+  processedCount?: number;
+  limit?: number;
+  remainingEstimate?: number;
+};
 
 const EMPTY_SCHEDULE_DIAGNOSTICS: ScheduleDiagnostics = {
   postgresNow: null,
@@ -145,6 +158,10 @@ const EMPTY_SIDE_EFFECT_DIAGNOSTICS: SideEffectDiagnostics = {
   doneCount: 0,
   oldestPendingAgeSeconds: null,
 };
+
+function countSideEffectsByKind(counts: SideEffectKindCounts, kinds: TaskSideEffectKind[]) {
+  return kinds.reduce((total, kind) => total + (counts[kind] ?? 0), 0);
+}
 
 function remainingBudgetMs(deadline: number, maxStepDurationMs: number) {
   return Math.max(0, Math.min(maxStepDurationMs, deadline - Date.now() - CRON_DEADLINE_GUARD_MS));
@@ -668,6 +685,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     taskSideEffectsPending: null,
     taskSideEffectsDue: null,
     taskSideEffectsNotificationDue: null,
+    taskSideEffectsDueByKind: {},
     schedulesPending: null,
     schedulesDue: null,
     schedulesDueByKind: emptyScheduleKindCounts(),
@@ -679,6 +697,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     taskSideEffectsPendingMs: null,
     taskSideEffectsDueMs: null,
     taskSideEffectsNotificationDueMs: null,
+    taskSideEffectsDueByKindMs: null,
     schedulesPendingMs: null,
     schedulesDueMs: null,
     tasksPendingMs: null,
@@ -694,6 +713,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     steps.taskSideEffectsPending = skippedStep();
     steps.taskSideEffectsDue = skippedStep();
     steps.taskSideEffectsNotificationDue = skippedStep();
+    steps.taskSideEffectsDueByKind = skippedStep();
     steps.schedulesPending = skippedStep();
     steps.schedulesDue = skippedStep();
     steps.schedulesDueByKind = skippedStep();
@@ -752,6 +772,26 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   counts.taskSideEffectsNotificationDue = taskSideEffectsNotificationDue.step.ok
     ? toCount(taskSideEffectsNotificationDue.rows[0]?.count)
     : null;
+
+  const taskSideEffectsDueByKind = await measureQuery(
+    'task_side_effects_due_by_kind',
+    () => sql`
+      SELECT kind, COUNT(*) AS count
+      FROM task_side_effects
+      WHERE status = 'pending'
+        AND available_at <= NOW()
+        AND cancelled_at IS NULL
+      GROUP BY kind
+      ORDER BY kind ASC
+    `,
+  );
+  steps.taskSideEffectsDueByKind = taskSideEffectsDueByKind.step;
+  db.taskSideEffectsDueByKindMs = taskSideEffectsDueByKind.step.durationMs;
+  if (taskSideEffectsDueByKind.step.ok) {
+    counts.taskSideEffectsDueByKind = Object.fromEntries(
+      taskSideEffectsDueByKind.rows.map((row) => [String(row.kind), toCount(row.count)]),
+    ) as SideEffectKindCounts;
+  }
 
   const schedulesPending = await measureQuery(
     'notification_schedules_pending',
@@ -913,7 +953,7 @@ function buildPreliminarySideEffectDiagnostics(dbHealth: CronDbHealth): SideEffe
     oldestPendingAvailableAt: null,
     duePendingCount: dbHealth.counts.taskSideEffectsDue ?? 0,
     pendingByKind: {},
-    dueByKind: {},
+    dueByKind: dbHealth.counts.taskSideEffectsDueByKind,
     processingCount: 0,
     failedCount: 0,
     doneCount: 0,
@@ -956,6 +996,76 @@ function maintenanceStageDisabledSummary(durationMs = 0, reason = 'disabled_in_n
       skippedReasons: { [reason]: 1 },
     },
   };
+}
+
+function buildCronBacklogWarnings(input: {
+  hasMore: boolean;
+  stoppedByTimeLimit: boolean;
+  schedulesDue: number;
+  schedulesProcessed: number;
+  notificationSideEffectsDue: number;
+  notificationSideEffectsProcessed: number;
+  calendarSideEffectsDue: number;
+  calendarSideEffectsProcessed: number;
+  overdueCandidates: number;
+  overdueDetected: number;
+}): CronBacklogWarning[] {
+  const warnings: CronBacklogWarning[] = [];
+
+  if (input.hasMore) {
+    warnings.push({
+      kind: 'has_more',
+      message: 'Reminder cron finished with hasMore=true; at least one reminder stage still has pending work.',
+    });
+  }
+
+  if (input.schedulesDue > DUE_SCHEDULE_LIMIT || input.schedulesDue > input.schedulesProcessed) {
+    warnings.push({
+      kind: 'schedule_backlog',
+      message: `Reminder schedule backlog: ${input.schedulesDue} due before the run, ${input.schedulesProcessed} processed, limit ${DUE_SCHEDULE_LIMIT}.`,
+      dueCount: input.schedulesDue,
+      processedCount: input.schedulesProcessed,
+      limit: DUE_SCHEDULE_LIMIT,
+      remainingEstimate: Math.max(0, input.schedulesDue - input.schedulesProcessed),
+    });
+  }
+
+  if (input.notificationSideEffectsDue > SIDE_EFFECT_LIMIT || input.notificationSideEffectsDue > input.notificationSideEffectsProcessed) {
+    warnings.push({
+      kind: 'side_effect_backlog',
+      message: `Notification side-effect backlog: ${input.notificationSideEffectsDue} due before the run, ${input.notificationSideEffectsProcessed} processed, limit ${SIDE_EFFECT_LIMIT}.`,
+      dueCount: input.notificationSideEffectsDue,
+      processedCount: input.notificationSideEffectsProcessed,
+      limit: SIDE_EFFECT_LIMIT,
+      remainingEstimate: Math.max(0, input.notificationSideEffectsDue - input.notificationSideEffectsProcessed),
+    });
+  }
+
+  if (input.calendarSideEffectsDue > CALENDAR_SYNC_LIMIT || input.calendarSideEffectsDue > input.calendarSideEffectsProcessed) {
+    warnings.push({
+      kind: 'calendar_backlog',
+      message: `Calendar sync backlog: ${input.calendarSideEffectsDue} due before the run, ${input.calendarSideEffectsProcessed} processed, limit ${CALENDAR_SYNC_LIMIT}.`,
+      dueCount: input.calendarSideEffectsDue,
+      processedCount: input.calendarSideEffectsProcessed,
+      limit: CALENDAR_SYNC_LIMIT,
+      remainingEstimate: Math.max(0, input.calendarSideEffectsDue - input.calendarSideEffectsProcessed),
+    });
+  }
+
+  if (input.overdueCandidates > OVERDUE_LIMIT || input.overdueCandidates > input.overdueDetected) {
+    warnings.push({
+      kind: 'overdue_backlog',
+      message: `Overdue detection backlog: ${input.overdueCandidates} candidates before the run, ${input.overdueDetected} detected, limit ${OVERDUE_LIMIT}.`,
+      dueCount: input.overdueCandidates,
+      processedCount: input.overdueDetected,
+      limit: OVERDUE_LIMIT,
+      remainingEstimate: Math.max(0, input.overdueCandidates - input.overdueDetected),
+    });
+  }
+
+  return input.stoppedByTimeLimit
+    ? warnings.map((warning) => ({ ...warning, message: `${warning.message} The cron response budget was exhausted.` }))
+    : warnings;
 }
 
 export async function handleAlarmDismiss(context: HandlerContext): Promise<HandlerResult> {
@@ -1126,7 +1236,11 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
         scheduleDiagnostics: preliminaryScheduleDiagnostics,
       }));
     }
-    const hasDueNotificationSideEffects = (dbHealth.counts.taskSideEffectsNotificationDue ?? 0) > 0;
+    const notificationSideEffectsDue = countSideEffectsByKind(
+      dbHealth.counts.taskSideEffectsDueByKind,
+      ['sync_notification_schedules', 'cancel_notification_schedules'],
+    );
+    const hasDueNotificationSideEffects = notificationSideEffectsDue > 0;
     const sideEffects = hasDueNotificationSideEffects && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, SIDE_EFFECT_PROCESS_DURATION_MS);
@@ -1162,10 +1276,11 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           );
         })()
       : maintenanceStageDisabledSummary(0, dbHealthMaintenanceSkipReason);
-    const hasDueExternalCalendarSideEffects = (
-      (preliminarySideEffectDiagnostics.dueByKind.sync_external_calendar ?? 0) +
-      (preliminarySideEffectDiagnostics.dueByKind.delete_external_calendar_event ?? 0)
-    ) > 0;
+    const externalCalendarSideEffectsDue = countSideEffectsByKind(
+      dbHealth.counts.taskSideEffectsDueByKind,
+      ['sync_external_calendar', 'delete_external_calendar_event'],
+    );
+    const hasDueExternalCalendarSideEffects = externalCalendarSideEffectsDue > 0;
     const externalCalendarSkipReason = dbHealth.slow
       ? 'db_health_slow'
       : hasDueExternalCalendarSideEffects
@@ -1242,10 +1357,36 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       hasMore: scheduleHasMore,
       schedulesByKindProcessed: result.schedulesByKindProcessed,
     };
+    const backlogWarnings = buildCronBacklogWarnings({
+      hasMore,
+      stoppedByTimeLimit,
+      schedulesDue: effectiveScheduleDiagnostics.duePendingCount,
+      schedulesProcessed: result.processedSchedules,
+      notificationSideEffectsDue,
+      notificationSideEffectsProcessed: sideEffects.processed,
+      calendarSideEffectsDue: externalCalendarSideEffectsDue,
+      calendarSideEffectsProcessed: calendarSync.scanned,
+      overdueCandidates: dbHealth.counts.overdueCandidates ?? 0,
+      overdueDetected: overdueDetection.detectedOverdueTasks,
+    });
+    if (backlogWarnings.length > 0) {
+      logWarn('cron_notifications_backlog_warning', getRequestMeta(request, {
+        backlogWarnings,
+        hasMore,
+        stoppedByTimeLimit,
+        schedules,
+        sideEffects,
+        calendarSync,
+        overdueDetection,
+        scheduleDiagnostics: effectiveScheduleDiagnostics,
+        sideEffectDiagnostics: effectiveSideEffectDiagnostics,
+      }));
+    }
     logInfo('cron_notifications_completed', getRequestMeta(request, {
       durationMs,
       stoppedByTimeLimit,
       hasMore,
+      backlogWarnings,
       sideEffects,
       schedules,
       dbHealth,
@@ -1266,6 +1407,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       backfill,
       calendarSync,
       overdueDetection,
+      backlogWarnings,
       dbHealth,
       scheduleDiagnostics: effectiveScheduleDiagnostics,
       sideEffectDiagnostics: effectiveSideEffectDiagnostics,

@@ -112,6 +112,31 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_status_deleted
 CREATE INDEX IF NOT EXISTS idx_tasks_status_due_date
   ON tasks(status, due_date);
 
+CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_created
+  ON tasks(user_id, deleted_at, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_due
+  ON tasks(user_id, deleted_at, status, due_date ASC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_priority_due
+  ON tasks(user_id, priority, due_date ASC, created_at DESC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_category_due
+  ON tasks(user_id, category, due_date ASC, created_at DESC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_search_gin
+  ON tasks USING GIN (
+    to_tsvector(
+      'simple',
+      coalesce(title, '') || ' ' ||
+      coalesce(description, '') || ' ' ||
+      coalesce(category, '')
+    )
+  )
+  WHERE deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS calendar_integrations (
   id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id                 UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -128,6 +153,20 @@ CREATE TABLE IF NOT EXISTS calendar_integrations (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_integrations_user_provider
   ON calendar_integrations(user_id, provider);
+
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_jti    TEXT        NOT NULL UNIQUE,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  revoked_at   TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_calendar_feeds_user_active
+  ON calendar_feeds(user_id, expires_at DESC)
+  WHERE revoked_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS user_categories (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -379,5 +418,6 @@ CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
 -- DELETE FROM token_blacklist      WHERE expires_at < NOW();
 -- DELETE FROM auth_rate_limit      WHERE attempted_at < NOW() - INTERVAL '1 hour';
 -- DELETE FROM password_reset_tokens WHERE expires_at < NOW() OR used = TRUE;
+-- DELETE FROM calendar_feeds       WHERE expires_at < NOW() OR revoked_at < NOW() - INTERVAL '30 days';
 -- DELETE FROM notifications        WHERE created_at < NOW() - INTERVAL '180 days';
 -- ============================================================

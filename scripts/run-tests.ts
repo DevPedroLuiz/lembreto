@@ -744,7 +744,11 @@ async function run(name: string, fn: () => Promise<void> | void) {
 }
 
 async function main() {
-  const { signToken } = await import('../lib/jwt.js');
+  const {
+    signCalendarFeedToken,
+    signToken,
+    verifyCalendarFeedToken,
+  } = await import('../lib/jwt.js');
   const {
     buildTokenJti,
     getAuthFailureResponse,
@@ -773,6 +777,11 @@ async function main() {
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
   const { handleNotificationProcessDue } = await import('../lib/handlers/notifications.js');
+  const {
+    handleTaskCalendarExport,
+    handleTaskCalendarFeed,
+    handleTasksCollection,
+  } = await import('../lib/handlers/tasks.js');
   const {
     backfillMissingNotificationSchedules,
     processDueNotificationSchedules,
@@ -811,6 +820,96 @@ async function main() {
         return true;
       },
     );
+  });
+
+  await run('calendar feed JWT includes expiration and revocation identifiers', () => {
+    const token = signCalendarFeedToken({
+      sub: 'user-1',
+      email: 'pedro@example.com',
+      fid: 'feed-1',
+      jti: 'token-1',
+    });
+    const payload = verifyCalendarFeedToken(token);
+
+    assert.equal(payload.scope, 'calendar-feed');
+    assert.equal(payload.fid, 'feed-1');
+    assert.equal(payload.jti, 'token-1');
+    assert.equal(typeof payload.exp, 'number');
+    assert.ok((payload.exp ?? 0) > Math.floor(Date.now() / 1000));
+  });
+
+  await run('calendar feed rotation revokes active links before issuing a new one', async () => {
+    const authToken = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    let insertedValues: unknown[] = [];
+
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join(' ');
+
+      if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('FROM users')) {
+        return [{
+          id: 'user-1',
+          name: 'Pedro',
+          email: 'pedro@example.com',
+          avatar: null,
+        }];
+      }
+      if (query.includes('UPDATE calendar_feeds') && query.includes('RETURNING id')) {
+        return [{ id: 'old-feed' }];
+      }
+      if (query.includes('INSERT INTO calendar_feeds')) {
+        insertedValues = values;
+        return [];
+      }
+
+      return [];
+    }) as SqlClient;
+
+    const result = await handleTaskCalendarFeed({
+      sql,
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${authToken}` },
+      },
+    });
+
+    assert.equal(result.status, 200);
+    const body = result.body as { feedPath: string; expiresAt: string; revokedCount: number };
+    assert.equal(body.revokedCount, 1);
+    assert.ok(Date.parse(body.expiresAt) > Date.now());
+
+    const feedToken = new URL(`https://lembreto.test${body.feedPath}`).searchParams.get('token');
+    assert.ok(feedToken);
+    const payload = verifyCalendarFeedToken(feedToken);
+    assert.equal(payload.fid, insertedValues[0]);
+    assert.equal(payload.sub, 'user-1');
+    assert.equal(payload.jti, insertedValues[2]);
+  });
+
+  await run('calendar feed export rejects revoked feed tokens', async () => {
+    const feedToken = signCalendarFeedToken({
+      sub: 'user-1',
+      email: 'pedro@example.com',
+      fid: 'feed-1',
+      jti: 'token-1',
+    });
+
+    const sql = (async (strings: TemplateStringsArray) => {
+      const query = strings.join(' ');
+      if (query.includes('FROM calendar_feeds')) return [];
+      return [];
+    }) as SqlClient;
+
+    const result = await handleTaskCalendarExport({
+      sql,
+      request: {
+        method: 'GET',
+        headers: {},
+        query: { token: feedToken },
+      },
+    });
+
+    assert.equal(result.status, 401);
   });
 
   await run('session cookie helpers set and clear auth cookie', () => {
@@ -952,6 +1051,90 @@ async function main() {
     if (!result.success) {
       assert.equal(formatZodError(result.error), 'Envie ao menos um campo para atualizar');
     }
+  });
+
+  await run('tasks collection returns paginated task list metadata', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const selectedValues: unknown[][] = [];
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join(' ');
+
+      if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('FROM users')) {
+        return [{
+          id: 'user-1',
+          name: 'Pedro',
+          email: 'pedro@example.com',
+          avatar: null,
+        }];
+      }
+
+      if (query.includes('CREATE INDEX') || query.includes('ALTER TABLE')) return [];
+      if (query.includes('SELECT COUNT(*) AS total')) return [{ total: '2' }];
+      if (query.includes('FROM tasks') && query.includes('LIMIT')) {
+        selectedValues.push(values);
+        return [{
+          id: 'task-1',
+          userId: 'user-1',
+          title: 'Enviar proposta',
+          description: '',
+          dueDate: '2026-05-21T12:00:00.000Z',
+          endDate: null,
+          priority: 'high',
+          category: 'Trabalho',
+          tags: ['cliente'],
+          suppressHolidayNotifications: false,
+          alarmEnabled: false,
+          reminderMode: 'timed',
+          expiresAt: null,
+          overdueSince: null,
+          overdueExpiresAt: null,
+          deletedAt: null,
+          completedAt: null,
+          completionSource: null,
+          autoDeletedReason: null,
+          autoDeletedAt: null,
+          mutedUntil: null,
+          status: 'pending',
+          history: [],
+          createdAt: '2026-05-20T12:00:00.000Z',
+          externalCalendarProvider: null,
+          externalCalendarEventId: null,
+          externalCalendarSyncStatus: 'idle',
+          externalCalendarLastError: null,
+          externalCalendarSyncedAt: null,
+        }];
+      }
+
+      return [];
+    }) as SqlClient;
+
+    const result = await handleTasksCollection({
+      sql,
+      request: {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        query: {
+          page: '2',
+          limit: '1',
+          status: 'pending',
+          search: 'proposta',
+          sort: 'dueDate',
+        },
+      },
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal((result.body as { items: unknown[] }).items.length, 1);
+    assert.equal((result.body as { page: number }).page, 2);
+    assert.equal((result.body as { limit: number }).limit, 1);
+    assert.equal((result.body as { total: number }).total, 2);
+    assert.equal((result.body as { totalPages: number }).totalPages, 2);
+    assert.equal((result.body as { hasPreviousPage: boolean }).hasPreviousPage, true);
+    assert.equal((result.body as { hasNextPage: boolean }).hasNextPage, false);
+    assert.equal((result.body as { sort: string }).sort, 'dueDate');
+    assert.equal(selectedValues.length, 1);
+    assert.equal(selectedValues[0].includes(1), true);
   });
 
   await run('work end time requirement applies only to active statuses', () => {
@@ -1556,13 +1739,16 @@ async function main() {
     assert.ok(cronHandler.includes('reclaimStuckProcessing: false'));
     assert.ok(cronHandler.includes('notificationSchedulesOnly: true'));
     assert.ok(cronHandler.includes('precomputedDiagnostics: preliminarySideEffectDiagnostics'));
+    assert.ok(cronHandler.includes('task_side_effects_due_by_kind'));
+    assert.ok(cronHandler.includes('cron_notifications_backlog_warning'));
+    assert.ok(cronHandler.includes('backlogWarnings'));
     assert.ok(cronHandler.includes('backfillDiagnostics'));
   });
 
   await run('reminder scheduler workflow has safe logs and authenticated cron call', () => {
     const workflow = readFileSync(new URL('../.github/workflows/reminder-scheduler.yml', import.meta.url), 'utf8');
 
-    assert.match(workflow, /cron: "2-59\/5 \* \* \* \*"/);
+    assert.match(workflow, /cron: "\* \* \* \* \*"/);
     assert.match(workflow, /APP_URL: https:\/\/lembreto\.vercel\.app/);
     assert.match(workflow, /CRON_SECRET: \$\{\{ secrets\.CRON_SECRET \}\}/);
     assert.match(workflow, /Authorization: Bearer \$CRON_SECRET/);
@@ -1573,6 +1759,8 @@ async function main() {
     assert.match(workflow, /http_status=/);
     assert.match(workflow, /response_ms=/);
     assert.match(workflow, /scheduleDuePendingCount/);
+    assert.match(workflow, /hasMore=true/);
+    assert.match(workflow, /backlogWarnings/);
     assert.doesNotMatch(workflow, /echo .*CRON_SECRET/);
     assert.doesNotMatch(workflow, /set -x/);
   });

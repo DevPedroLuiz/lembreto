@@ -56,6 +56,12 @@ jobs:
           PORT=3001
           APP_URL=http://127.0.0.1:3001
           EOF
+          cat <<EOF > .env.e2e
+          DATABASE_URL_TEST=postgres://postgres:postgres@127.0.0.1:5432/lembreto_test?sslmode=disable
+          JWT_SECRET=$JWT_SECRET
+          PORT=3001
+          APP_URL=http://127.0.0.1:3001
+          EOF
 
       - name: Install dependencies
         run: npm ci

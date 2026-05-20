@@ -5,6 +5,11 @@ import {
   ensureCalendarIntegrationSchema,
 } from '../calendar/calendarSync.js';
 import {
+  assertCalendarFeedActive,
+  createCalendarFeedToken,
+  revokeActiveCalendarFeeds,
+} from '../calendar/calendarFeeds.js';
+import {
   buildHolidayCalendar,
   detectBrazilLocationFromCoordinates,
   ensureHolidayLocationSchema,
@@ -36,7 +41,7 @@ import {
   ensureTaskSideEffectsInfrastructure,
   userHasActiveExternalCalendarSync,
 } from '../task-side-effects.js';
-import { signCalendarFeedToken, verifyCalendarFeedToken } from '../jwt.js';
+import { verifyCalendarFeedToken } from '../jwt.js';
 import {
   type HandlerContext,
   type HandlerResult,
@@ -56,6 +61,13 @@ interface TaskHistoryEntry {
   details?: string[];
 }
 
+const TASK_LIST_DEFAULT_LIMIT = 50;
+const TASK_LIST_MAX_LIMIT = 100;
+
+type TaskListStatusFilter = 'pending' | 'overdue' | 'completed' | 'inactive' | 'cancelled';
+type TaskListPriorityFilter = 'low' | 'medium' | 'high';
+type TaskListSort = 'created' | 'dueDate' | 'priority' | 'category';
+
 const PRIORITY_HISTORY_LABELS: Record<string, string> = {
   low: 'baixa',
   medium: 'média',
@@ -71,6 +83,36 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
     await ensureTaskTaxonomySchema(sql);
     await ensureCalendarIntegrationSchema(sql);
     await ensureTaskSideEffectsInfrastructure(sql);
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_created
+      ON tasks(user_id, deleted_at, status, created_at DESC)
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_due
+      ON tasks(user_id, deleted_at, status, due_date ASC, created_at DESC)
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_priority_due
+      ON tasks(user_id, priority, due_date ASC, created_at DESC)
+      WHERE deleted_at IS NULL
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_category_due
+      ON tasks(user_id, category, due_date ASC, created_at DESC)
+      WHERE deleted_at IS NULL
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_tasks_search_gin
+      ON tasks USING GIN (
+        to_tsvector(
+          'simple',
+          coalesce(title, '') || ' ' ||
+          coalesce(description, '') || ' ' ||
+          coalesce(category, '')
+        )
+      )
+      WHERE deleted_at IS NULL
+    `;
   })().catch((error) => {
     taskInfrastructureReady = null;
     throw error;
@@ -113,12 +155,62 @@ function getQueryStringValue(context: HandlerContext, key: string): string | nul
   return null;
 }
 
+function parseBoundedPositiveInteger(value: string | null, fallback: number, max: number): number {
+  if (!value) return fallback;
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+
+  return Math.min(parsed, max);
+}
+
+function normalizeTaskListStatus(value: string | null): TaskListStatusFilter | null {
+  if (
+    value === 'pending' ||
+    value === 'overdue' ||
+    value === 'completed' ||
+    value === 'inactive' ||
+    value === 'cancelled'
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeTaskListPriority(value: string | null): TaskListPriorityFilter | null {
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  return null;
+}
+
+function normalizeTaskListSort(value: string | null): TaskListSort {
+  if (value === 'dueDate' || value === 'priority' || value === 'category' || value === 'created') {
+    return value;
+  }
+
+  return 'created';
+}
+
+function normalizeOptionalTaskListText(value: string | null, maxLength = 80): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return normalized.slice(0, maxLength);
+}
+
+function normalizeOptionalTaskListDate(value: string | null): string | null {
+  const normalized = normalizeOptionalTaskListText(value, 32);
+  if (!normalized) return null;
+
+  return Number.isNaN(Date.parse(normalized)) ? null : normalized;
+}
+
 async function requireTaskCalendarAuth(context: HandlerContext) {
   const feedToken = getQueryStringValue(context, 'token');
 
   if (feedToken) {
     try {
       const payload = verifyCalendarFeedToken(feedToken);
+      await assertCalendarFeedActive(context.sql, payload);
       const user = await getSafeUserById(context.sql, payload.sub);
       if (!user) return json(401, { error: 'Usuário não encontrado' });
       return { payload, user, token: feedToken };
@@ -389,6 +481,56 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
 
   if (request.method === 'GET') {
     try {
+      const page = parseBoundedPositiveInteger(getQueryStringValue(context, 'page'), 1, Number.MAX_SAFE_INTEGER);
+      const limit = parseBoundedPositiveInteger(
+        getQueryStringValue(context, 'limit'),
+        TASK_LIST_DEFAULT_LIMIT,
+        TASK_LIST_MAX_LIMIT,
+      );
+      const offset = (page - 1) * limit;
+      const statusFilter = normalizeTaskListStatus(getQueryStringValue(context, 'status'));
+      const priorityFilter = normalizeTaskListPriority(getQueryStringValue(context, 'priority'));
+      const sort = normalizeTaskListSort(getQueryStringValue(context, 'sort'));
+      const search = normalizeOptionalTaskListText(getQueryStringValue(context, 'search'));
+      const category = normalizeOptionalTaskListText(getQueryStringValue(context, 'category'));
+      const tag = normalizeOptionalTaskListText(getQueryStringValue(context, 'tag'));
+      const dueStart = normalizeOptionalTaskListDate(getQueryStringValue(context, 'dueStart'));
+      const dueEnd = normalizeOptionalTaskListDate(getQueryStringValue(context, 'dueEnd'));
+      const searchPattern = search ? `%${search}%` : null;
+
+      const countRows = await sql`
+        SELECT COUNT(*) AS total
+        FROM tasks
+        WHERE user_id = ${user.id}
+          AND deleted_at IS NULL
+          AND (${statusFilter === 'cancelled'} OR status <> 'cancelled')
+          AND (${statusFilter}::text IS NULL OR (
+            (${statusFilter} = 'completed' AND status = 'completed')
+            OR (${statusFilter} = 'inactive' AND status = 'inactive')
+            OR (${statusFilter} = 'cancelled' AND status = 'cancelled')
+            OR (${statusFilter} = 'overdue' AND status IN ('pending', 'overdue') AND due_date IS NOT NULL AND due_date < NOW())
+            OR (${statusFilter} = 'pending' AND status IN ('pending', 'overdue') AND (due_date IS NULL OR due_date >= NOW()))
+          ))
+          AND (${priorityFilter}::text IS NULL OR priority = ${priorityFilter})
+          AND (${category}::text IS NULL OR category = ${category})
+          AND (${tag}::text IS NULL OR ${tag} = ANY(tags))
+          AND (${dueStart}::text IS NULL OR due_date >= ${dueStart}::timestamptz)
+          AND (${dueEnd}::text IS NULL OR due_date <= ${dueEnd}::timestamptz)
+          AND (${search}::text IS NULL OR (
+            to_tsvector(
+              'simple',
+              coalesce(title, '') || ' ' ||
+              coalesce(description, '') || ' ' ||
+              coalesce(category, '')
+            ) @@ plainto_tsquery('simple', ${search})
+            OR title ILIKE ${searchPattern}
+            OR description ILIKE ${searchPattern}
+            OR category ILIKE ${searchPattern}
+            OR array_to_string(tags, ' ') ILIKE ${searchPattern}
+          ))
+      `;
+      const total = Number(countRows[0]?.total ?? 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
       const rows = await sql`
         SELECT
           id,
@@ -423,10 +565,66 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         FROM tasks
         WHERE user_id = ${user.id}
           AND deleted_at IS NULL
-          AND status <> 'cancelled'
-        ORDER BY created_at DESC
+          AND (${statusFilter === 'cancelled'} OR status <> 'cancelled')
+          AND (${statusFilter}::text IS NULL OR (
+            (${statusFilter} = 'completed' AND status = 'completed')
+            OR (${statusFilter} = 'inactive' AND status = 'inactive')
+            OR (${statusFilter} = 'cancelled' AND status = 'cancelled')
+            OR (${statusFilter} = 'overdue' AND status IN ('pending', 'overdue') AND due_date IS NOT NULL AND due_date < NOW())
+            OR (${statusFilter} = 'pending' AND status IN ('pending', 'overdue') AND (due_date IS NULL OR due_date >= NOW()))
+          ))
+          AND (${priorityFilter}::text IS NULL OR priority = ${priorityFilter})
+          AND (${category}::text IS NULL OR category = ${category})
+          AND (${tag}::text IS NULL OR ${tag} = ANY(tags))
+          AND (${dueStart}::text IS NULL OR due_date >= ${dueStart}::timestamptz)
+          AND (${dueEnd}::text IS NULL OR due_date <= ${dueEnd}::timestamptz)
+          AND (${search}::text IS NULL OR (
+            to_tsvector(
+              'simple',
+              coalesce(title, '') || ' ' ||
+              coalesce(description, '') || ' ' ||
+              coalesce(category, '')
+            ) @@ plainto_tsquery('simple', ${search})
+            OR title ILIKE ${searchPattern}
+            OR description ILIKE ${searchPattern}
+            OR category ILIKE ${searchPattern}
+            OR array_to_string(tags, ' ') ILIKE ${searchPattern}
+          ))
+        ORDER BY
+          CASE WHEN ${sort} = 'dueDate' THEN due_date END ASC NULLS LAST,
+          CASE WHEN ${sort} = 'dueDate' THEN
+            CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+          END ASC,
+          CASE WHEN ${sort} = 'priority' THEN
+            CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+          END ASC,
+          CASE WHEN ${sort} = 'priority' THEN due_date END ASC NULLS LAST,
+          CASE WHEN ${sort} = 'category' THEN lower(category) END ASC,
+          CASE WHEN ${sort} = 'category' THEN due_date END ASC NULLS LAST,
+          CASE WHEN ${sort} = 'created' THEN created_at END DESC,
+          created_at DESC
+        LIMIT ${limit}
+        OFFSET ${offset}
       `;
-      return json(200, rows);
+      return json(200, {
+        items: rows,
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+        sort,
+        filters: {
+          status: statusFilter,
+          search,
+          priority: priorityFilter,
+          category,
+          tag,
+          dueStart,
+          dueEnd,
+        },
+      });
     } catch (error) {
       logError('tasks_list_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao buscar tarefas' });
@@ -943,15 +1141,20 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
 export async function handleTaskCalendarFeed(context: HandlerContext): Promise<HandlerResult> {
   const auth = await requireTaskAuth(context);
   if ('status' in auth) return auth;
-  if (context.request.method !== 'GET') return methodNotAllowed();
+  if (context.request.method !== 'GET' && context.request.method !== 'POST') return methodNotAllowed();
 
-  const token = signCalendarFeedToken({
-    sub: auth.user.id,
+  const revokedCount = context.request.method === 'POST'
+    ? await revokeActiveCalendarFeeds(context.sql, auth.user.id)
+    : 0;
+  const feed = await createCalendarFeedToken(context.sql, {
+    userId: auth.user.id,
     email: auth.user.email,
   });
 
   return json(200, {
-    feedPath: `/api/tasks/calendar.ics?token=${encodeURIComponent(token)}`,
+    feedPath: `/api/tasks/calendar.ics?token=${encodeURIComponent(feed.token)}`,
+    expiresAt: feed.expiresAt,
+    revokedCount,
   });
 }
 
