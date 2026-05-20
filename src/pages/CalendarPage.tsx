@@ -8,7 +8,6 @@ import {
   Clock3,
   Flag,
   Hash,
-  ListFilter,
   Plus,
   Search,
   SlidersHorizontal,
@@ -27,7 +26,8 @@ import type { Priority, Task } from '../types';
 
 type StatusFilter = 'all' | DerivedTaskStatus;
 type PriorityFilter = 'all' | Priority;
-type CalendarPanel = 'calendar' | 'filters';
+type CalendarPanel = 'calendar' | 'timeline';
+type TimelineGroup = { dateKey: string; date: Date; tasks: Task[] };
 
 interface CalendarPageProps {
   tasks: Task[];
@@ -281,6 +281,18 @@ export function CalendarPage({
     return grouped;
   }, [filteredTasks]);
 
+  const timelineGroups = React.useMemo<TimelineGroup[]>(
+    () =>
+      Array.from(tasksByDay.entries())
+        .sort(([leftDateKey], [rightDateKey]) => leftDateKey.localeCompare(rightDateKey))
+        .map(([dateKey, dayTasks]) => ({
+          dateKey,
+          date: parseISO(`${dateKey}T00:00:00`),
+          tasks: dayTasks,
+        })),
+    [tasksByDay],
+  );
+
   const selectedDateKey = formatDateKey(selectedDate);
   const selectedTasks = tasksByDay.get(selectedDateKey) ?? [];
   const selectedPendingCount = selectedTasks.filter((task) => getDerivedTaskStatus(task) === 'pending').length;
@@ -523,22 +535,17 @@ export function CalendarPage({
             </button>
             <button
               type="button"
-              onClick={() => setActivePanel('filters')}
-              aria-pressed={activePanel === 'filters'}
+              onClick={() => setActivePanel('timeline')}
+              aria-pressed={activePanel === 'timeline'}
               className={cn(
                 'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all',
-                activePanel === 'filters'
+                activePanel === 'timeline'
                   ? 'bg-white text-slate-950 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] dark:bg-white/[0.12] dark:text-white'
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
               )}
             >
-              <ListFilter size={16} />
-              Filtros
-              {activeFilterCount > 0 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] text-white">
-                  {activeFilterCount}
-                </span>
-              )}
+              <Clock3 size={16} />
+              Linha do tempo
             </button>
           </div>
 
@@ -551,7 +558,9 @@ export function CalendarPage({
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-6">
-          <section className="surface-panel overflow-hidden">
+          {activePanel === 'calendar' ? (
+            <>
+              <section className="surface-panel overflow-hidden">
             <div className="flex flex-col gap-4 border-b border-slate-200/70 p-4 dark:border-white/10 md:flex-row md:items-center md:justify-between md:p-5">
               <div className="flex items-center gap-2">
                 <button
@@ -735,12 +744,72 @@ export function CalendarPage({
                 <EmptyDayState onNewTask={onNewTask} />
               )}
             </AnimatePresence>
-          </section>
+              </section>
+            </>
+          ) : (
+            <section className="surface-panel p-5 md:p-6">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <span className="section-eyebrow">
+                    <Clock3 size={14} />
+                    Linha do tempo
+                  </span>
+                  <h3 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">
+                    Calendário em linha do tempo
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    {timelineGroups.length} dia{timelineGroups.length === 1 ? '' : 's'} com lembrete
+                    {filteredTasks.length === 1 ? '' : 's'} nos filtros atuais.
+                  </p>
+                </div>
+
+                <button type="button" onClick={onNewTask} className="action-secondary h-11 rounded-xl px-4 py-0 text-sm">
+                  <Plus size={16} />
+                  Adicionar
+                </button>
+              </div>
+
+              {timelineGroups.length > 0 ? (
+                <div className="space-y-5">
+                  {timelineGroups.map((group) => (
+                    <div key={group.dateKey} className="relative grid gap-4 border-l border-slate-200 pl-4 dark:border-white/10 md:grid-cols-[180px_minmax(0,1fr)] md:border-l-0 md:pl-0">
+                      <div className="md:border-r md:border-slate-200 md:pr-5 md:dark:border-white/10">
+                        <div className="sticky top-4">
+                          <p className="text-sm font-semibold capitalize text-slate-950 dark:text-white">
+                            {formatSelectedDateLabel(group.date)}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold uppercase text-slate-400 dark:text-slate-500">
+                            {group.tasks.length} lembrete{group.tasks.length === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {group.tasks.map((task) => (
+                          <TaskItem
+                            key={task.id}
+                            task={task}
+                            onToggle={onToggle}
+                            onDelete={onDelete}
+                            onEdit={onEdit}
+                            showToggleControl
+                            compact
+                            isDeleting={deletingTaskIds?.has(task.id)}
+                            isToggling={togglingTaskIds?.has(task.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyDayState onNewTask={onNewTask} />
+              )}
+            </section>
+          )}
         </div>
 
-        <div className={cn(
-          activePanel === 'filters' ? 'order-first block xl:order-none' : 'hidden xl:block',
-        )}>
+        <div className="hidden xl:block">
           {filtersPanel}
         </div>
       </div>
