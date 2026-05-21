@@ -6,6 +6,7 @@ import {
   runScheduledNotifications,
   seedCustomTasksForUser,
   seedNotificationForUser,
+  seedNotificationScheduleForTask,
   seedPasswordResetToken,
   seedTasksForUser,
   type E2ETestUser,
@@ -30,6 +31,19 @@ function nextWeekday(startDate: Date, weekday: number): Date {
   const diff = (weekday - date.getDay() + 7) % 7 || 7;
   date.setDate(date.getDate() + diff);
   return date;
+}
+
+function pastSaoPauloNoon(): Date {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '01';
+
+  return new Date(`${get('year')}-${get('month')}-${get('day')}T12:00:00-03:00`);
 }
 
 async function waitForJsonResponse(
@@ -1318,23 +1332,28 @@ test.describe('Lembreto critical flows', () => {
 
   test('opens the exact reminder from an overdue notification', async ({ page }) => {
     const user = buildE2ETestUser();
-    const overdue = new Date();
-    overdue.setDate(overdue.getDate() - 2);
-    overdue.setHours(8, 0, 0, 0);
+    const overdue = new Date(pastSaoPauloNoon().getTime() - 40 * 60 * 1000);
 
     await cleanupUsersByEmail([user.email]);
 
     try {
       await registerUser(page, user);
-      await seedCustomTasksForUser(user.email, [
+      const [taskId] = await seedCustomTasksForUser(user.email, [
         {
           title: 'Lembrete em atraso com alerta',
           dueDate: overdue.toISOString(),
           priority: 'high',
           category: 'Trabalho',
+          status: 'overdue',
         },
       ]);
-      await runScheduledNotifications();
+      await seedNotificationForUser(user.email, {
+        title: 'Lembrete atrasado',
+        message: '"Lembrete em atraso com alerta" está em atraso há 40 minutos. Marque como concluído quando finalizar.',
+        tone: 'warning',
+        target: { type: 'task', taskId },
+        dedupeKey: `e2e:overdue-open:${taskId}`,
+      });
       await page.getByTestId('sidebar-logout').click();
       await expect(page.getByTestId('auth-submit-button')).toBeVisible();
       await loginUser(page, user.email, user.password);
@@ -1367,10 +1386,10 @@ test.describe('Lembreto critical flows', () => {
       dueSoon.setMilliseconds(0);
       const dueSoonWithoutAlarm = new Date(Date.now() + 3500);
       dueSoonWithoutAlarm.setMilliseconds(0);
-      const overdue = new Date(Date.now() - 40 * 60 * 1000);
-      overdue.setSeconds(0, 0);
+      const overdueNotifyAt = pastSaoPauloNoon();
+      const overdue = new Date(overdueNotifyAt.getTime() - 40 * 60 * 1000);
 
-      await seedCustomTasksForUser(user.email, [
+      const taskIds = await seedCustomTasksForUser(user.email, [
         {
           title: 'Lembrete prestes a vencer',
           dueDate: dueSoon.toISOString(),
@@ -1389,8 +1408,20 @@ test.describe('Lembreto critical flows', () => {
           dueDate: overdue.toISOString(),
           priority: 'medium',
           category: 'Pessoal',
+          status: 'overdue',
         },
       ]);
+      const overdueTaskId = taskIds[2];
+      await seedNotificationScheduleForTask(user.email, overdueTaskId, {
+        kind: 'overdue_reminder',
+        notifyAt: overdueNotifyAt,
+        title: 'Lembrete em atraso',
+        message: '"Lembrete atrasado recorrente" está em atraso há 40 minutos. Marque como concluído quando finalizar.',
+        tone: 'warning',
+        sequenceIndex: 0,
+        intervalMinutes: 15,
+        dedupeKey: `e2e:overdue-recurring:${overdueTaskId}`,
+      });
       await runScheduledNotifications({ delayMs: 4000 });
 
       await page.getByTestId('sidebar-logout').click();

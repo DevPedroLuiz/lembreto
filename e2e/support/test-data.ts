@@ -4,7 +4,7 @@ import { processNotificationSchedules } from '../../lib/notification-schedules';
 import { createNotification, type NotificationTarget } from '../../lib/notifications';
 import { verifyToken } from '../../lib/jwt';
 import { createPasswordResetToken } from '../../lib/password-reset';
-import type { NotificationTone } from '../../lib/contracts';
+import type { NotificationScheduleKind, NotificationTone, TaskStatus } from '../../lib/contracts';
 import { getRequiredE2EDatabaseUrl } from './e2e-env';
 
 const sql = createSqlClient(getRequiredE2EDatabaseUrl());
@@ -115,14 +115,15 @@ export async function seedCustomTasksForUser(
     priority: 'low' | 'medium' | 'high';
     category: string;
     tags?: string[];
-    status?: 'pending' | 'completed' | 'draft' | 'inactive';
+    status?: Extract<TaskStatus, 'pending' | 'overdue' | 'completed' | 'draft' | 'inactive'>;
     alarmEnabled?: boolean;
   }>,
-): Promise<void> {
+): Promise<string[]> {
   const userId = await getUserIdByEmail(email);
+  const taskIds: string[] = [];
 
   for (const task of tasks) {
-    await sql`
+    const rows = (await sql`
       INSERT INTO tasks (user_id, title, description, due_date, priority, category, tags, alarm_enabled, status)
       VALUES (
         ${userId},
@@ -135,8 +136,15 @@ export async function seedCustomTasksForUser(
         ${task.alarmEnabled ?? false},
         ${task.status ?? 'pending'}
       )
-    `;
+      RETURNING id
+    `) as Array<{ id: string }>;
+
+    if (rows[0]?.id) {
+      taskIds.push(rows[0].id);
+    }
   }
+
+  return taskIds;
 }
 
 export async function blacklistToken(token: string): Promise<void> {
@@ -169,6 +177,58 @@ export async function seedNotificationForUser(
     userId,
     ...input,
   });
+}
+
+export async function seedNotificationScheduleForTask(
+  email: string,
+  taskId: string,
+  input: {
+    kind: NotificationScheduleKind;
+    notifyAt: Date;
+    title: string;
+    message: string;
+    tone: NotificationTone;
+    sequenceIndex?: number | null;
+    intervalMinutes?: number | null;
+    dedupeKey?: string;
+  },
+): Promise<void> {
+  const userId = await getUserIdByEmail(email);
+  const dedupeKey = input.dedupeKey ?? [
+    'e2e',
+    userId,
+    taskId,
+    input.kind,
+    input.notifyAt.getTime(),
+    Math.random().toString(16).slice(2),
+  ].join(':');
+
+  await sql`
+    INSERT INTO notification_schedules (
+      user_id,
+      task_id,
+      kind,
+      notify_at,
+      title,
+      message,
+      tone,
+      dedupe_key,
+      sequence_index,
+      interval_minutes
+    )
+    VALUES (
+      ${userId},
+      ${taskId},
+      ${input.kind},
+      ${input.notifyAt},
+      ${input.title},
+      ${input.message},
+      ${input.tone},
+      ${dedupeKey},
+      ${input.sequenceIndex ?? null},
+      ${input.intervalMinutes ?? null}
+    )
+  `;
 }
 
 export async function runScheduledNotifications(options?: { passes?: number; delayMs?: number }): Promise<void> {
