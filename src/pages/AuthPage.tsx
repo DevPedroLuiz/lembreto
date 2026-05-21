@@ -241,7 +241,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8">
       <div className="absolute inset-0 bg-grid opacity-50 dark:opacity-30" />
 
-      <div className="relative grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-slate-200/80 bg-white/90 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="relative grid w-full min-w-0 max-w-6xl overflow-hidden rounded-[36px] border border-slate-200/80 bg-white/90 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] lg:grid-cols-[1.1fr_0.9fr]">
         <aside className="hidden border-r border-slate-200/80 bg-slate-50/80 p-10 dark:border-white/10 dark:bg-white/[0.04] lg:flex lg:flex-col">
           <div>
             <span className="section-eyebrow">
@@ -293,8 +293,8 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
           </div>
         </aside>
 
-        <section className="p-6 sm:p-8 lg:p-10">
-          <div className="mx-auto w-full max-w-md">
+        <section className="min-w-0 p-5 sm:p-8 lg:p-10">
+          <div className="mx-auto w-full min-w-0 max-w-md">
             <div className="mb-8 text-center lg:text-left">
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)] lg:mx-0 lg:hidden">
                 <Target size={28} />

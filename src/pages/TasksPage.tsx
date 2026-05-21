@@ -467,7 +467,7 @@ function ControlButton({
     <button
       {...props}
       className={[
-        'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-all',
+        'inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-all',
         active
           ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.7)]'
           : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
@@ -1314,11 +1314,11 @@ export function TasksPage({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="space-y-6"
+      className="space-y-4 md:space-y-6"
     >
-      <section className="surface-panel p-5 md:p-6">
-        <div className="space-y-5">
-          <div>
+      <section className="surface-panel p-4 md:p-6">
+        <div className="space-y-4 md:space-y-5">
+          <div className="hidden sm:block">
             <span className="section-eyebrow">
               <ArrowUpDown size={14} />
               Organização da agenda
@@ -1331,7 +1331,7 @@ export function TasksPage({
             </p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
             {pageTabs.map((tab) => {
               const isActive = activeView === tab.value;
 
@@ -1343,7 +1343,7 @@ export function TasksPage({
                   onClick={() => onActiveViewChange(tab.value)}
                   aria-pressed={isActive}
                   className={[
-                    'group min-h-[128px] rounded-[24px] border p-4 text-left transition-all',
+                    'group min-h-[78px] rounded-2xl border p-3 text-left transition-all sm:min-h-[128px] sm:rounded-[24px] sm:p-4',
                     isActive
                       ? 'border-blue-200 bg-blue-50 text-blue-950 shadow-[0_18px_42px_-32px_rgba(37,99,235,0.75)] dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-white'
                       : 'border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.07]',
@@ -1352,7 +1352,7 @@ export function TasksPage({
                   <span className="flex items-start justify-between gap-3">
                     <span
                       className={[
-                        'icon-slot h-10 w-10 rounded-2xl',
+                        'icon-slot h-8 w-8 rounded-xl sm:h-10 sm:w-10 sm:rounded-2xl',
                         isActive
                           ? 'bg-blue-600 text-white dark:bg-blue-400 dark:text-slate-950'
                           : 'bg-slate-100 text-slate-500 group-hover:bg-white dark:bg-white/[0.06] dark:text-slate-300',
@@ -1362,7 +1362,7 @@ export function TasksPage({
                     </span>
                     <span
                       className={[
-                        'rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]',
+                        'hidden rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] sm:inline-flex',
                         isActive
                           ? 'bg-white/80 text-blue-700 dark:bg-white/10 dark:text-blue-100'
                           : 'bg-slate-100 text-slate-500 dark:bg-white/[0.06] dark:text-slate-400',
@@ -1371,15 +1371,15 @@ export function TasksPage({
                       Página
                     </span>
                   </span>
-                  <span className="mt-4 block text-base font-semibold text-slate-950 dark:text-white">
+                  <span className="mt-3 block text-sm font-semibold text-slate-950 dark:text-white sm:mt-4 sm:text-base">
                     {tab.label}
                   </span>
-                  <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  <span className="mt-1 hidden text-sm leading-6 text-slate-500 dark:text-slate-400 sm:block">
                     {tab.description}
                   </span>
                   <span
                     className={[
-                      'mt-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold',
+                      'mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold sm:mt-4 sm:px-3 sm:text-xs',
                       isActive
                         ? 'bg-blue-600 text-white dark:bg-blue-300 dark:text-slate-950'
                         : 'bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300',
@@ -1414,37 +1414,37 @@ export function TasksPage({
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
               <span
                 data-testid="task-sort-summary"
-                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Ordenado por {activeSortLabel}
               </span>
-              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+              <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
                 Categoria: {filterCategory}
               </span>
               <span
                 data-testid="task-priority-summary"
-                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Prioridade: {activePriorityLabel}
               </span>
               <span
                 data-testid="task-status-summary"
-                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Status: {activeStatusLabel}
               </span>
               <span
                 data-testid="task-tag-summary"
-                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Tag: {activeTagLabel}
               </span>
               <span
                 data-testid="task-date-summary"
-                className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                className="inline-flex shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
               >
                 Data: {activeDateLabel}
               </span>

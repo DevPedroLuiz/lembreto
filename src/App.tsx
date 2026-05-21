@@ -3295,8 +3295,8 @@ export default function App() {
         </header>
 
         <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 sm:p-6 sm:pb-28 lg:p-8 lg:pb-8 xl:p-10">
-          {!(activeTab === 'dashboard' && isMobileViewport) && (
-            <div className="surface-panel mb-6 p-5 md:mb-8 md:p-6">
+          {!isMobileViewport && (
+            <div className="surface-panel mb-4 p-4 md:mb-8 md:p-6">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <span className="section-eyebrow">
@@ -3310,11 +3310,11 @@ export default function App() {
                         ? 'Central de notificações'
                           : 'Gestão de lembretes'}
                   </span>
-                  <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-4xl">
+                  <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:mt-4 md:text-4xl">
                     {pageTitle}
                   </h2>
                   {pageDescription && (
-                    <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 md:text-base">
+                    <p className="mt-2 hidden max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400 sm:block md:text-base">
                       {pageDescription}
                     </p>
                   )}
@@ -3358,7 +3358,7 @@ export default function App() {
               <button
                 onClick={openNewTask}
                 data-testid="new-task-button"
-                className="action-primary hidden lg:inline-flex"
+                className="action-primary !hidden lg:!inline-flex"
               >
                 <Plus size={20} /> Novo lembrete
               </button>
@@ -3367,7 +3367,7 @@ export default function App() {
               <button
                 onClick={() => openNewNote()}
                 data-testid="new-note-header-button"
-                className="action-primary hidden lg:inline-flex"
+                className="action-primary !hidden lg:!inline-flex"
               >
                 <Plus size={20} /> Nova nota
               </button>
