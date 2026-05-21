@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { SafeUser } from '../auth.js';
 import type { SqlClient } from '../handlers/core.js';
+import { assertInfrastructure } from '../infrastructure.js';
 import { signCalendarOAuthState, verifyCalendarOAuthState } from '../jwt.js';
 import { buildCalendarEventInput, LEMBRETO_TIME_ZONE } from './eventPayload.js';
 import { decryptCalendarToken, encryptCalendarToken } from './crypto.js';
@@ -77,66 +78,43 @@ function buildDuplicateKey(input: { title: string; dueDate: string | null }): st
 export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
   if (!ensureCalendarSchemaPromise) {
     ensureCalendarSchemaPromise = (async () => {
-      await sql`
-        CREATE TABLE IF NOT EXISTS calendar_integrations (
-          id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id                 UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          provider                TEXT        NOT NULL CHECK (provider IN ('google', 'outlook')),
-          access_token_encrypted  TEXT        NOT NULL,
-          refresh_token_encrypted TEXT        NOT NULL,
-          expires_at              TIMESTAMPTZ,
-          calendar_id             TEXT        NOT NULL DEFAULT 'primary',
-          sync_enabled            BOOLEAN     NOT NULL DEFAULT TRUE,
-          last_error              TEXT,
-          created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_integrations_user_provider
-        ON calendar_integrations(user_id, provider)
-      `;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_provider TEXT CHECK (external_calendar_provider IN ('google', 'outlook'))`;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_event_id TEXT`;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_sync_status TEXT NOT NULL DEFAULT 'idle'`;
-      await sql`
-        DO $$
-        BEGIN
-          IF EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conrelid = 'tasks'::regclass
-              AND conname = 'tasks_external_calendar_sync_status_check'
-              AND pg_get_constraintdef(oid) NOT LIKE '%pending%'
-          ) THEN
-            ALTER TABLE tasks DROP CONSTRAINT tasks_external_calendar_sync_status_check;
-          END IF;
-
-          IF NOT EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conrelid = 'tasks'::regclass
-              AND conname = 'tasks_external_calendar_sync_status_check'
-          ) THEN
-            ALTER TABLE tasks
-            ADD CONSTRAINT tasks_external_calendar_sync_status_check
-            CHECK (external_calendar_sync_status IN ('idle', 'pending', 'synced', 'failed'));
-          END IF;
-        END $$;
-      `;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_last_error TEXT`;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_synced_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
-      await sql`
-        CREATE INDEX IF NOT EXISTS idx_tasks_external_calendar
-        ON tasks(user_id, external_calendar_provider, external_calendar_event_id)
-        WHERE external_calendar_event_id IS NOT NULL
-      `;
-      await sql`
-        CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status
-        ON tasks(user_id, deleted_at, status)
-      `;
-    })();
+      await assertInfrastructure(sql, 'calendar integrations', {
+        relations: [
+          { name: 'calendar_integrations' },
+        ],
+        columns: [
+          { table: 'calendar_integrations', column: 'user_id' },
+          { table: 'calendar_integrations', column: 'provider' },
+          { table: 'calendar_integrations', column: 'access_token_encrypted' },
+          { table: 'calendar_integrations', column: 'refresh_token_encrypted' },
+          { table: 'calendar_integrations', column: 'expires_at' },
+          { table: 'calendar_integrations', column: 'calendar_id' },
+          { table: 'calendar_integrations', column: 'sync_enabled' },
+          { table: 'calendar_integrations', column: 'last_error' },
+          { table: 'tasks', column: 'external_calendar_provider' },
+          { table: 'tasks', column: 'external_calendar_event_id' },
+          { table: 'tasks', column: 'external_calendar_sync_status' },
+          { table: 'tasks', column: 'external_calendar_last_error' },
+          { table: 'tasks', column: 'external_calendar_synced_at' },
+          { table: 'tasks', column: 'deleted_at' },
+        ],
+        indexes: [
+          { name: 'idx_calendar_integrations_user_provider' },
+          { name: 'idx_tasks_external_calendar' },
+          { name: 'idx_tasks_user_deleted_status' },
+        ],
+        constraints: [
+          {
+            table: 'tasks',
+            name: 'tasks_external_calendar_sync_status_check',
+            contains: ['idle', 'pending', 'synced', 'failed'],
+          },
+        ],
+      });
+    })().catch((error) => {
+      ensureCalendarSchemaPromise = null;
+      throw error;
+    });
   }
 
   await ensureCalendarSchemaPromise;

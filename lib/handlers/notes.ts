@@ -1,5 +1,6 @@
 import { getAuthFailureResponse, requireAuthFromAuthorizationHeader } from '../auth.js';
 import { logError, logInfo } from '../logger.js';
+import { assertInfrastructure } from '../infrastructure.js';
 import {
   createNoteSchema,
   formatZodError,
@@ -54,85 +55,44 @@ function normalizeNoteExpiry(mode: 'temporary' | 'fixed', expiresAt: string | nu
   return expiresAtDate.toISOString();
 }
 
+let notesSchemaReady: Promise<void> | null = null;
+
 async function ensureNotesSchema(sql: HandlerContext['sql']) {
-  await ensureTaskTaxonomySchema(sql);
+  notesSchemaReady ??= (async () => {
+    await ensureTaskTaxonomySchema(sql);
+    await assertInfrastructure(sql, 'notes', {
+      relations: [
+        { name: 'notes' },
+      ],
+      columns: [
+        { table: 'notes', column: 'expires_at' },
+        { table: 'notes', column: 'deleted_at' },
+        { table: 'notes', column: 'delete_after' },
+        { table: 'notes', column: 'deletion_reason' },
+        { table: 'notes', column: 'expired_notification_sent_at' },
+      ],
+      indexes: [
+        { name: 'idx_notes_user_created' },
+        { name: 'idx_notes_user_mode' },
+        { name: 'idx_notes_expiration' },
+        { name: 'idx_notes_trash_cleanup' },
+        { name: 'idx_notes_task_id' },
+        { name: 'idx_notes_tags_gin' },
+      ],
+      constraints: [
+        {
+          table: 'notes',
+          name: 'notes_deletion_reason_check',
+          contains: ['manual', 'expired'],
+        },
+      ],
+    });
+  })().catch((error) => {
+    notesSchemaReady = null;
+    throw error;
+  });
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS notes (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL DEFAULT '',
-      priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
-      category TEXT NOT NULL DEFAULT 'Geral',
-      tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-      mode TEXT NOT NULL DEFAULT 'temporary' CHECK (mode IN ('temporary', 'fixed')),
-      expires_at TIMESTAMPTZ,
-      deleted_at TIMESTAMPTZ,
-      delete_after TIMESTAMPTZ,
-      deletion_reason TEXT CHECK (deletion_reason IN ('manual', 'expired')),
-      expired_notification_sent_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-
-  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS delete_after TIMESTAMPTZ`;
-  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS deletion_reason TEXT`;
-  await sql`ALTER TABLE notes ADD COLUMN IF NOT EXISTS expired_notification_sent_at TIMESTAMPTZ`;
-
-  await sql`
-    UPDATE notes
-    SET expires_at = NOW() + INTERVAL '7 days'
-    WHERE mode = 'temporary'
-      AND expires_at IS NULL
-      AND deleted_at IS NULL
-  `;
-
-  await sql`
-    DO $$
-    BEGIN
-      ALTER TABLE notes
-        ADD CONSTRAINT notes_deletion_reason_check CHECK (deletion_reason IN ('manual', 'expired'));
-    EXCEPTION
-      WHEN duplicate_object THEN NULL;
-    END $$;
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_user_created
-    ON notes(user_id, deleted_at, created_at DESC)
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_user_mode
-    ON notes(user_id, deleted_at, mode, updated_at DESC)
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_expiration
-    ON notes(user_id, expires_at)
-    WHERE deleted_at IS NULL AND mode = 'temporary'
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_trash_cleanup
-    ON notes(user_id, delete_after)
-    WHERE deleted_at IS NOT NULL
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_task_id
-    ON notes(task_id)
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_notes_tags_gin
-    ON notes USING GIN(tags)
-  `;
+  await notesSchemaReady;
 }
 
 async function requireNotesAuth(context: HandlerContext) {

@@ -1,8 +1,10 @@
 import type { SqlClient } from './handlers/core.js';
 import { DEFAULT_CATEGORIES } from '../src/types/index.js';
+import { assertInfrastructure } from './infrastructure.js';
 
 const CATEGORY_LIMIT = 20;
 const TAG_LIMIT = 32;
+let taskTaxonomySchemaReady: Promise<void> | null = null;
 
 function normalizeUnique(values: string[]) {
   const seen = new Set<string>();
@@ -22,94 +24,37 @@ function normalizeUnique(values: string[]) {
 }
 
 export async function ensureTaskTaxonomySchema(sql: SqlClient) {
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'tasks'::regclass
-          AND conname = 'tasks_status_check'
-          AND (
-            pg_get_constraintdef(oid) NOT LIKE '%overdue%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%draft%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%inactive%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%cancelled%'
-          )
-      ) THEN
-        ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
-      END IF;
+  taskTaxonomySchemaReady ??= assertInfrastructure(sql, 'task taxonomy', {
+    relations: [
+      { name: 'tasks' },
+      { name: 'user_categories' },
+      { name: 'user_tags' },
+    ],
+    columns: [
+      { table: 'tasks', column: 'tags' },
+      { table: 'tasks', column: 'end_date' },
+      { table: 'tasks', column: 'suppress_holiday_notifications' },
+      { table: 'tasks', column: 'alarm_enabled' },
+      { table: 'tasks', column: 'history' },
+    ],
+    indexes: [
+      { name: 'idx_tasks_tags_gin' },
+      { name: 'idx_user_categories_unique_name' },
+      { name: 'idx_user_tags_unique_name' },
+    ],
+    constraints: [
+      {
+        table: 'tasks',
+        name: 'tasks_status_check',
+        contains: ['pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'],
+      },
+    ],
+  }).catch((error) => {
+    taskTaxonomySchemaReady = null;
+    throw error;
+  });
 
-      IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'tasks'::regclass
-          AND conname = 'tasks_status_check'
-      ) THEN
-        ALTER TABLE tasks
-        ADD CONSTRAINT tasks_status_check
-        CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'));
-      END IF;
-    END $$;
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS history JSONB NOT NULL DEFAULT '[]'::JSONB
-  `;
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin
-    ON tasks USING GIN(tags)
-  `;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS user_categories (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-
-  await sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_categories_unique_name
-    ON user_categories(user_id, lower(name))
-  `;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS user_tags (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-
-  await sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tags_unique_name
-    ON user_tags(user_id, lower(name))
-  `;
+  await taskTaxonomySchemaReady;
 }
 
 export async function upsertUserCategory(sql: SqlClient, userId: string, name: string) {

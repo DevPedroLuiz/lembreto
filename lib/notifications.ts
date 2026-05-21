@@ -7,6 +7,7 @@ import {
 } from './contracts.js';
 import { isHolidayForLocationOnDate } from './holidays.js';
 import type { SqlClient } from './handlers/core.js';
+import { assertInfrastructure } from './infrastructure.js';
 import { logError, logInfo, logWarn } from './logger.js';
 
 const DEFAULT_PUSH_SEND_TIMEOUT_MS = 3000;
@@ -301,142 +302,47 @@ export async function sendPushPayloadToUser(
   );
 }
 
-async function hasNotificationsInfrastructure(sql: SqlClient): Promise<boolean> {
-  const rows = await sql`
-    SELECT
-      EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'users'
-          AND column_name = 'notifications_enabled'
-      ) AS "hasUserSetting",
-      to_regclass('public.notifications') IS NOT NULL AS "hasNotifications",
-      to_regclass('public.push_subscriptions') IS NOT NULL AS "hasPushSubscriptions",
-      EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'notifications'
-          AND column_name = 'kind'
-      ) AS "hasNotificationKind",
-      to_regclass('public.idx_notifications_user_created') IS NOT NULL AS "hasCreatedIndex",
-      to_regclass('public.idx_notifications_user_read') IS NOT NULL AS "hasReadIndex",
-      to_regclass('public.idx_notifications_user_dedupe') IS NOT NULL AS "hasDedupeIndex",
-      to_regclass('public.idx_notifications_source_schedule') IS NOT NULL AS "hasSourceScheduleIndex",
-      to_regclass('public.idx_push_subscriptions_user_seen') IS NOT NULL AS "hasPushIndex"
-  `;
-
-  const row = rows[0] as
-    | {
-        hasUserSetting?: boolean;
-        hasNotifications?: boolean;
-        hasPushSubscriptions?: boolean;
-        hasNotificationKind?: boolean;
-        hasCreatedIndex?: boolean;
-        hasReadIndex?: boolean;
-        hasDedupeIndex?: boolean;
-        hasSourceScheduleIndex?: boolean;
-        hasPushIndex?: boolean;
-      }
-    | undefined;
-
-  return Boolean(
-      row?.hasUserSetting &&
-      row.hasNotifications &&
-      row.hasPushSubscriptions &&
-      row.hasNotificationKind &&
-      row.hasCreatedIndex &&
-      row.hasReadIndex &&
-      row.hasDedupeIndex &&
-      row.hasSourceScheduleIndex &&
-      row.hasPushIndex,
-  );
-}
-
 export async function ensureNotificationsInfrastructure(sql: SqlClient) {
   if (!ensureNotificationsInfrastructurePromise) {
     ensureNotificationsInfrastructurePromise = (async () => {
-      if (await hasNotificationsInfrastructure(sql)) return;
-
-      await sql`
-        ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE
-      `;
-
-      await sql`
-        CREATE TABLE IF NOT EXISTS notifications (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          title TEXT NOT NULL,
-          message TEXT NOT NULL,
-          tone TEXT NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'error')),
-          read BOOLEAN NOT NULL DEFAULT FALSE,
-          target_type TEXT CHECK (target_type IN ('task', 'notifications', 'profile', 'settings')),
-          target_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
-          dedupe_key TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-
-      await sql`
-        ALTER TABLE notifications
-        DROP CONSTRAINT IF EXISTS notifications_dedupe_key_key
-      `;
-
-      await sql`
-        ALTER TABLE notifications
-        ADD COLUMN IF NOT EXISTS source_schedule_id UUID
-      `;
-
-      await sql`
-        ALTER TABLE notifications
-        ADD COLUMN IF NOT EXISTS kind TEXT CHECK (
-          kind IN ('pre_notice', 'notification', 'alarm', 'floating_reminder', 'overdue_reminder')
-        )
-      `;
-
-      await sql`
-        CREATE INDEX IF NOT EXISTS idx_notifications_user_created
-        ON notifications(user_id, created_at DESC)
-      `;
-
-      await sql`
-        CREATE INDEX IF NOT EXISTS idx_notifications_user_read
-        ON notifications(user_id, read, created_at DESC)
-      `;
-
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedupe
-        ON notifications(user_id, dedupe_key)
-        WHERE dedupe_key IS NOT NULL
-      `;
-
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_source_schedule
-        ON notifications(source_schedule_id)
-        WHERE source_schedule_id IS NOT NULL
-      `;
-
-      await sql`
-        CREATE TABLE IF NOT EXISTS push_subscriptions (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          endpoint TEXT NOT NULL UNIQUE,
-          p256dh TEXT NOT NULL,
-          auth TEXT NOT NULL,
-          expiration_time BIGINT,
-          user_agent TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-
-      await sql`
-        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_seen
-        ON push_subscriptions(user_id, last_seen_at DESC)
-      `;
-    })();
+      await assertInfrastructure(sql, 'notifications', {
+        relations: [
+          { name: 'notifications' },
+          { name: 'push_subscriptions' },
+        ],
+        columns: [
+          { table: 'users', column: 'notifications_enabled' },
+          { table: 'notifications', column: 'user_id' },
+          { table: 'notifications', column: 'title' },
+          { table: 'notifications', column: 'message' },
+          { table: 'notifications', column: 'tone' },
+          { table: 'notifications', column: 'read' },
+          { table: 'notifications', column: 'target_type' },
+          { table: 'notifications', column: 'target_task_id' },
+          { table: 'notifications', column: 'dedupe_key' },
+          { table: 'notifications', column: 'source_schedule_id' },
+          { table: 'notifications', column: 'kind' },
+          { table: 'notifications', column: 'created_at' },
+          { table: 'push_subscriptions', column: 'user_id' },
+          { table: 'push_subscriptions', column: 'endpoint' },
+          { table: 'push_subscriptions', column: 'p256dh' },
+          { table: 'push_subscriptions', column: 'auth' },
+          { table: 'push_subscriptions', column: 'expiration_time' },
+          { table: 'push_subscriptions', column: 'user_agent' },
+          { table: 'push_subscriptions', column: 'last_seen_at' },
+        ],
+        indexes: [
+          { name: 'idx_notifications_user_created' },
+          { name: 'idx_notifications_user_read' },
+          { name: 'idx_notifications_user_dedupe' },
+          { name: 'idx_notifications_source_schedule' },
+          { name: 'idx_push_subscriptions_user_seen' },
+        ],
+      });
+    })().catch((error) => {
+      ensureNotificationsInfrastructurePromise = null;
+      throw error;
+    });
   }
 
   await ensureNotificationsInfrastructurePromise;
@@ -763,15 +669,12 @@ function minutesDifference(targetDate: Date, referenceDate: Date) {
 
 export async function generateScheduledNotifications(sql: SqlClient): Promise<ScheduledNotificationSummary> {
   await ensureNotificationsInfrastructure(sql);
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE
-  `;
-
-  await sql`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE
-  `;
+  await assertInfrastructure(sql, 'scheduled notifications', {
+    columns: [
+      { table: 'tasks', column: 'suppress_holiday_notifications' },
+      { table: 'tasks', column: 'alarm_enabled' },
+    ],
+  });
 
   const rows = await sql`
     SELECT

@@ -14,6 +14,7 @@ import {
   detectBrazilLocationFromCoordinates,
   ensureHolidayLocationSchema,
 } from '../holidays.js';
+import { assertInfrastructure } from '../infrastructure.js';
 import { logError, logInfo } from '../logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
@@ -83,36 +84,15 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
     await ensureTaskTaxonomySchema(sql);
     await ensureCalendarIntegrationSchema(sql);
     await ensureTaskSideEffectsInfrastructure(sql);
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_created
-      ON tasks(user_id, deleted_at, status, created_at DESC)
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_status_due
-      ON tasks(user_id, deleted_at, status, due_date ASC, created_at DESC)
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_tasks_user_priority_due
-      ON tasks(user_id, priority, due_date ASC, created_at DESC)
-      WHERE deleted_at IS NULL
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_tasks_user_category_due
-      ON tasks(user_id, category, due_date ASC, created_at DESC)
-      WHERE deleted_at IS NULL
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_tasks_search_gin
-      ON tasks USING GIN (
-        to_tsvector(
-          'simple',
-          coalesce(title, '') || ' ' ||
-          coalesce(description, '') || ' ' ||
-          coalesce(category, '')
-        )
-      )
-      WHERE deleted_at IS NULL
-    `;
+    await assertInfrastructure(sql, 'task list indexes', {
+      indexes: [
+        { name: 'idx_tasks_user_deleted_status_created' },
+        { name: 'idx_tasks_user_deleted_status_due' },
+        { name: 'idx_tasks_user_priority_due' },
+        { name: 'idx_tasks_user_category_due' },
+        { name: 'idx_tasks_search_gin' },
+      ],
+    });
   })().catch((error) => {
     taskInfrastructureReady = null;
     throw error;

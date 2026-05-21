@@ -49,11 +49,11 @@ export function useAppConfig() {
     const next = { ...persistedConfig, ...current, ...patch };
 
     LS.saveConfig(next);
-    setDarkMode(next.darkMode);
-    setNotificationsEnabled(next.notifications);
-    setConfigSound(next.sound);
-    setConfigConfirmDelete(next.confirmDelete);
-    setConfigShowCompleted(next.showCompleted);
+    setDarkMode(next.darkMode ?? darkMode);
+    setNotificationsEnabled(next.notifications ?? notificationsEnabled);
+    setConfigSound(next.sound ?? configSound);
+    setConfigConfirmDelete(next.confirmDelete ?? configConfirmDelete);
+    setConfigShowCompleted(next.showCompleted ?? configShowCompleted);
     setConfigNoTimeReminderMinutes(normalizeNoTimeReminderMinutes(next.noTimeReminderMinutes));
   }, [
     configConfirmDelete,

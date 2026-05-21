@@ -299,7 +299,9 @@ function matchesDateFilter(task: Task, range: { start: string; end: string } | n
   return dueDateKey >= range.start && dueDateKey <= range.end;
 }
 
-function parseDateValue(value: string): number {
+function parseDateValue(value: string | null | undefined): number {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
 }

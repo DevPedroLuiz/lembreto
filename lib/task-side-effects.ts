@@ -3,6 +3,7 @@ import {
   syncTaskToExternalCalendar,
 } from './calendar/calendarSync.js';
 import type { SqlClient } from './handlers/core.js';
+import { assertInfrastructure } from './infrastructure.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
@@ -68,6 +69,7 @@ const SIDE_EFFECT_JOB_TIMEOUT_MS = 3000;
 const EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS = 2500;
 const STUCK_SIDE_EFFECT_RECLAIM_LIMIT = 10;
 const MAX_SIDE_EFFECT_ATTEMPTS = 5;
+let taskSideEffectsInfrastructureReady: Promise<void> | null = null;
 
 export function buildTaskSideEffectDedupeKey(userId: string, taskId: string, kind: TaskSideEffectKind) {
   if (kind === 'sync_notification_schedules') return `user:${userId}:task:${taskId}:sync-schedules`;
@@ -77,45 +79,36 @@ export function buildTaskSideEffectDedupeKey(userId: string, taskId: string, kin
 }
 
 export async function ensureTaskSideEffectsInfrastructure(sql: SqlClient) {
-  await sql`
-    CREATE TABLE IF NOT EXISTS task_side_effects (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (
-        kind IN (
-          'sync_notification_schedules',
-          'cancel_notification_schedules',
-          'sync_external_calendar',
-          'delete_external_calendar_event'
-        )
-      ),
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'processing', 'done', 'failed', 'cancelled')),
-      dedupe_key TEXT NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0,
-      available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      processing_started_at TIMESTAMPTZ,
-      done_at TIMESTAMPTZ,
-      failed_at TIMESTAMPTZ,
-      cancelled_at TIMESTAMPTZ,
-      error_message TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_side_effects_dedupe
-    ON task_side_effects(user_id, dedupe_key)
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_task_side_effects_due
-    ON task_side_effects(status, available_at)
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_task_side_effects_task
-    ON task_side_effects(task_id, status)
-  `;
+  taskSideEffectsInfrastructureReady ??= assertInfrastructure(sql, 'task side effects', {
+    relations: [
+      { name: 'task_side_effects' },
+    ],
+    columns: [
+      { table: 'task_side_effects', column: 'user_id' },
+      { table: 'task_side_effects', column: 'task_id' },
+      { table: 'task_side_effects', column: 'kind' },
+      { table: 'task_side_effects', column: 'status' },
+      { table: 'task_side_effects', column: 'dedupe_key' },
+      { table: 'task_side_effects', column: 'attempts' },
+      { table: 'task_side_effects', column: 'available_at' },
+      { table: 'task_side_effects', column: 'processing_started_at' },
+      { table: 'task_side_effects', column: 'done_at' },
+      { table: 'task_side_effects', column: 'failed_at' },
+      { table: 'task_side_effects', column: 'cancelled_at' },
+      { table: 'task_side_effects', column: 'error_message' },
+      { table: 'task_side_effects', column: 'updated_at' },
+    ],
+    indexes: [
+      { name: 'idx_task_side_effects_dedupe' },
+      { name: 'idx_task_side_effects_due' },
+      { name: 'idx_task_side_effects_task' },
+    ],
+  }).catch((error) => {
+    taskSideEffectsInfrastructureReady = null;
+    throw error;
+  });
+
+  await taskSideEffectsInfrastructureReady;
 }
 
 export async function enqueueTaskSideEffect(

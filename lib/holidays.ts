@@ -8,6 +8,7 @@ import {
   resolveStateCodeFromName,
 } from './brazil-location.js';
 import type { SqlClient } from './handlers/core.js';
+import { assertInfrastructure } from './infrastructure.js';
 
 const BRAZIL_CODE = 'BR';
 
@@ -86,9 +87,13 @@ function toDate(value: string) {
 }
 
 export async function ensureHolidayLocationSchema(sql: SqlClient) {
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS state_code TEXT`;
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city_name TEXT`;
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS holiday_region_code TEXT`;
+  await assertInfrastructure(sql, 'holiday location', {
+    columns: [
+      { table: 'users', column: 'state_code' },
+      { table: 'users', column: 'city_name' },
+      { table: 'users', column: 'holiday_region_code' },
+    ],
+  });
 }
 
 export function getBrazilStates() {

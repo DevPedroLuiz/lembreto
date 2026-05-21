@@ -88,11 +88,20 @@ npm run dev
 
 Por padrão, o servidor local atual sobe em `http://localhost:3001`.
 
+## Migrations versionadas
+
+```bash
+npm run migrate
+```
+
+Na Vercel, o build usa `npm run vercel-build`, que executa `npm run migrate` antes de `vite build`. O runtime apenas verifica se a infraestrutura esperada existe; ele nao cria nem altera schema durante requests.
+
 ## Scripts
 
 ```bash
 npm run dev
 npm run build
+npm run migrate
 npm run lint
 npm run test
 npm run test:e2e

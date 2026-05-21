@@ -25,9 +25,37 @@ import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../src/lib/task
 
 process.env.JWT_SECRET ||= 'test-secret-with-at-least-thirty-two-characters';
 
+function getInfrastructureCheckRows(query: string) {
+  if (query.includes('pg_catalog.pg_constraint')) {
+    return [{
+      definition: [
+        'pending',
+        'overdue',
+        'completed',
+        'draft',
+        'inactive',
+        'cancelled',
+        'idle',
+        'synced',
+        'failed',
+        'manual',
+        'expired',
+      ].join(' '),
+    }];
+  }
+
+  if (query.includes('pg_catalog.pg_class') || query.includes('pg_catalog.pg_attribute')) {
+    return [{ exists: 1 }];
+  }
+
+  return null;
+}
+
 function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean }) {
   return async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) {
       return options?.blacklisted ? [{ exists: 1 }] : [];
@@ -137,6 +165,8 @@ function createNotificationScheduleSqlMock(options?: {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) {
       return [];
@@ -421,6 +451,8 @@ function createTaskSideEffectsSqlMock(options?: {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('SELECT NOW() AS "postgresNow"')) {
       return [{ postgresNow: now.toISOString() }];
@@ -651,6 +683,8 @@ function createCronHealthSqlMock(options?: {
   const now = new Date('2026-05-14T21:30:00.000Z');
   const sql = (async (strings: TemplateStringsArray) => {
     const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('SELECT NOW() AS now')) {
       if (options?.neverNow) {
@@ -844,6 +878,8 @@ async function main() {
 
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
       if (query.includes('FROM users')) {
@@ -896,6 +932,9 @@ async function main() {
 
     const sql = (async (strings: TemplateStringsArray) => {
       const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
+
       if (query.includes('FROM calendar_feeds')) return [];
       return [];
     }) as SqlClient;
@@ -1058,6 +1097,8 @@ async function main() {
     const selectedValues: unknown[][] = [];
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
       if (query.includes('FROM users')) {

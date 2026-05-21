@@ -1,5 +1,6 @@
 import { extractBearerToken, verifyToken, type JwtPayload } from './jwt.js';
 import type { SqlClient } from './handlers/core.js';
+import { assertInfrastructure } from './infrastructure.js';
 
 export interface SafeUser {
   id: string;
@@ -32,10 +33,17 @@ let ensureGoogleAuthSchemaPromise: Promise<void> | null = null;
 export async function ensureUserProfileSchema(sql: SqlClient) {
   if (!ensureUserProfileSchemaPromise) {
     ensureUserProfileSchemaPromise = (async () => {
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS state_code TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city_name TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS holiday_region_code TEXT`;
-    })();
+      await assertInfrastructure(sql, 'user profile', {
+        columns: [
+          { table: 'users', column: 'state_code' },
+          { table: 'users', column: 'city_name' },
+          { table: 'users', column: 'holiday_region_code' },
+        ],
+      });
+    })().catch((error) => {
+      ensureUserProfileSchemaPromise = null;
+      throw error;
+    });
   }
 
   await ensureUserProfileSchemaPromise;
@@ -45,9 +53,18 @@ export async function ensureGoogleAuthSchema(sql: SqlClient) {
   if (!ensureGoogleAuthSchemaPromise) {
     ensureGoogleAuthSchemaPromise = (async () => {
       await ensureUserProfileSchema(sql);
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL`;
-    })();
+      await assertInfrastructure(sql, 'google auth', {
+        columns: [
+          { table: 'users', column: 'google_id' },
+        ],
+        indexes: [
+          { name: 'idx_users_google_id' },
+        ],
+      });
+    })().catch((error) => {
+      ensureGoogleAuthSchemaPromise = null;
+      throw error;
+    });
   }
 
   await ensureGoogleAuthSchemaPromise;

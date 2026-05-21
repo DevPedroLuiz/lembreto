@@ -108,6 +108,7 @@ type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
+type TaskWithDueDate = Task & { dueDate: string };
 
 type EmitNotificationOptions = {
   toastOnly?: boolean;
@@ -142,6 +143,10 @@ type ActiveAlarm = {
 
 const DISMISSED_ALARMS_STORAGE_KEY = 'lembreto.dismissedAlarms.v1';
 const LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY = 'lembreto.localNotificationDedupe.v1';
+
+function hasTaskDueDate(task: Task): task is TaskWithDueDate {
+  return typeof task.dueDate === 'string' && task.dueDate.length > 0;
+}
 
 function normalizeCategoryForValidation(value: string): string {
   return value
@@ -813,19 +818,20 @@ export default function App() {
   useEffect(() => {
     if (!auth.token || !auth.currentUser || welcomedUserIdRef.current === auth.currentUser.id) return;
 
-    welcomedUserIdRef.current = auth.currentUser.id;
+    const welcomedUser = auth.currentUser;
+    welcomedUserIdRef.current = welcomedUser.id;
     void createNotification({
       title: 'Bem-vindo!',
-      message: `Olá, ${auth.currentUser.name}!`,
+      message: `Olá, ${welcomedUser.name}!`,
       tone: 'success',
       target: { type: 'notifications' },
-      dedupeKey: `user:${auth.currentUser.id}:welcome:${format(new Date(), 'yyyy-MM-dd')}`,
+      dedupeKey: `user:${welcomedUser.id}:welcome:${format(new Date(), 'yyyy-MM-dd')}`,
     }).then((result) => {
       if (!result.created) return;
       seenNotificationIdsRef.current.add(result.notification.id);
-      triggerToastNotification('Bem-vindo!', `Olá, ${auth.currentUser.name}!`);
+      triggerToastNotification('Bem-vindo!', `Olá, ${welcomedUser.name}!`);
     }).catch(() => {
-      triggerToastNotification('Bem-vindo!', `Olá, ${auth.currentUser.name}!`);
+      triggerToastNotification('Bem-vindo!', `Olá, ${welcomedUser.name}!`);
     });
   }, [auth.currentUser, auth.token, createNotification, triggerToastNotification]);
 
@@ -2396,7 +2402,9 @@ export default function App() {
   );
 
   const overdueTasks = useMemo(
-    () => tasks.filter((task) => getDerivedTaskStatus(task, derivedStatusNow) === 'overdue'),
+    () => tasks.filter((task): task is TaskWithDueDate => (
+      hasTaskDueDate(task) && getDerivedTaskStatus(task, derivedStatusNow) === 'overdue'
+    )),
     [derivedStatusNow, tasks]
   );
 
@@ -2436,7 +2444,9 @@ export default function App() {
   );
 
   const todayTasks = useMemo(() => {
-    return pendingTasks.filter((task) => {
+    return pendingTasks.filter((task): task is TaskWithDueDate => {
+      if (!hasTaskDueDate(task)) return false;
+
       try {
         const dueDate = parseISO(task.dueDate);
         return isToday(dueDate) && !isPast(dueDate);
@@ -2447,7 +2457,9 @@ export default function App() {
   }, [pendingTasks]);
 
   const tomorrowTasks = useMemo(() => {
-    return pendingTasks.filter((task) => {
+    return pendingTasks.filter((task): task is TaskWithDueDate => {
+      if (!hasTaskDueDate(task)) return false;
+
       try {
         return isTomorrow(parseISO(task.dueDate));
       } catch {
@@ -2462,11 +2474,14 @@ export default function App() {
   }), [overdueTasks.length, todayTasks.length]);
 
   const timedPendingTasks = useMemo(() => {
-    return pendingTasks.filter((task) => Boolean(getTaskTimeLabel(task.dueDate)));
+    return pendingTasks.filter((task): task is TaskWithDueDate => (
+      hasTaskDueDate(task) && Boolean(getTaskTimeLabel(task.dueDate))
+    ));
   }, [pendingTasks]);
 
   const shouldSuppressHolidayNotification = useCallback((task: Task) => {
     if (!task.suppressHolidayNotifications) return false;
+    if (!hasTaskDueDate(task)) return false;
 
     try {
       return holidayDateKeys.has(format(parseISO(task.dueDate), 'yyyy-MM-dd'));

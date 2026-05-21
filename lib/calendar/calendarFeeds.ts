@@ -5,27 +5,27 @@ import {
   type CalendarFeedJwtPayload,
 } from '../jwt.js';
 import type { SqlClient } from '../handlers/core.js';
+import { assertInfrastructure } from '../infrastructure.js';
 
 let calendarFeedSchemaReady: Promise<void> | null = null;
 
 export async function ensureCalendarFeedSchema(sql: SqlClient) {
   calendarFeedSchemaReady ??= (async () => {
-    await sql`
-      CREATE TABLE IF NOT EXISTS calendar_feeds (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        token_jti TEXT NOT NULL UNIQUE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        revoked_at TIMESTAMPTZ,
-        last_used_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_calendar_feeds_user_active
-      ON calendar_feeds(user_id, expires_at DESC)
-      WHERE revoked_at IS NULL
-    `;
+    await assertInfrastructure(sql, 'calendar feeds', {
+      relations: [
+        { name: 'calendar_feeds' },
+      ],
+      columns: [
+        { table: 'calendar_feeds', column: 'user_id' },
+        { table: 'calendar_feeds', column: 'token_jti' },
+        { table: 'calendar_feeds', column: 'expires_at' },
+        { table: 'calendar_feeds', column: 'revoked_at' },
+        { table: 'calendar_feeds', column: 'last_used_at' },
+      ],
+      indexes: [
+        { name: 'idx_calendar_feeds_user_active' },
+      ],
+    });
   })().catch((error) => {
     calendarFeedSchemaReady = null;
     throw error;

@@ -1399,6 +1399,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
     }));
     return json(200, {
       ok: true,
+      ...result,
       durationMs,
       stoppedByTimeLimit,
       hasMore,
@@ -1412,7 +1413,6 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       scheduleDiagnostics: effectiveScheduleDiagnostics,
       sideEffectDiagnostics: effectiveSideEffectDiagnostics,
       backfillDiagnostics: backfill.backfillDiagnostics,
-      ...result,
     });
   } catch (error) {
     logError('cron_notifications_failed', error, getRequestMeta(request));

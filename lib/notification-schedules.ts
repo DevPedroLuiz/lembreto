@@ -7,6 +7,7 @@ import {
 } from './contracts.js';
 import type { SqlClient } from './handlers/core.js';
 import { buildHolidayCalendar } from './holidays.js';
+import { assertInfrastructure } from './infrastructure.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import {
   createNotification,
@@ -31,6 +32,7 @@ const OVERDUE_SCHEDULES_PER_TASK_LIMIT = 1;
 const QUIET_START_HOUR = 22;
 const QUIET_END_HOUR = 7;
 const SAO_PAULO_OFFSET = '-03:00';
+let notificationSchedulingInfrastructureReady: Promise<void> | null = null;
 
 interface TaskForScheduling {
   id: string;
@@ -345,94 +347,70 @@ export function formatOverdueDuration(minutes: number): string {
 }
 
 export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient) {
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'tasks'::regclass
-          AND conname = 'tasks_status_check'
-          AND (
-            pg_get_constraintdef(oid) NOT LIKE '%overdue%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%draft%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%inactive%' OR
-            pg_get_constraintdef(oid) NOT LIKE '%cancelled%'
-          )
-      ) THEN
-        ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
-      END IF;
+  notificationSchedulingInfrastructureReady ??= (async () => {
+    await ensureNotificationsInfrastructure(sql);
+    await assertInfrastructure(sql, 'notification scheduling', {
+      relations: [
+        { name: 'notification_schedules' },
+      ],
+      columns: [
+        { table: 'tasks', column: 'alarm_enabled' },
+        { table: 'tasks', column: 'reminder_mode' },
+        { table: 'tasks', column: 'expires_at' },
+        { table: 'tasks', column: 'overdue_since' },
+        { table: 'tasks', column: 'overdue_expires_at' },
+        { table: 'tasks', column: 'deleted_at' },
+        { table: 'tasks', column: 'completed_at' },
+        { table: 'tasks', column: 'completion_source' },
+        { table: 'tasks', column: 'auto_deleted_reason' },
+        { table: 'tasks', column: 'auto_deleted_at' },
+        { table: 'tasks', column: 'muted_until' },
+        { table: 'tasks', column: 'suppress_holiday_notifications' },
+        { table: 'tasks', column: 'floating_interval_minutes' },
+        { table: 'notification_schedules', column: 'user_id' },
+        { table: 'notification_schedules', column: 'task_id' },
+        { table: 'notification_schedules', column: 'kind' },
+        { table: 'notification_schedules', column: 'notify_at' },
+        { table: 'notification_schedules', column: 'status' },
+        { table: 'notification_schedules', column: 'title' },
+        { table: 'notification_schedules', column: 'message' },
+        { table: 'notification_schedules', column: 'tone' },
+        { table: 'notification_schedules', column: 'dedupe_key' },
+        { table: 'notification_schedules', column: 'sequence_index' },
+        { table: 'notification_schedules', column: 'interval_minutes' },
+        { table: 'notification_schedules', column: 'processing_started_at' },
+        { table: 'notification_schedules', column: 'sent_at' },
+        { table: 'notification_schedules', column: 'failed_at' },
+        { table: 'notification_schedules', column: 'cancelled_at' },
+        { table: 'notification_schedules', column: 'dismissed_at' },
+        { table: 'notification_schedules', column: 'error_message' },
+        { table: 'notification_schedules', column: 'updated_at' },
+        { table: 'notifications', column: 'source_schedule_id' },
+      ],
+      indexes: [
+        { name: 'idx_notification_schedules_due' },
+        { name: 'idx_notification_schedules_task_status' },
+        { name: 'idx_notification_schedules_user_task' },
+        { name: 'idx_notification_schedules_dedupe' },
+      ],
+      constraints: [
+        {
+          table: 'tasks',
+          name: 'tasks_status_check',
+          contains: ['pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'],
+        },
+        {
+          table: 'notifications',
+          name: 'notifications_source_schedule_id_fkey',
+        },
+      ],
+    });
+  })().catch((error) => {
+    notificationSchedulingInfrastructureReady = null;
+    throw error;
+  });
 
-      IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'tasks'::regclass
-          AND conname = 'tasks_status_check'
-      ) THEN
-        ALTER TABLE tasks
-        ADD CONSTRAINT tasks_status_check
-        CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled'));
-      END IF;
-    END $$;
-  `;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'timed' CHECK (reminder_mode IN ('timed', 'floating'))`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_since TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_expires_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completion_source TEXT CHECK (completion_source IN ('user', 'system', 'calendar_sync'))`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_reason TEXT`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE`;
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS floating_interval_minutes INTEGER`;
-  await sql`
-    CREATE TABLE IF NOT EXISTS notification_schedules (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK (kind IN ('pre_notice', 'notification', 'alarm', 'floating_reminder', 'overdue_reminder')),
-      notify_at TIMESTAMPTZ NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'cancelled')),
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      tone TEXT NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'error')),
-      dedupe_key TEXT NOT NULL,
-      sequence_index INTEGER,
-      interval_minutes INTEGER,
-      processing_started_at TIMESTAMPTZ,
-      sent_at TIMESTAMPTZ,
-      failed_at TIMESTAMPTZ,
-      cancelled_at TIMESTAMPTZ,
-      dismissed_at TIMESTAMPTZ,
-      error_message TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_due ON notification_schedules(status, notify_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_task_status ON notification_schedules(task_id, status)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_notification_schedules_user_task ON notification_schedules(user_id, task_id)`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_schedules_dedupe ON notification_schedules(user_id, dedupe_key)`;
-  await sql`ALTER TABLE notification_schedules ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ`;
-  await ensureNotificationsInfrastructure(sql);
-  await sql`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'notifications'::regclass
-          AND conname = 'notifications_source_schedule_id_fkey'
-      ) THEN
-        ALTER TABLE notifications
-        ADD CONSTRAINT notifications_source_schedule_id_fkey
-        FOREIGN KEY (source_schedule_id) REFERENCES notification_schedules(id) ON DELETE SET NULL;
-      END IF;
-    END $$;
-  `;
+  await notificationSchedulingInfrastructureReady;
 }
 
 async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: string): Promise<TaskForScheduling | null> {

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "vite build",
+  "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
   "crons": [
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
