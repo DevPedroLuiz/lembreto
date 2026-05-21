@@ -202,17 +202,6 @@ function buildPushPayload(notification: AppNotificationRecord) {
   };
 }
 
-async function shouldSendPushToUser(sql: SqlClient, userId: string) {
-  const rows = await sql`
-    SELECT notifications_enabled AS "notificationsEnabled"
-    FROM users
-    WHERE id = ${userId}
-    LIMIT 1
-  `;
-
-  return rows[0]?.notificationsEnabled !== false;
-}
-
 async function sendPushNotificationToUser(
   sql: SqlClient,
   userId: string,
@@ -229,8 +218,6 @@ export async function sendPushPayloadToUser(
 ) {
   const client = getWebPushClient();
   if (!client) return;
-
-  if (!(await shouldSendPushToUser(sql, userId))) return;
 
   const rows = await sql`
     SELECT

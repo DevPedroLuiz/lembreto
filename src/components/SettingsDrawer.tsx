@@ -42,22 +42,26 @@ function Toggle({
   onClick,
   ariaLabel,
   autoFocus = false,
+  disabled = false,
 }: {
   active: boolean;
   onClick: () => void;
   ariaLabel: string;
   autoFocus?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       autoFocus={autoFocus}
+      disabled={disabled}
       aria-label={ariaLabel}
       role="switch"
       aria-checked={active}
       className={[
         'relative h-8 w-14 rounded-full border transition-colors',
+        disabled ? 'cursor-not-allowed opacity-60' : '',
         active
           ? 'border-blue-600 bg-blue-600 dark:border-blue-500 dark:bg-blue-500'
           : 'border-slate-300 bg-slate-200 dark:border-white/10 dark:bg-slate-800',
@@ -84,12 +88,13 @@ interface SettingsDrawerProps {
   notificationsEnabled: boolean;
   onToggleNotifications: () => void;
   desktopNotificationsSupported: boolean;
+  desktopNotificationsEnabled: boolean;
   desktopNotificationsReady: boolean;
   desktopNotificationsPermission: NotificationPermission;
   desktopNotificationsConfigured: boolean;
   desktopNotificationsError: string | null;
   isSyncingDesktopNotifications: boolean;
-  onEnableDesktopNotifications: () => void;
+  onToggleDesktopNotifications: () => void;
   onOpenNotificationsCenter: () => void;
   onOpenProfile: () => void;
   sound: boolean;
@@ -137,6 +142,7 @@ export type SettingsView =
 type SettingToggleKey =
   | 'darkMode'
   | 'notifications'
+  | 'desktopNotifications'
   | 'sound'
   | 'showCompleted'
   | 'confirmDelete';
@@ -204,10 +210,18 @@ const settingCards: Array<{
   {
     key: 'notifications',
     section: 'notifications',
-    title: 'Notificações do sistema',
-    description: 'Controla a central e os alertas do aplicativo.',
+    title: 'Central de notificações',
+    description: 'Registra novos avisos no histórico interno e nos alertas dentro do app.',
     helper: 'Acompanhamento',
     icon: BellRing,
+  },
+  {
+    key: 'desktopNotifications',
+    section: 'notifications',
+    title: 'Notificações do Windows',
+    description: 'Envia push para este navegador quando você quiser receber avisos fora da aba.',
+    helper: 'Windows',
+    icon: MonitorSmartphone,
   },
   {
     key: 'sound',
@@ -301,12 +315,13 @@ export function SettingsDrawer({
   notificationsEnabled,
   onToggleNotifications,
   desktopNotificationsSupported,
+  desktopNotificationsEnabled,
   desktopNotificationsReady,
   desktopNotificationsPermission,
   desktopNotificationsConfigured,
   desktopNotificationsError,
   isSyncingDesktopNotifications,
-  onEnableDesktopNotifications,
+  onToggleDesktopNotifications,
   onOpenNotificationsCenter,
   onOpenProfile,
   sound,
@@ -594,7 +609,25 @@ export function SettingsDrawer({
     notifications: {
       active: notificationsEnabled,
       onClick: onToggleNotifications,
-      ariaLabel: 'Alternar notificações do sistema',
+      ariaLabel: 'Alternar notificações da central',
+    },
+    desktopNotifications: {
+      active: desktopNotificationsEnabled,
+      onClick: onToggleDesktopNotifications,
+      ariaLabel: 'Alternar push do Windows',
+      disabled: isSyncingDesktopNotifications,
+      statusLabel: isSyncingDesktopNotifications
+        ? 'Sincronizando'
+        : desktopNotificationsEnabled && desktopNotificationsReady
+          ? 'Ativado'
+          : desktopNotificationsEnabled
+            ? 'Pendente'
+          : 'Desativado',
+      statusHint: desktopNotificationsReady
+        ? 'Toque para desconectar este navegador.'
+        : desktopNotificationsEnabled
+          ? 'A conexão ainda não está pronta neste navegador.'
+        : 'Toque para conectar este navegador.',
     },
     sound: {
       active: sound,
@@ -650,6 +683,13 @@ export function SettingsDrawer({
       {cards.map((card, index) => {
         const config = toggleMap[card.key];
         const Icon = card.icon;
+        const statusLabel = 'statusLabel' in config
+          ? config.statusLabel
+          : config.active ? 'Ativado' : 'Desativado';
+        const statusHint = 'statusHint' in config
+          ? config.statusHint
+          : 'Toque para alternar esta preferência.';
+        const disabled = 'disabled' in config ? config.disabled : false;
 
         return (
           <section
@@ -677,10 +717,10 @@ export function SettingsDrawer({
             <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 dark:border-white/10 dark:bg-slate-950/40">
               <div>
                 <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                  {config.active ? 'Ativado' : 'Desativado'}
+                  {statusLabel}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Toque para alternar esta preferência.
+                  {statusHint}
                 </p>
               </div>
 
@@ -689,6 +729,7 @@ export function SettingsDrawer({
                 onClick={config.onClick}
                 ariaLabel={config.ariaLabel}
                 autoFocus={index === 0}
+                disabled={disabled}
               />
             </div>
           </section>
@@ -1093,7 +1134,7 @@ export function SettingsDrawer({
               title: 'Notificações do Windows ativas',
               description:
                 'Este navegador já está conectado e receberá avisos mesmo fora da aba do sistema.',
-              buttonLabel: 'Conectar novamente',
+              buttonLabel: null as string | null,
             };
           }
 
@@ -1103,7 +1144,7 @@ export function SettingsDrawer({
               title: 'Permissão bloqueada no navegador',
               description:
                 'Libere a permissão do site nas configurações do navegador para voltar a receber avisos do Windows.',
-              buttonLabel: 'Tentar novamente',
+              buttonLabel: null as string | null,
             };
           }
 
@@ -1117,12 +1158,22 @@ export function SettingsDrawer({
             };
           }
 
+          if (desktopNotificationsEnabled) {
+            return {
+              badge: 'Pendente',
+              title: 'Conexão pendente',
+              description:
+                'A preferência está ativa, mas este navegador ainda não confirmou a assinatura push.',
+              buttonLabel: null as string | null,
+            };
+          }
+
           return {
             badge: 'Pendente',
             title: 'Ative as notificações do Windows',
             description:
-              'Permita o envio no navegador para receber lembretes mesmo quando o Lembreto não estiver em foco.',
-            buttonLabel: 'Ativar no navegador',
+              'Use o toggle acima para pedir permissão ao navegador e conectar este dispositivo.',
+            buttonLabel: null as string | null,
           };
         })();
 
@@ -1140,8 +1191,8 @@ export function SettingsDrawer({
             <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Windows"
-                title="Notificações do sistema"
-                description="Conecte este navegador ao Windows para receber lembretes fora da aba."
+                title="Estado do push desktop"
+                description="Acompanhe a conexão deste navegador com os avisos do Windows."
               />
 
               <div className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
@@ -1174,7 +1225,7 @@ export function SettingsDrawer({
                 {desktopNotificationsStatus.buttonLabel ? (
                   <button
                     type="button"
-                    onClick={onEnableDesktopNotifications}
+                    onClick={onToggleDesktopNotifications}
                     disabled={isSyncingDesktopNotifications}
                     className="action-primary mt-5 w-full justify-between disabled:cursor-not-allowed disabled:opacity-70"
                   >

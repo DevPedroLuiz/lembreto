@@ -64,7 +64,7 @@ export function usePushNotifications({
     setPushError(null);
   }, [token]);
 
-  const syncPushSubscription = useCallback(async () => {
+  const syncPushSubscription = useCallback(async (forceEnabled = false) => {
     if (!isPushSupported()) {
       setSubscriptionEndpoint(null);
       setPushError('Este navegador não oferece suporte a notificações push.');
@@ -77,9 +77,9 @@ export function usePushNotifications({
     try {
       const registration = await ensureRegistration();
       const existingSubscription = await registration.pushManager.getSubscription();
-      const explicitlyDisabled = !enabled || notificationPermission !== 'granted';
+      const shouldConnect = forceEnabled || enabled;
 
-      if (explicitlyDisabled) {
+      if (!shouldConnect || notificationPermission !== 'granted') {
         if (existingSubscription) {
           if (token) {
             await apiDelete('/api/notifications/push-subscriptions', token, {
@@ -173,6 +173,48 @@ export function usePushNotifications({
     }
   }, [enabled, ensureRegistration, notificationPermission, pushPublicKey, token]);
 
+  const disablePushSubscription = useCallback(async () => {
+    if (!isPushSupported()) {
+      setSubscriptionEndpoint(null);
+      setPushError(null);
+      return;
+    }
+
+    setIsSyncing(true);
+    setPushError(null);
+
+    try {
+      const registration = await ensureRegistration();
+      const existingSubscription = await registration.pushManager.getSubscription();
+
+      if (existingSubscription) {
+        if (token) {
+          await apiDelete('/api/notifications/push-subscriptions', token, {
+            endpoint: existingSubscription.endpoint,
+          }).catch(() => {
+            // best effort cleanup
+          });
+        }
+
+        await existingSubscription.unsubscribe().catch(() => {
+          // best effort unsubscribe
+        });
+      }
+
+      syncedEndpointRef.current = null;
+      setSubscriptionEndpoint(null);
+    } catch (error) {
+      setPushError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível desativar as notificações do Windows neste navegador.',
+      );
+      throw error;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [ensureRegistration, token]);
+
   useEffect(() => {
     void syncPushSubscription().catch(() => {
       // the app still works without push; this is a best effort sync
@@ -216,5 +258,6 @@ export function usePushNotifications({
     isSyncing,
     pushError,
     syncPushSubscription,
+    disablePushSubscription,
   };
 }

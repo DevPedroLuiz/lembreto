@@ -8,6 +8,7 @@ import { LS, type AppConfig } from '../lib/storage';
 type AppConfigPatch = Partial<{
   darkMode: boolean;
   notifications: boolean;
+  desktopNotifications: boolean;
   sound: boolean;
   confirmDelete: boolean;
   showCompleted: boolean;
@@ -17,6 +18,7 @@ type AppConfigPatch = Partial<{
 export function useAppConfig() {
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(false);
   const [configSound, setConfigSound] = useState(true);
   const [configConfirmDelete, setConfigConfirmDelete] = useState(true);
   const [configShowCompleted, setConfigShowCompleted] = useState(true);
@@ -26,6 +28,7 @@ export function useAppConfig() {
     const cfg = LS.getConfig();
     if (typeof cfg.darkMode === 'boolean') setDarkMode(cfg.darkMode);
     if (typeof cfg.notifications === 'boolean') setNotificationsEnabled(cfg.notifications);
+    if (typeof cfg.desktopNotifications === 'boolean') setDesktopNotificationsEnabled(cfg.desktopNotifications);
     if (typeof cfg.sound === 'boolean') setConfigSound(cfg.sound);
     if (typeof cfg.confirmDelete === 'boolean') setConfigConfirmDelete(cfg.confirmDelete);
     if (typeof cfg.showCompleted === 'boolean') setConfigShowCompleted(cfg.showCompleted);
@@ -41,6 +44,7 @@ export function useAppConfig() {
     const current: AppConfig = {
       darkMode,
       notifications: notificationsEnabled,
+      desktopNotifications: desktopNotificationsEnabled,
       sound: configSound,
       confirmDelete: configConfirmDelete,
       showCompleted: configShowCompleted,
@@ -51,6 +55,7 @@ export function useAppConfig() {
     LS.saveConfig(next);
     setDarkMode(next.darkMode ?? darkMode);
     setNotificationsEnabled(next.notifications ?? notificationsEnabled);
+    setDesktopNotificationsEnabled(next.desktopNotifications ?? desktopNotificationsEnabled);
     setConfigSound(next.sound ?? configSound);
     setConfigConfirmDelete(next.confirmDelete ?? configConfirmDelete);
     setConfigShowCompleted(next.showCompleted ?? configShowCompleted);
@@ -61,6 +66,7 @@ export function useAppConfig() {
     configShowCompleted,
     configSound,
     darkMode,
+    desktopNotificationsEnabled,
     notificationsEnabled,
   ]);
 
@@ -72,6 +78,7 @@ export function useAppConfig() {
     darkMode,
     notificationsEnabled,
     setNotificationsEnabled,
+    desktopNotificationsEnabled,
     configSound,
     configConfirmDelete,
     configShowCompleted,

@@ -400,6 +400,7 @@ export default function App() {
     darkMode,
     notificationsEnabled,
     setNotificationsEnabled,
+    desktopNotificationsEnabled,
     configSound,
     configConfirmDelete,
     configShowCompleted,
@@ -629,9 +630,10 @@ export default function App() {
     isSyncing: isSyncingDesktopNotifications,
     pushError: desktopPushError,
     syncPushSubscription,
+    disablePushSubscription,
   } = usePushNotifications({
     token: isResetPasswordRoute ? null : auth.token,
-    enabled: notificationsEnabled,
+    enabled: desktopNotificationsEnabled,
     pushPublicKey,
     notificationPermission: notifPerm,
     onPushMessage: refreshNotificationsFromPush,
@@ -1572,19 +1574,37 @@ export default function App() {
       await updateNotificationsEnabled(nextValue);
 
       if (nextValue) {
-        await requestPermission();
-        triggerToastOnly('Notificações ativadas', 'Novos avisos voltarão a aparecer na central e na interface.');
+        triggerToastOnly('Central ativada', 'Novos avisos voltarão a aparecer na central e na interface.');
       } else {
-        triggerToastOnly('Notificações desativadas', 'A central deixará de registrar novos avisos até você reativar.');
+        triggerToastOnly('Central desativada', 'A central deixará de registrar novos avisos até você reativar.');
       }
     } catch {
       notificationsOverrideRef.current = !nextValue;
       saveConfig({ notifications: !nextValue });
       triggerToastOnly('Não foi possível salvar', 'A preferência de notificações não foi atualizada.');
     }
-  }, [notificationsEnabled, requestPermission, saveConfig, triggerToastOnly, updateNotificationsEnabled]);
+  }, [notificationsEnabled, saveConfig, triggerToastOnly, updateNotificationsEnabled]);
 
-  const handleEnableDesktopNotifications = useCallback(async () => {
+  const handleToggleDesktopNotifications = useCallback(async () => {
+    if (desktopNotificationsEnabled) {
+      try {
+        await disablePushSubscription();
+        saveConfig({ desktopNotifications: false });
+        triggerToastOnly(
+          'Notificações do Windows desativadas',
+          'Este navegador deixou de receber avisos fora da aba.',
+        );
+      } catch (error) {
+        triggerToastOnly(
+          'Não foi possível desativar',
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível desativar as notificações do Windows neste navegador.',
+        );
+      }
+      return;
+    }
+
     if (!auth.token) {
       triggerToastOnly('Faça login primeiro', 'Entre na sua conta para conectar este navegador às notificações do Windows.');
       return;
@@ -1595,17 +1615,7 @@ export default function App() {
       return;
     }
 
-    let enabledNotifications = notificationsEnabled;
-
     try {
-      if (!enabledNotifications) {
-        notificationsOverrideRef.current = true;
-        saveConfig({ notifications: true });
-        setNotificationsEnabled(true);
-        await updateNotificationsEnabled(true);
-        enabledNotifications = true;
-      }
-
       const permission = await requestPermission();
       if (permission !== 'granted') {
         triggerToastOnly(
@@ -1617,18 +1627,17 @@ export default function App() {
         return;
       }
 
-      await syncPushSubscription();
+      saveConfig({ desktopNotifications: true });
+      await syncPushSubscription(true);
       triggerToastOnly(
         'Notificações do Windows ativadas',
         'Este navegador foi conectado e passará a receber seus lembretes fora da aba.',
       );
     } catch (error) {
-      if (!enabledNotifications) {
-        notificationsOverrideRef.current = false;
-        saveConfig({ notifications: false });
-        setNotificationsEnabled(false);
-      }
-
+      saveConfig({ desktopNotifications: false });
+      await disablePushSubscription().catch(() => {
+        // best effort cleanup after a failed activation
+      });
       triggerToastOnly(
         'Não foi possível ativar',
         error instanceof Error
@@ -1638,14 +1647,14 @@ export default function App() {
     }
   }, [
     auth.token,
-    notificationsEnabled,
+    desktopNotificationsEnabled,
+    disablePushSubscription,
     pushConfigured,
     pushPublicKey,
     requestPermission,
     saveConfig,
     syncPushSubscription,
     triggerToastOnly,
-    updateNotificationsEnabled,
   ]);
 
   const handleSubmitTask = useCallback(async (e: React.FormEvent) => {
@@ -3753,13 +3762,14 @@ export default function App() {
               void handleToggleNotifications();
             }}
             desktopNotificationsSupported={pushSupported}
+            desktopNotificationsEnabled={desktopNotificationsEnabled}
             desktopNotificationsReady={desktopNotificationsReady}
             desktopNotificationsPermission={notifPerm}
             desktopNotificationsConfigured={pushConfigured}
             desktopNotificationsError={desktopPushError}
             isSyncingDesktopNotifications={isSyncingDesktopNotifications}
-            onEnableDesktopNotifications={() => {
-              void handleEnableDesktopNotifications();
+            onToggleDesktopNotifications={() => {
+              void handleToggleDesktopNotifications();
             }}
             onOpenNotificationsCenter={openNotificationsCenter}
             onOpenProfile={openProfile}

@@ -7,6 +7,7 @@ import type { AppNotification } from '../types';
 export interface AppConfig {
   darkMode?: boolean;
   notifications?: boolean;
+  desktopNotifications?: boolean;
   sound?: boolean;
   confirmDelete?: boolean;
   showCompleted?: boolean;
