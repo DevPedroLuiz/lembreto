@@ -1356,31 +1356,31 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
-  test('warns before alarm time and repeats alerts for overdue reminders', async ({ page }) => {
+  test('sends due alarm, due reminder, and overdue schedules', async ({ page }) => {
     const user = buildE2ETestUser();
-    const upcoming = new Date(Date.now() + 10 * 60 * 1000);
-    upcoming.setSeconds(0, 0);
-    const upcomingWithoutAlarm = new Date(Date.now() + 12 * 60 * 1000);
-    upcomingWithoutAlarm.setSeconds(0, 0);
-
-    const overdue = new Date(Date.now() - 40 * 60 * 1000);
-    overdue.setSeconds(0, 0);
 
     await cleanupUsersByEmail([user.email]);
 
     try {
       await registerUser(page, user);
+      const dueSoon = new Date(Date.now() + 3500);
+      dueSoon.setMilliseconds(0);
+      const dueSoonWithoutAlarm = new Date(Date.now() + 3500);
+      dueSoonWithoutAlarm.setMilliseconds(0);
+      const overdue = new Date(Date.now() - 40 * 60 * 1000);
+      overdue.setSeconds(0, 0);
+
       await seedCustomTasksForUser(user.email, [
         {
           title: 'Lembrete prestes a vencer',
-          dueDate: upcoming.toISOString(),
+          dueDate: dueSoon.toISOString(),
           priority: 'high',
           category: 'Trabalho',
           alarmEnabled: true,
         },
         {
           title: 'Lembrete comum prestes a vencer',
-          dueDate: upcomingWithoutAlarm.toISOString(),
+          dueDate: dueSoonWithoutAlarm.toISOString(),
           priority: 'medium',
           category: 'Geral',
         },
@@ -1391,7 +1391,7 @@ test.describe('Lembreto critical flows', () => {
           category: 'Pessoal',
         },
       ]);
-      await runScheduledNotifications();
+      await runScheduledNotifications({ delayMs: 4000 });
 
       await page.getByTestId('sidebar-logout').click();
       await expect(page.getByTestId('auth-submit-button')).toBeVisible();
@@ -1400,7 +1400,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('header-notifications-button').click();
       const notificationItems = page.getByTestId('recent-notification-item');
 
-      await expect(notificationItems.filter({ hasText: 'O alarme do seu lembrete vai tocar em 15 minutos!' }).first()).toBeVisible();
+      await expect(notificationItems.filter({ hasText: 'Lembrete prestes a vencer' }).first()).toBeVisible();
       await expect(notificationItems.filter({ hasText: 'Lembrete comum prestes a vencer' }).first()).toBeVisible();
       await expect(notificationItems.filter({ hasText: 'Lembrete atrasado recorrente' }).first()).toBeVisible();
     } finally {

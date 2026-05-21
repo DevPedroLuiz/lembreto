@@ -248,6 +248,33 @@ function fallbackSchedules(durationMs = 0): ProcessNotificationSchedulesSummary 
   };
 }
 
+function addScheduleSummaries(
+  target: ProcessNotificationSchedulesSummary,
+  increment: ProcessNotificationSchedulesSummary,
+) {
+  target.detectedOverdueTasks += increment.detectedOverdueTasks;
+  target.backfilledSchedules += increment.backfilledSchedules;
+  target.reclaimedSchedules += increment.reclaimedSchedules;
+  target.fetchedSchedules += increment.fetchedSchedules;
+  target.processedSchedules += increment.processedSchedules;
+  target.sentSchedules += increment.sentSchedules;
+  target.cancelledSchedules += increment.cancelledSchedules;
+  target.rescheduledSchedules += increment.rescheduledSchedules;
+  target.failedSchedules += increment.failedSchedules;
+  target.durationMs += increment.durationMs;
+  target.hasMore = target.hasMore || increment.hasMore;
+  target.stoppedByTimeLimit = target.stoppedByTimeLimit || increment.stoppedByTimeLimit;
+  target.processed = target.processedSchedules;
+  target.sent = target.sentSchedules;
+  target.failed = target.failedSchedules;
+  target.cancelled = target.cancelledSchedules;
+  target.scheduleDiagnostics = increment.scheduleDiagnostics;
+
+  for (const kind of NOTIFICATION_SCHEDULE_KINDS) {
+    target.schedulesByKindProcessed[kind] += increment.schedulesByKindProcessed[kind] ?? 0;
+  }
+}
+
 function fallbackSideEffects(durationMs = 0): ProcessTaskSideEffectsSummary {
   return {
     fetched: 0,
@@ -1262,6 +1289,19 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           sideEffectDiagnostics: preliminarySideEffectDiagnostics,
           skippedReason: hasDueNotificationSideEffects ? 'time_limit' : 'no_notification_side_effects_due',
         };
+    if (sideEffects.done > 0 && hasCronBudget(deadline)) {
+      const budgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
+      const postSideEffectSchedules = await withTimeout(
+        processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, budgetMs, {
+          ensureInfrastructure: false,
+          reclaimStuckProcessing: false,
+        }),
+        budgetMs,
+        fallbackSchedules(budgetMs),
+        'processDueNotificationSchedulesAfterSideEffects',
+      );
+      addScheduleSummaries(result, postSideEffectSchedules);
+    }
     const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' && !dbHealth.slow;
     const hasOverdueCandidates = (dbHealth.counts.overdueCandidates ?? 0) > 0;
     const dbHealthMaintenanceSkipReason = dbHealth.slow ? 'db_health_slow' : 'disabled_in_notification_cron';

@@ -1,11 +1,9 @@
-import { format } from 'date-fns';
 import webpush from 'web-push';
 import {
   type NotificationScheduleKind,
   type NotificationTargetType,
   type NotificationTone,
 } from './contracts.js';
-import { isHolidayForLocationOnDate } from './holidays.js';
 import type { SqlClient } from './handlers/core.js';
 import { assertInfrastructure } from './infrastructure.js';
 import { logError, logInfo, logWarn } from './logger.js';
@@ -84,11 +82,6 @@ export interface CreateNotificationResult {
   notification: AppNotificationRecord;
 }
 
-export interface ScheduledNotificationSummary {
-  scannedTasks: number;
-  createdNotifications: number;
-}
-
 export class NotificationReferenceUnavailableError extends Error {
   constructor(message = 'Notification reference unavailable') {
     super(message);
@@ -96,8 +89,6 @@ export class NotificationReferenceUnavailableError extends Error {
   }
 }
 
-export const UPCOMING_REMINDER_MINUTES = 15;
-export const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
 let ensureNotificationsInfrastructurePromise: Promise<void> | null = null;
 
 function isForeignKeyReferenceError(error: unknown) {
@@ -649,136 +640,4 @@ export async function clearNotificationsForUser(sql: SqlClient, userId: string) 
   `;
 
   return rows.length;
-}
-
-interface SchedulableTaskRow {
-  id: string;
-  userId: string;
-  title: string;
-  dueDate: string | null;
-  suppressHolidayNotifications: boolean;
-  alarmEnabled: boolean;
-  stateCode: string | null;
-  cityName: string | null;
-  holidayRegionCode: string | null;
-}
-
-function minutesDifference(targetDate: Date, referenceDate: Date) {
-  return Math.floor((targetDate.getTime() - referenceDate.getTime()) / 60000);
-}
-
-export async function generateScheduledNotifications(sql: SqlClient): Promise<ScheduledNotificationSummary> {
-  await ensureNotificationsInfrastructure(sql);
-  await assertInfrastructure(sql, 'scheduled notifications', {
-    columns: [
-      { table: 'tasks', column: 'suppress_holiday_notifications' },
-      { table: 'tasks', column: 'alarm_enabled' },
-    ],
-  });
-
-  const rows = await sql`
-    SELECT
-      tasks.id,
-      tasks.user_id AS "userId",
-      tasks.title,
-      tasks.due_date AS "dueDate",
-      tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
-      tasks.alarm_enabled AS "alarmEnabled",
-      users.state_code AS "stateCode",
-      users.city_name AS "cityName",
-      users.holiday_region_code AS "holidayRegionCode"
-    FROM tasks
-    INNER JOIN users ON users.id = tasks.user_id
-    WHERE tasks.status = 'pending'
-      AND tasks.due_date IS NOT NULL
-      AND users.notifications_enabled = TRUE
-  `;
-
-  const tasks = rows as unknown as SchedulableTaskRow[];
-  const now = new Date();
-  let createdNotifications = 0;
-
-  for (const task of tasks) {
-    if (!task.dueDate) continue;
-
-    const dueDate = new Date(task.dueDate);
-    if (Number.isNaN(dueDate.getTime())) continue;
-
-    if (
-      task.suppressHolidayNotifications &&
-      isHolidayForLocationOnDate(
-        {
-          stateCode: task.stateCode,
-          cityName: task.cityName,
-          regionCode: task.holidayRegionCode,
-        },
-        dueDate,
-      )
-    ) {
-      continue;
-    }
-
-    const minutesUntil = minutesDifference(dueDate, now);
-
-    if (
-      minutesUntil <= UPCOMING_REMINDER_MINUTES &&
-      (task.alarmEnabled ? minutesUntil >= 0 : minutesUntil > 0)
-    ) {
-      const result = await createNotification(sql, {
-        userId: task.userId,
-        title: task.alarmEnabled
-          ? 'Alarme em 15 minutos'
-          : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
-        message: task.alarmEnabled
-          ? `O alarme do seu lembrete vai tocar em 15 minutos! "${task.title}" está chegando.`
-          : `"${task.title}" está chegando. Falta pouco para o horário definido.`,
-        tone: task.alarmEnabled || minutesUntil <= 5 ? 'warning' : 'info',
-        target: { type: 'task', taskId: task.id },
-        dedupeKey: `user:${task.userId}:${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
-      });
-
-      if (result.created) {
-        createdNotifications += 1;
-      }
-    }
-
-    if (!task.alarmEnabled && minutesUntil === 0) {
-      const result = await createNotification(sql, {
-        userId: task.userId,
-        title: 'Lembrete para agora',
-        message: `"${task.title}" chegou ao horário definido.`,
-        tone: 'info',
-        target: { type: 'task', taskId: task.id },
-        dedupeKey: `user:${task.userId}:due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,
-      });
-
-      if (result.created) {
-        createdNotifications += 1;
-      }
-    }
-
-    if (minutesUntil < 0) {
-      const minutesOverdue = Math.abs(minutesUntil);
-      const overdueBucket = Math.floor(minutesOverdue / OVERDUE_REMINDER_INTERVAL_MINUTES);
-      const result = await createNotification(sql, {
-        userId: task.userId,
-        title: 'Lembrete atrasado',
-        message: overdueBucket === 0
-          ? `"${task.title}" passou do prazo e precisa da sua atenção.`
-          : `"${task.title}" continua atrasado ha ${minutesOverdue} minuto${minutesOverdue === 1 ? '' : 's'}.`,
-        tone: 'warning',
-        target: { type: 'task', taskId: task.id },
-        dedupeKey: `user:${task.userId}:overdue:${task.id}:${overdueBucket}`,
-      });
-
-      if (result.created) {
-        createdNotifications += 1;
-      }
-    }
-  }
-
-  return {
-    scannedTasks: tasks.length,
-    createdNotifications,
-  };
 }

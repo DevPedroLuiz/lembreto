@@ -729,6 +729,14 @@ function createCronHealthSqlMock(options?: {
       return count > 0 ? [{ kind: 'sync_notification_schedules', count }] : [];
     }
 
+    if (query.includes('WITH due AS') && query.includes('UPDATE task_side_effects tse')) {
+      return [];
+    }
+
+    if (query.includes('WITH due AS') && query.includes('UPDATE notification_schedules ns')) {
+      return [];
+    }
+
     if (query.includes('FROM task_side_effects') && query.includes('available_at <= NOW()')) {
       return [{ count: options?.taskSideEffectsDue ?? 0 }];
     }
@@ -765,6 +773,274 @@ function createCronHealthSqlMock(options?: {
   }) as SqlClient;
 
   return sql;
+}
+
+function createCronPostSideEffectScheduleSqlMock() {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const taskId = '22222222-2222-4222-8222-222222222222';
+  const dbNow = new Date(Date.now() + 2_000);
+  const taskDueDate = new Date(Date.now() + 1_000);
+  const job = {
+    id: '77777777-7777-4777-8777-777777777777',
+    userId,
+    taskId,
+    kind: 'sync_notification_schedules',
+    attempts: 0,
+    dedupeKey: `user:${userId}:task:${taskId}:sync-schedules`,
+    status: 'pending',
+    availableAt: new Date(Date.now() - 1_000).toISOString(),
+    createdAt: new Date(Date.now() - 1_000).toISOString(),
+    processingStartedAt: null as string | null,
+    doneAt: null as string | null,
+    failedAt: null as string | null,
+    cancelledAt: null as string | null,
+    errorMessage: null as string | null,
+  };
+  const schedules: Array<Record<string, unknown>> = [];
+  const notifications: Array<Record<string, unknown>> = [];
+
+  const pendingSchedules = () => schedules.filter((schedule) => schedule.status === 'pending');
+  const dueSchedules = () => pendingSchedules().filter((schedule) => (
+    new Date(String(schedule.notifyAt)) <= dbNow &&
+    schedule.sentAt === null &&
+    schedule.failedAt === null &&
+    schedule.cancelledAt === null
+  ));
+  const scheduleRow = (schedule: Record<string, unknown>) => ({
+    id: schedule.id,
+    userId: schedule.userId,
+    taskId: schedule.taskId,
+    kind: schedule.kind,
+    notifyAt: schedule.notifyAt,
+    title: schedule.title,
+    message: schedule.message,
+    tone: schedule.tone,
+    dedupeKey: schedule.dedupeKey,
+    sequenceIndex: schedule.sequenceIndex,
+    intervalMinutes: schedule.intervalMinutes,
+  });
+  const notificationRow = (notification: Record<string, unknown>) => ({
+    id: notification.id,
+    title: notification.title,
+    message: notification.message,
+    createdAt: notification.createdAt,
+    read: notification.read,
+    tone: notification.tone,
+    targetType: notification.targetType,
+    targetTaskId: notification.targetTaskId,
+    dedupeKey: notification.dedupeKey,
+    sourceScheduleId: notification.sourceScheduleId,
+    kind: notification.kind,
+  });
+
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
+
+    if (query.includes('SELECT NOW() AS now')) return [{ now: dbNow.toISOString() }];
+    if (query.includes('SELECT NOW() AS "postgresNow"')) return [{ postgresNow: dbNow.toISOString() }];
+
+    if (query.includes('FROM task_side_effects') && query.includes('GROUP BY kind')) {
+      return job.status === 'pending' ? [{ kind: job.kind, count: 1 }] : [];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count') && query.includes('FROM task_side_effects')) {
+      const notificationOnly = query.includes("kind IN ('sync_notification_schedules', 'cancel_notification_schedules')");
+      const dueOnly = query.includes('available_at <= NOW()');
+      const matches = job.status === 'pending' &&
+        (!dueOnly || new Date(job.availableAt) <= dbNow) &&
+        (!notificationOnly || job.kind === 'sync_notification_schedules');
+      return [{ count: matches ? 1 : 0 }];
+    }
+
+    if (query.includes('FROM task_side_effects') && query.includes('MIN(available_at)')) {
+      const due = job.status === 'pending' && new Date(job.availableAt) <= dbNow;
+      return [{
+        postgresNow: dbNow.toISOString(),
+        oldestPendingAvailableAt: job.status === 'pending' ? job.availableAt : null,
+        duePendingCount: due ? 1 : 0,
+        processingCount: job.status === 'processing' ? 1 : 0,
+        failedCount: job.status === 'failed' ? 1 : 0,
+        doneCount: job.status === 'done' ? 1 : 0,
+        oldestPendingAgeSeconds: due ? 1 : null,
+      }];
+    }
+
+    if (query.includes('WITH due AS') && query.includes('UPDATE task_side_effects tse')) {
+      if (job.status !== 'pending' || new Date(job.availableAt) > dbNow) return [];
+      job.status = 'processing';
+      job.processingStartedAt = dbNow.toISOString();
+      return [{
+        id: job.id,
+        userId: job.userId,
+        taskId: job.taskId,
+        kind: job.kind,
+        attempts: job.attempts,
+        dedupeKey: job.dedupeKey,
+      }];
+    }
+
+    if (query.includes('UPDATE task_side_effects') && query.includes('done_at = CASE')) {
+      const status = String(values[0]);
+      job.status = status;
+      job.processingStartedAt = null;
+      job.doneAt = status === 'done' ? dbNow.toISOString() : job.doneAt;
+      job.failedAt = status === 'failed' ? dbNow.toISOString() : job.failedAt;
+      job.errorMessage = typeof values[7] === 'string' ? values[7] : null;
+      return [];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
+      const dueOnly = query.includes('notify_at <= NOW()');
+      const source = dueOnly ? dueSchedules() : pendingSchedules();
+      return source.length > 0 ? [{ kind: 'notification', count: source.length }] : [];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count FROM notification_schedules WHERE status =')) {
+      const statusFromQuery = query.match(/status = '([^']+)'/)?.[1] ?? String(values[0] ?? '');
+      return [{ count: schedules.filter((schedule) => schedule.status === statusFromQuery).length }];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS count') && query.includes('FROM notification_schedules')) {
+      if (query.includes('notify_at <= NOW()')) return [{ count: dueSchedules().length }];
+      return [{ count: pendingSchedules().length }];
+    }
+
+    if (query.includes('MIN(notify_at)')) {
+      return [{
+        postgresNow: dbNow.toISOString(),
+        oldestPendingNotifyAt: pendingSchedules().map((schedule) => String(schedule.notifyAt)).sort()[0] ?? null,
+        duePendingCount: dueSchedules().length,
+        futurePendingCount: pendingSchedules().length - dueSchedules().length,
+      }];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('LIMIT 5')) {
+      return dueSchedules().slice(0, 5).map((schedule) => ({
+        id: schedule.id,
+        kind: schedule.kind,
+        notifyAt: schedule.notifyAt,
+        status: schedule.status,
+        taskId: schedule.taskId,
+      }));
+    }
+
+    if (query.includes('WITH stuck AS') && query.includes('UPDATE notification_schedules')) return [];
+
+    if (query.includes('WITH due AS') && query.includes('UPDATE notification_schedules ns')) {
+      const claimed = dueSchedules().slice(0, 5);
+      for (const schedule of claimed) {
+        schedule.status = 'processing';
+        schedule.processingStartedAt = dbNow.toISOString();
+      }
+      return claimed.map(scheduleRow);
+    }
+
+    if (query.includes('FROM tasks') && query.includes('INNER JOIN users')) {
+      return [{
+        id: taskId,
+        userId,
+        title: 'Teste perto do horario',
+        description: '',
+        dueDate: taskDueDate.toISOString(),
+        status: 'pending',
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        alarmEnabled: false,
+        reminderMode: 'timed',
+        expiresAt: null,
+        overdueSince: null,
+        overdueExpiresAt: null,
+        deletedAt: null,
+        mutedUntil: null,
+        suppressHolidayNotifications: false,
+        floatingIntervalMinutes: null,
+        notificationsEnabled: true,
+        stateCode: null,
+        cityName: null,
+        holidayRegionCode: null,
+      }];
+    }
+
+    if (query.includes('SELECT 1') && query.includes('FROM tasks')) return [{ exists: 1 }];
+
+    if (query.includes('FROM tasks') && query.includes('due_date < NOW()')) return [{ count: 0 }];
+    if (query.includes('FROM tasks')) return [{ count: 1 }];
+
+    if (query.includes('UPDATE tasks') && query.includes('reminder_mode')) return [];
+    if (query.includes('UPDATE notification_schedules') && query.includes("status = 'cancelled'")) return [];
+
+    if (query.includes('INSERT INTO notification_schedules')) {
+      const schedule = {
+        id: crypto.randomUUID(),
+        userId: values[0],
+        taskId: values[1],
+        kind: values[2],
+        notifyAt: values[3] instanceof Date ? values[3].toISOString() : String(values[3]),
+        title: values[4],
+        message: values[5],
+        tone: values[6],
+        dedupeKey: values[7],
+        sequenceIndex: values[8],
+        intervalMinutes: values[9],
+        status: 'pending',
+        sentAt: null,
+        failedAt: null,
+        cancelledAt: null,
+        processingStartedAt: null,
+      };
+      schedules.push(schedule);
+      return [{ id: schedule.id }];
+    }
+
+    if (query.includes('FROM notifications') && query.includes('WHERE user_id')) return [];
+
+    if (query.includes('INSERT INTO notifications')) {
+      const notification = {
+        id: '44444444-4444-4444-8444-444444444444',
+        userId: values[0],
+        title: values[1],
+        message: values[2],
+        tone: values[3],
+        targetType: values[4],
+        targetTaskId: values[5],
+        dedupeKey: values[6],
+        sourceScheduleId: values[7],
+        kind: values[8],
+        createdAt: dbNow.toISOString(),
+        read: false,
+      };
+      notifications.push(notification);
+      return [notificationRow(notification)];
+    }
+
+    if (query.includes('SELECT notifications_enabled AS "notificationsEnabled"')) {
+      return [{ notificationsEnabled: true }];
+    }
+
+    if (query.includes('FROM push_subscriptions')) return [];
+
+    if (query.includes('UPDATE notification_schedules') && query.includes('sent_at = CASE')) {
+      const status = String(values[0]);
+      const scheduleId = values[6];
+      const schedule = schedules.find((item) => item.id === scheduleId);
+      if (schedule) {
+        schedule.status = status;
+        schedule.sentAt = status === 'sent' ? dbNow.toISOString() : schedule.sentAt;
+        schedule.failedAt = status === 'failed' ? dbNow.toISOString() : schedule.failedAt;
+        schedule.cancelledAt = status === 'cancelled' ? dbNow.toISOString() : schedule.cancelledAt;
+        schedule.processingStartedAt = null;
+      }
+      return [];
+    }
+
+    if (query.includes('FROM pg_stat_activity')) return [{ longRunningActive: 0, waitingOnLock: 0 }];
+    if (query.includes('FROM pg_locks')) return [{ waitingLocksOnReminderTables: 0, grantedLocksOnReminderTables: 0 }];
+
+    return [];
+  }) as SqlClient;
+
+  return { sql, job, schedules, notifications };
 }
 
 async function run(name: string, fn: () => Promise<void> | void) {
@@ -1753,14 +2029,55 @@ async function main() {
     assert.ok(durationMs < 250, `expected external calendar timeout before 250ms, got ${durationMs}ms`);
   });
 
-  await run('cron processes due schedules before side effects', () => {
+  await run('cron post-side-effect pass sends schedule created in same run', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const previousMaintenance = process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+    const { handleNotificationsCron } = await import('../lib/handlers/notifications.js');
+    const { sql, job, schedules, notifications } = createCronPostSideEffectScheduleSqlMock();
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      const response = await handleNotificationsCron({
+        sql,
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+
+      const body = response.body as {
+        schedules?: { fetched?: number; processed?: number; sent?: number };
+        sideEffects?: { done?: number };
+      };
+      assert.equal(response.status, 200);
+      assert.equal(body.sideEffects?.done, 1);
+      assert.equal(body.schedules?.fetched, 1);
+      assert.equal(body.schedules?.processed, 1);
+      assert.equal(body.schedules?.sent, 1);
+      assert.equal(job.status, 'done');
+      assert.equal(schedules.length, 1);
+      assert.equal(schedules[0].status, 'sent');
+      assert.equal(notifications.length, 1);
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      if (previousMaintenance === undefined) delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      else process.env.CRON_ENABLE_MAINTENANCE_STAGES = previousMaintenance;
+    }
+  });
+
+  await run('cron processes due schedules before and after side effects', () => {
     const cronHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
     const dueIndex = cronHandler.indexOf('processDueNotificationSchedules(');
     const sideEffectIndex = cronHandler.indexOf('processTaskSideEffects(sql');
+    const postSideEffectDueIndex = cronHandler.indexOf('processDueNotificationSchedulesAfterSideEffects');
 
     assert.ok(dueIndex >= 0);
     assert.ok(sideEffectIndex >= 0);
+    assert.ok(postSideEffectDueIndex >= 0);
     assert.ok(dueIndex < sideEffectIndex);
+    assert.ok(sideEffectIndex < postSideEffectDueIndex);
   });
 
   await run('cron handler has global deadline and nested schedule response', () => {
@@ -1770,6 +2087,8 @@ async function main() {
     assert.ok(cronHandler.includes('function withTimeout'));
     assert.ok(cronHandler.includes("stage: 'processDueNotificationSchedules'") || cronHandler.includes("'processDueNotificationSchedules'"));
     assert.ok(cronHandler.includes("'processTaskSideEffects'"));
+    assert.ok(cronHandler.includes("'processDueNotificationSchedulesAfterSideEffects'"));
+    assert.ok(cronHandler.includes('addScheduleSummaries(result, postSideEffectSchedules)'));
     assert.ok(cronHandler.includes("'backfillMissingNotificationSchedules'"));
     assert.ok(cronHandler.includes("'processExternalCalendarSideEffects'"));
     assert.ok(cronHandler.includes("'detectOverdueNotificationSchedules'"));

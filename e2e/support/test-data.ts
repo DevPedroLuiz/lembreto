@@ -1,10 +1,7 @@
 import { buildTokenJti } from '../../lib/auth';
 import { createSqlClient } from '../../lib/db';
-import {
-  createNotification,
-  generateScheduledNotifications,
-  type NotificationTarget,
-} from '../../lib/notifications';
+import { processNotificationSchedules } from '../../lib/notification-schedules';
+import { createNotification, type NotificationTarget } from '../../lib/notifications';
 import { verifyToken } from '../../lib/jwt';
 import { createPasswordResetToken } from '../../lib/password-reset';
 import type { NotificationTone } from '../../lib/contracts';
@@ -174,6 +171,14 @@ export async function seedNotificationForUser(
   });
 }
 
-export async function runScheduledNotifications(): Promise<void> {
-  await generateScheduledNotifications(sql);
+export async function runScheduledNotifications(options?: { passes?: number; delayMs?: number }): Promise<void> {
+  const passes = options?.passes ?? 2;
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    if (pass > 0 && options?.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    }
+
+    await processNotificationSchedules(sql);
+  }
 }
