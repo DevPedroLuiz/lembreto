@@ -1308,7 +1308,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-settings-button').click();
       await page.getByTestId('settings-nav-center').click();
       await page.getByTestId('settings-open-notifications-center').click();
-      await expect(page.getByRole('heading', { name: /Central de notifica/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Tudo o que aconteceu no sistema/i })).toBeVisible();
       const initialNotifications = page.getByTestId('notification-item');
       await expect(initialNotifications.first()).toContainText('Bem-vindo!');
       const initialCount = await initialNotifications.count();
