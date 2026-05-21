@@ -19,6 +19,7 @@ import { logError, logInfo } from '../logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
   ensureNotificationSchedulingInfrastructure,
+  syncTaskNotificationSchedulesLightweight,
 } from '../notification-schedules.js';
 import {
   createTaskCategorySchema,
@@ -43,6 +44,7 @@ import {
   userHasActiveExternalCalendarSync,
 } from '../task-side-effects.js';
 import { verifyCalendarFeedToken } from '../jwt.js';
+import type { OverdueReminderIntensity } from '../contracts.js';
 import {
   type HandlerContext,
   type HandlerResult,
@@ -74,6 +76,12 @@ const PRIORITY_HISTORY_LABELS: Record<string, string> = {
   medium: 'média',
   high: 'alta',
 };
+const OVERDUE_INTENSITY_HISTORY_LABELS: Record<OverdueReminderIntensity, string> = {
+  gentle: 'suave',
+  normal: 'normal',
+  insistent: 'insistente',
+  silent: 'silenciosa',
+};
 const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
 const WORK_END_AFTER_START_MESSAGE = 'Horário final precisa ser depois do horário inicial.';
 
@@ -84,6 +92,7 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
     await ensureTaskTaxonomySchema(sql);
     await ensureCalendarIntegrationSchema(sql);
     await ensureTaskSideEffectsInfrastructure(sql);
+    await ensureNotificationSchedulingInfrastructure(sql);
     await assertInfrastructure(sql, 'task list indexes', {
       indexes: [
         { name: 'idx_tasks_user_deleted_status_created' },
@@ -248,6 +257,25 @@ async function enqueueScheduleCancel(sql: HandlerContext['sql'], userId: string,
   });
 }
 
+async function syncSchedulesNowBestEffort(
+  context: HandlerContext,
+  userId: string,
+  taskId: string,
+  caller: string,
+) {
+  try {
+    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, {
+      ensureInfrastructure: false,
+    });
+  } catch (error) {
+    logError('task_notification_schedule_sync_inline_failed', error, getRequestMeta(context.request, {
+      userId,
+      taskId,
+      caller,
+    }));
+  }
+}
+
 async function enqueueCalendarSync(sql: HandlerContext['sql'], userId: string, taskId: string) {
   await enqueueTaskSideEffect(sql, {
     userId,
@@ -324,6 +352,14 @@ function requiresWorkScheduleForUpdate(input: {
   return false;
 }
 
+function normalizeOverdueReminderIntensity(value: unknown): OverdueReminderIntensity {
+  if (value === 'gentle' || value === 'normal' || value === 'insistent' || value === 'silent') {
+    return value;
+  }
+
+  return 'normal';
+}
+
 function areStringArraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
@@ -336,6 +372,7 @@ function buildCreatedHistoryEntry(input: {
   category: string;
   tags: string[];
   alarmEnabled: boolean;
+  overdueReminderIntensity: OverdueReminderIntensity;
   status: string;
 }): TaskHistoryEntry {
   const details = [
@@ -350,6 +387,10 @@ function buildCreatedHistoryEntry(input: {
 
   if (input.alarmEnabled) {
     details.push('Alarme ativado.');
+  }
+
+  if (input.overdueReminderIntensity !== 'normal') {
+    details.push(`Avisos de atraso: ${OVERDUE_INTENSITY_HISTORY_LABELS[input.overdueReminderIntensity]}.`);
   }
 
   if (input.endDate) {
@@ -381,6 +422,7 @@ function buildUpdateHistoryEntry(
     tags: string[];
     suppressHolidayNotifications: unknown;
     alarmEnabled: unknown;
+    overdueReminderIntensity: unknown;
     status: unknown;
   },
 ): TaskHistoryEntry | null {
@@ -399,6 +441,12 @@ function buildUpdateHistoryEntry(
   }
   if (Boolean(current.alarm_enabled) !== Boolean(next.alarmEnabled)) {
     changedDetails.push('Configuração de alarme alterada.');
+  }
+  if (
+    normalizeOverdueReminderIntensity(current.overdue_reminder_intensity) !==
+    normalizeOverdueReminderIntensity(next.overdueReminderIntensity)
+  ) {
+    changedDetails.push('Intensidade dos avisos de atraso alterada.');
   }
   if (String(current.status ?? '') !== String(next.status ?? '')) changedDetails.push('Status alterado.');
 
@@ -523,6 +571,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
@@ -627,6 +676,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       status,
       suppressHolidayNotifications,
       alarmEnabled,
+      overdueReminderIntensity,
       mutedUntil,
       noTimeReminderMinutes,
     } = parsed.data;
@@ -642,6 +692,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         category,
         tags,
         alarmEnabled: effectiveAlarmEnabled,
+        overdueReminderIntensity,
         status,
       }),
     ]);
@@ -665,6 +716,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications,
+          overdue_reminder_intensity,
           alarm_enabled,
           reminder_mode,
           expires_at,
@@ -684,6 +736,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${category},
           ${tags},
           ${suppressHolidayNotifications},
+          ${overdueReminderIntensity},
           ${effectiveAlarmEnabled},
           ${effectiveDueDate ? 'timed' : 'floating'},
           ${effectiveDueDate ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)},
@@ -704,6 +757,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
@@ -729,6 +783,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       const taskId = String(rows[0].id);
       const enqueueStartedAt = Date.now();
       await enqueueScheduleSync(sql, user.id, taskId);
+      await syncSchedulesNowBestEffort(context, user.id, taskId, 'handleTasksCollection:create');
       if (effectiveDueDate && status === 'pending' && await userHasActiveExternalCalendarSync(sql, user.id)) {
         await enqueueCalendarSync(sql, user.id, taskId);
       }
@@ -780,6 +835,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         status,
         alarmEnabled,
         suppressHolidayNotifications,
+        overdueReminderIntensity,
         mutedUntil,
         noTimeReminderMinutes,
       } = parsed.data;
@@ -799,6 +855,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           status,
           alarm_enabled,
           suppress_holiday_notifications,
+          overdue_reminder_intensity,
           muted_until,
           floating_interval_minutes,
           external_calendar_event_id,
@@ -824,6 +881,9 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           ? suppressHolidayNotifications
           : cur.suppress_holiday_notifications,
         alarmEnabled: alarmEnabled !== undefined ? alarmEnabled : cur.alarm_enabled,
+        overdueReminderIntensity: overdueReminderIntensity !== undefined
+          ? overdueReminderIntensity
+          : normalizeOverdueReminderIntensity(cur.overdue_reminder_intensity),
         mutedUntil: mutedUntil !== undefined ? mutedUntil || null : cur.muted_until,
         floatingIntervalMinutes: noTimeReminderMinutes !== undefined
           ? noTimeReminderMinutes
@@ -867,14 +927,23 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category    = ${nextValues.category},
           tags        = ${nextValues.tags},
           suppress_holiday_notifications = ${nextValues.suppressHolidayNotifications},
+          overdue_reminder_intensity = ${nextValues.overdueReminderIntensity},
           alarm_enabled = ${nextValues.alarmEnabled},
           reminder_mode = ${nextValues.dueDate ? 'timed' : 'floating'},
           expires_at = CASE
             WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN COALESCE(expires_at, NOW() + INTERVAL '24 hours')
             ELSE NULL
           END,
-          overdue_since = CASE WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL ELSE overdue_since END,
-          overdue_expires_at = CASE WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL ELSE overdue_expires_at END,
+          overdue_since = CASE
+            WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL
+            WHEN ${nextValues.status} = 'pending' AND ${nextValues.dueDate}::timestamptz > NOW() THEN NULL
+            ELSE overdue_since
+          END,
+          overdue_expires_at = CASE
+            WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN NULL
+            WHEN ${nextValues.status} = 'pending' AND ${nextValues.dueDate}::timestamptz > NOW() THEN NULL
+            ELSE overdue_expires_at
+          END,
           muted_until = ${nextValues.mutedUntil},
           floating_interval_minutes = ${nextValues.dueDate ? null : nextValues.floatingIntervalMinutes ?? 60},
           status      = ${nextValues.status},
@@ -915,6 +984,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           category,
           tags,
           suppress_holiday_notifications AS "suppressHolidayNotifications",
+          overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
@@ -957,6 +1027,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         await enqueueScheduleCancel(sql, user.id, taskId);
       } else {
         await enqueueScheduleSync(sql, user.id, taskId);
+        await syncSchedulesNowBestEffort(context, user.id, taskId, 'handleTaskById:update');
       }
 
       if (shouldCancelSchedules && existingExternalEventId) {

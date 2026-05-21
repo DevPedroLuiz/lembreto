@@ -28,6 +28,8 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_reason TEXT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS floating_interval_minutes INTEGER;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_reminder_intensity TEXT NOT NULL DEFAULT 'normal'
+  CHECK (overdue_reminder_intensity IN ('gentle', 'normal', 'insistent', 'silent'));
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_provider TEXT
   CHECK (external_calendar_provider IN ('google', 'outlook'));
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS external_calendar_event_id TEXT;

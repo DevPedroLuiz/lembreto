@@ -130,8 +130,38 @@ function normalizeNotificationPayload(payload) {
     icon: typeof payload.icon === 'string' ? payload.icon : '/icon.png',
     badge: typeof payload.badge === 'string' ? payload.badge : '/icon.png',
     tag: stableTag,
+    actions: Array.isArray(payload.actions)
+      ? payload.actions
+          .filter((action) => (
+            action &&
+            typeof action === 'object' &&
+            typeof action.action === 'string' &&
+            typeof action.title === 'string'
+          ))
+          .slice(0, 3)
+      : [],
     data,
   };
+}
+
+function buildNotificationActionPath(action, data, fallbackPath) {
+  if (!action || !data || typeof data.taskId !== 'string') return fallbackPath;
+
+  const presetByAction = {
+    overdue_snooze_10: 'tenMinutes',
+    overdue_snooze_60: 'oneHour',
+    overdue_snooze_tomorrow: 'tomorrow',
+  };
+  const preset = presetByAction[action];
+  if (!preset) return fallbackPath;
+
+  const params = new URLSearchParams();
+  params.set('notificationTarget', 'task');
+  params.set('taskId', data.taskId);
+  params.set('notificationAction', 'overdueSnooze');
+  params.set('snoozePreset', preset);
+  if (typeof data.notificationId === 'string') params.set('notificationId', data.notificationId);
+  return `/?${params.toString()}`;
 }
 
 self.addEventListener('push', (event) => {
@@ -172,6 +202,7 @@ self.addEventListener('push', (event) => {
       icon: payload.icon,
       badge: payload.badge,
       tag: payload.tag,
+      actions: payload.actions,
       data: payload.data,
     });
   })());
@@ -180,12 +211,13 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const path =
+  const fallbackPath =
     event.notification.data &&
     typeof event.notification.data.path === 'string' &&
     event.notification.data.path.length > 0
       ? event.notification.data.path
       : '/?notificationTarget=notifications';
+  const path = buildNotificationActionPath(event.action, event.notification.data, fallbackPath);
 
   event.waitUntil((async () => {
     const targetUrl = new URL(path, self.location.origin).toString();

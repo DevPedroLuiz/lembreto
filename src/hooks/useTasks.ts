@@ -16,7 +16,15 @@ import {
   updateOfflineTaskCreate,
   type TaskCreatePayload,
 } from '../lib/offlineTasks';
-import type { Priority, Status, Task, TaskListResponse, TaskTaxonomy, User } from '../types';
+import type {
+  Priority,
+  Status,
+  Task,
+  TaskListResponse,
+  TaskOverdueReminderIntensity,
+  TaskTaxonomy,
+  User,
+} from '../types';
 
 type TaskPayload = TaskCreatePayload;
 type InFlightRequest<T> = {
@@ -36,6 +44,29 @@ function normalizeTaxonomy(data: TaskTaxonomy): TaskTaxonomy {
 
 function isTaskListResponse(data: TaskListResponse | Task[]): data is TaskListResponse {
   return typeof data === 'object' && data !== null && !Array.isArray(data) && Array.isArray(data.items);
+}
+
+function upsertCachedTask(userId: string, task: Task) {
+  const cachedTasks = loadTaskCache(userId);
+  const hasTask = cachedTasks.some((cachedTask) => cachedTask.id === task.id);
+  saveTaskCache(
+    userId,
+    hasTask
+      ? cachedTasks.map((cachedTask) => (cachedTask.id === task.id ? task : cachedTask))
+      : [task, ...cachedTasks],
+  );
+}
+
+function updateCachedTaskStatus(userId: string, taskId: string, status: Status) {
+  const cachedTasks = loadTaskCache(userId);
+  if (cachedTasks.length === 0) return;
+
+  saveTaskCache(
+    userId,
+    cachedTasks.map((cachedTask) => (
+      cachedTask.id === taskId ? { ...cachedTask, status } : cachedTask
+    )),
+  );
 }
 
 function findOfflineTask(queueId: string, userId: string): Task {
@@ -405,6 +436,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       category: string;
       tags: string[];
       suppressHolidayNotifications: boolean;
+      overdueReminderIntensity: TaskOverdueReminderIntensity;
       alarmEnabled: boolean;
       mutedUntil: string | null;
       noTimeReminderMinutes: number;
@@ -463,6 +495,8 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   }, [token, userId]);
 
   const toggleStatus = useCallback(async (task: Task) => {
+    if (!token || !userId) throw new Error('NÃ£o autenticado');
+
     if (task.status === 'draft' || task.status === 'inactive') {
       throw new Error(
         task.status === 'draft'
@@ -485,16 +519,18 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
           : currentTask
       )),
     );
+    updateCachedTaskStatus(userId, task.id, newStatus);
 
     try {
       const updated = await apiPut<Task>(
         `/api/tasks/${task.id}`,
         { status: newStatus },
-        token!,
+        token,
       );
       setTasks((prev) =>
         prev.map((currentTask) => (currentTask.id === task.id ? updated : currentTask)),
       );
+      upsertCachedTask(userId, updated);
       return { task: updated, newStatus };
     } catch {
       setTasks((prev) =>
@@ -504,9 +540,10 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
             : currentTask
         )),
       );
+      upsertCachedTask(userId, task);
       throw new Error('Falha ao atualizar o status');
     }
-  }, [token]);
+  }, [token, userId]);
 
   const createCategory = useCallback(async (name: string) => {
     if (!token) throw new Error('Não autenticado');

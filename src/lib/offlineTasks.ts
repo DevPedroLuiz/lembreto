@@ -1,4 +1,4 @@
-import type { Priority, Status, Task, TaskTaxonomy } from '../types';
+import type { Priority, Status, Task, TaskOverdueReminderIntensity, TaskTaxonomy } from '../types';
 
 export type TaskCreatePayload = {
   title: string;
@@ -9,6 +9,7 @@ export type TaskCreatePayload = {
   category: string;
   tags: string[];
   suppressHolidayNotifications: boolean;
+  overdueReminderIntensity?: TaskOverdueReminderIntensity;
   alarmEnabled?: boolean;
   mutedUntil?: string | null;
   noTimeReminderMinutes?: number;
@@ -109,6 +110,7 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
     category: item.payload.category,
     tags: item.payload.tags,
     suppressHolidayNotifications: item.payload.suppressHolidayNotifications,
+    overdueReminderIntensity: item.payload.overdueReminderIntensity ?? 'normal',
     alarmEnabled: item.payload.alarmEnabled ?? false,
     status: item.payload.status ?? 'pending',
     createdAt: item.createdAt,

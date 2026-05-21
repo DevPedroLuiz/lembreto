@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority    TEXT        NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
   category    TEXT        NOT NULL DEFAULT 'Geral',
   suppress_holiday_notifications BOOLEAN NOT NULL DEFAULT FALSE,
+  overdue_reminder_intensity TEXT NOT NULL DEFAULT 'normal'
+    CHECK (overdue_reminder_intensity IN ('gentle', 'normal', 'insistent', 'silent')),
   alarm_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   status      TEXT        NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'overdue', 'completed', 'draft', 'inactive', 'cancelled')),
   history     JSONB       NOT NULL DEFAULT '[]'::JSONB,
@@ -74,6 +76,8 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_reason TEXT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS floating_interval_minutes INTEGER;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_reminder_intensity TEXT NOT NULL DEFAULT 'normal'
+  CHECK (overdue_reminder_intensity IN ('gentle', 'normal', 'insistent', 'silent'));
 
 CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin ON tasks USING GIN(tags);
 

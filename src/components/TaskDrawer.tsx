@@ -17,7 +17,7 @@ import {
 import { cn } from '../lib/cn';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { getRecurrenceSuggestion, type RecurrenceMode, type RecurrenceSuggestion } from '../lib/taskRecurrence';
-import type { Priority, Task } from '../types';
+import type { Priority, Task, TaskOverdueReminderIntensity } from '../types';
 
 const RECURRENCE_MODE_OPTIONS: Array<{ value: RecurrenceMode; label: string }> = [
   { value: 'daily', label: 'Todos os dias' },
@@ -64,6 +64,17 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   high: 'Alta',
 };
 
+const OVERDUE_INTENSITY_OPTIONS: Array<{
+  value: TaskOverdueReminderIntensity;
+  label: string;
+  description: string;
+}> = [
+  { value: 'gentle', label: 'Suave', description: '30 min, 2h e depois 6h.' },
+  { value: 'normal', label: 'Normal', description: '15 min, 30 min, 45 min, 75 min...' },
+  { value: 'insistent', label: 'Insistente', description: '5 min, 15 min, 30 min, 1h...' },
+  { value: 'silent', label: 'Silencioso', description: 'Sem alertas de atraso; aparece apenas no app.' },
+];
+
 type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
 
 interface TaskDrawerProps {
@@ -104,6 +115,8 @@ interface TaskDrawerProps {
   setRecurrenceUntil: (value: string) => void;
   suppressHolidayNotifications: boolean;
   setSuppressHolidayNotifications: (value: boolean) => void;
+  overdueReminderIntensity: TaskOverdueReminderIntensity;
+  setOverdueReminderIntensity: (value: TaskOverdueReminderIntensity) => void;
   alarmEnabled: boolean;
   setAlarmEnabled: (value: boolean) => void;
   recurrenceError?: string;
@@ -293,6 +306,8 @@ export function TaskDrawer({
   setRecurrenceUntil,
   suppressHolidayNotifications,
   setSuppressHolidayNotifications,
+  overdueReminderIntensity,
+  setOverdueReminderIntensity,
   alarmEnabled,
   setAlarmEnabled,
   recurrenceError = '',
@@ -1015,6 +1030,26 @@ export function TaskDrawer({
                               ? 'Alarme ativado para o horário inicial definido.'
                               : 'Alarme desativado. O lembrete enviará apenas a notificação no horário inicial.'
                             : 'Defina data e horário inicial para ativar o alarme sonoro.'}
+                        </div>
+
+                        <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                          <FieldLabel>Intensidade dos avisos de atraso</FieldLabel>
+                          <select
+                            value={overdueReminderIntensity}
+                            disabled={isSubmitting}
+                            data-testid="task-overdue-intensity"
+                            onChange={(event) => setOverdueReminderIntensity(event.target.value as TaskOverdueReminderIntensity)}
+                            className="field-control cursor-pointer"
+                          >
+                            {OVERDUE_INTENSITY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                            {OVERDUE_INTENSITY_OPTIONS.find((option) => option.value === overdueReminderIntensity)?.description}
+                          </p>
                         </div>
                       </div>
                     </section>

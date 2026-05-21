@@ -2,7 +2,7 @@ import React from 'react';
 import { BellRing, CheckCheck, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { NotificationFeed } from '../components/NotificationFeed';
-import type { AppNotification } from '../types';
+import type { AppNotification, OverdueNotificationSnoozePreset } from '../types';
 
 type NotificationVisibility = 'all' | 'unread' | 'read';
 type NotificationToneFilter = 'all' | AppNotification['tone'];
@@ -12,6 +12,11 @@ interface NotificationsPageProps {
   onMarkAllRead: () => void;
   onClearAll: () => void;
   onOpenNotification: (notification: AppNotification) => void;
+  onSnoozeOverdueNotification: (
+    notification: AppNotification,
+    preset: OverdueNotificationSnoozePreset,
+  ) => void;
+  isNotificationActionBusy: (notification: AppNotification) => boolean;
 }
 
 function FilterButton({
@@ -47,6 +52,8 @@ export function NotificationsPage({
   onMarkAllRead,
   onClearAll,
   onOpenNotification,
+  onSnoozeOverdueNotification,
+  isNotificationActionBusy,
 }: NotificationsPageProps) {
   const [search, setSearch] = React.useState('');
   const [visibility, setVisibility] = React.useState<NotificationVisibility>('all');
@@ -236,6 +243,8 @@ export function NotificationsPage({
           <NotificationFeed
             notifications={filteredNotifications}
             onOpenNotification={onOpenNotification}
+            onSnoozeOverdueNotification={onSnoozeOverdueNotification}
+            isNotificationActionBusy={isNotificationActionBusy}
             emptyTitle="Nenhuma notificação por aqui"
             emptyDescription="Quando o sistema gerar novos avisos e confirmações, eles vão aparecer nesta central."
           />

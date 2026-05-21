@@ -2,6 +2,7 @@ import type {
   CalendarProvider,
   ExternalCalendarSyncStatus,
   NoteMode as NoteModeContract,
+  OverdueReminderIntensity,
   TaskPriority,
   TaskStatus,
 } from '../../lib/contracts';
@@ -9,6 +10,7 @@ import type {
 export type Priority = TaskPriority;
 export type Status = TaskStatus;
 export type NoteMode = NoteModeContract;
+export type TaskOverdueReminderIntensity = OverdueReminderIntensity;
 
 export interface User {
   id: string;
@@ -31,6 +33,7 @@ export interface Task {
   category: string;
   tags: string[];
   suppressHolidayNotifications: boolean;
+  overdueReminderIntensity?: TaskOverdueReminderIntensity;
   alarmEnabled: boolean;
   reminderMode?: 'timed' | 'floating';
   expiresAt?: string | null;
@@ -171,6 +174,8 @@ export type NotificationTarget =
   | { type: 'notifications' }
   | { type: 'profile' }
   | { type: 'settings' };
+
+export type OverdueNotificationSnoozePreset = 'tenMinutes' | 'oneHour' | 'tomorrow';
 
 export interface AppNotification {
   id: string;

@@ -4,6 +4,7 @@ import {
   type NotificationScheduleKind,
   type NotificationScheduleStatus,
   type NotificationTone,
+  type OverdueReminderIntensity,
 } from './contracts.js';
 import type { SqlClient } from './handlers/core.js';
 import { buildHolidayCalendar } from './holidays.js';
@@ -15,10 +16,15 @@ import {
   getPushSendTimeoutMs,
   sendPushPayloadToUser,
 } from './notifications.js';
+import {
+  OVERDUE_LIFETIME_HOURS,
+  buildOverdueScheduleTimes,
+  formatOverdueDuration,
+  getOverdueIntervalMinutes,
+} from './overdue-reminders.js';
 
 const PRE_NOTICE_MINUTES = 15;
 const FLOATING_LIFETIME_HOURS = 24;
-const OVERDUE_LIFETIME_HOURS = 72;
 const DEFAULT_FLOATING_INTERVAL_MINUTES = 60;
 const PROCESS_LIMIT = 20;
 const OVERDUE_TASK_SCAN_LIMIT = 10;
@@ -51,6 +57,7 @@ interface TaskForScheduling {
   mutedUntil: string | null;
   suppressHolidayNotifications: boolean;
   floatingIntervalMinutes: number | null;
+  overdueReminderIntensity: OverdueReminderIntensity;
   notificationsEnabled?: boolean;
   stateCode: string | null;
   cityName: string | null;
@@ -154,6 +161,13 @@ function mapTask(row: Record<string, unknown>): TaskForScheduling {
     floatingIntervalMinutes: typeof row.floatingIntervalMinutes === 'number'
       ? row.floatingIntervalMinutes
       : null,
+    overdueReminderIntensity:
+      row.overdueReminderIntensity === 'gentle' ||
+      row.overdueReminderIntensity === 'normal' ||
+      row.overdueReminderIntensity === 'insistent' ||
+      row.overdueReminderIntensity === 'silent'
+        ? row.overdueReminderIntensity
+        : 'normal',
     notificationsEnabled: row.notificationsEnabled === undefined ? undefined : Boolean(row.notificationsEnabled),
     stateCode: typeof row.stateCode === 'string' ? row.stateCode : null,
     cityName: typeof row.cityName === 'string' ? row.cityName : null,
@@ -307,44 +321,11 @@ function applyScheduleSuppression(task: TaskForScheduling, kind: NotificationSch
   return { action: 'reschedule' as const, notifyAt: adjusted, holiday };
 }
 
-export function getOverdueIntervalMinutes(sequenceIndex: number): number {
-  if (sequenceIndex <= 0) return 15;
-  if (sequenceIndex === 1) return 30;
-
-  let previousPrevious = 15;
-  let previous = 30;
-  for (let index = 2; index <= sequenceIndex; index += 1) {
-    const next = Math.min(previousPrevious + previous, 360);
-    previousPrevious = previous;
-    previous = next;
-  }
-
-  return previous;
-}
-
-export function buildOverdueScheduleTimes(dueDate: Date, overdueExpiresAt: Date) {
-  const times: Array<{ notifyAt: Date; sequenceIndex: number; intervalMinutes: number }> = [];
-  let cursor = new Date(dueDate);
-  for (let sequenceIndex = 0; sequenceIndex < 100; sequenceIndex += 1) {
-    const intervalMinutes = getOverdueIntervalMinutes(sequenceIndex);
-    cursor = addMinutes(cursor, intervalMinutes);
-    if (cursor > overdueExpiresAt) break;
-    times.push({ notifyAt: new Date(cursor), sequenceIndex, intervalMinutes });
-  }
-  return times;
-}
-
-export function formatOverdueDuration(minutes: number): string {
-  const safeMinutes = Math.max(0, Math.floor(minutes));
-  const days = Math.floor(safeMinutes / (24 * 60));
-  const hours = Math.floor((safeMinutes % (24 * 60)) / 60);
-  const remainingMinutes = safeMinutes % 60;
-
-  if (days > 0) return `${days} dia${days === 1 ? '' : 's'}${hours > 0 ? ` e ${hours}h` : ''}`;
-  if (hours > 0 && remainingMinutes > 0) return `${hours}h${remainingMinutes}min`;
-  if (hours > 0) return `${hours}h`;
-  return `${remainingMinutes} minuto${remainingMinutes === 1 ? '' : 's'}`;
-}
+export {
+  buildOverdueScheduleTimes,
+  formatOverdueDuration,
+  getOverdueIntervalMinutes,
+};
 
 export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient) {
   notificationSchedulingInfrastructureReady ??= (async () => {
@@ -367,6 +348,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
         { table: 'tasks', column: 'muted_until' },
         { table: 'tasks', column: 'suppress_holiday_notifications' },
         { table: 'tasks', column: 'floating_interval_minutes' },
+        { table: 'tasks', column: 'overdue_reminder_intensity' },
         { table: 'notification_schedules', column: 'user_id' },
         { table: 'notification_schedules', column: 'task_id' },
         { table: 'notification_schedules', column: 'kind' },
@@ -432,6 +414,7 @@ async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: st
       tasks.muted_until AS "mutedUntil",
       tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
       tasks.floating_interval_minutes AS "floatingIntervalMinutes",
+      tasks.overdue_reminder_intensity AS "overdueReminderIntensity",
       users.notifications_enabled AS "notificationsEnabled",
       users.state_code AS "stateCode",
       users.city_name AS "cityName",
@@ -709,11 +692,12 @@ export async function scheduleOverdueRemindersForTask(
   options: { maxSchedules?: number; notBefore?: Date } = {},
 ) {
   if (!task.dueDate) return 0;
+  if (task.overdueReminderIntensity === 'silent') return 0;
   const dueDate = new Date(task.dueDate);
   const overdueExpiresAt = task.overdueExpiresAt
     ? new Date(task.overdueExpiresAt)
     : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
-  const times = buildOverdueScheduleTimes(dueDate, overdueExpiresAt);
+  const times = buildOverdueScheduleTimes(dueDate, overdueExpiresAt, task.overdueReminderIntensity);
   const maxSchedules = options.maxSchedules ?? Number.POSITIVE_INFINITY;
   let created = 0;
   let catchUpReminder: { notifyAt: Date; dedupeAt: Date; sequenceIndex: number; intervalMinutes: number } | null = null;
@@ -833,6 +817,7 @@ async function detectAndScheduleOverdueTasks(
       tasks.muted_until AS "mutedUntil",
       tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
       tasks.floating_interval_minutes AS "floatingIntervalMinutes",
+      tasks.overdue_reminder_intensity AS "overdueReminderIntensity",
       users.state_code AS "stateCode",
       users.city_name AS "cityName",
       users.holiday_region_code AS "holidayRegionCode"
@@ -1199,7 +1184,7 @@ async function scheduleNextOverdueReminder(sql: SqlClient, schedule: ScheduleRow
   const currentSequenceIndex = schedule.sequenceIndex ?? -1;
   const now = new Date();
 
-  for (const item of buildOverdueScheduleTimes(dueDate, overdueExpiresAt)) {
+  for (const item of buildOverdueScheduleTimes(dueDate, overdueExpiresAt, task.overdueReminderIntensity)) {
     if (item.sequenceIndex <= currentSequenceIndex) continue;
 
     const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
@@ -1423,6 +1408,13 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
         tag: schedule.dedupeKey,
         icon: '/icon.png',
         badge: '/icon.png',
+        actions: schedule.kind === 'overdue_reminder'
+          ? [
+              { action: 'overdue_snooze_10', title: '10 min' },
+              { action: 'overdue_snooze_60', title: '1 hora' },
+              { action: 'overdue_snooze_tomorrow', title: 'Amanhã' },
+            ]
+          : undefined,
         data: {
           id: result.notification.id,
           notificationId: result.notification.id,
@@ -1737,6 +1729,7 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
     mutedUntil: null,
     suppressHolidayNotifications: false,
     floatingIntervalMinutes: null,
+    overdueReminderIntensity: 'normal',
     stateCode: null,
     cityName: null,
     holidayRegionCode: null,

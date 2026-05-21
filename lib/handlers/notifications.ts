@@ -69,6 +69,8 @@ const DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS = 3000;
 const DB_HEALTH_SLOW_THRESHOLD_MS = 1000;
 const USER_DUE_SCHEDULE_LIMIT = 5;
 const USER_DUE_SCHEDULE_DURATION_MS = 3500;
+const USER_NOTIFICATION_SIDE_EFFECT_LIMIT = 3;
+const USER_NOTIFICATION_SIDE_EFFECT_DURATION_MS = 2500;
 
 type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
@@ -443,11 +445,34 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
   if (request.method !== 'POST') return methodNotAllowed();
 
   try {
+    const sideEffects = await processTaskSideEffects(
+      sql,
+      USER_NOTIFICATION_SIDE_EFFECT_LIMIT,
+      USER_NOTIFICATION_SIDE_EFFECT_DURATION_MS,
+      {
+        ensureInfrastructure: false,
+        notificationSchedulesOnly: true,
+        userId: user.id,
+      },
+    );
     const schedules = await processDueNotificationSchedules(sql, USER_DUE_SCHEDULE_LIMIT, USER_DUE_SCHEDULE_DURATION_MS, {
       ensureInfrastructure: false,
       reclaimStuckProcessing: false,
       userId: user.id,
     });
+    if (sideEffects.done > 0) {
+      const postSideEffectSchedules = await processDueNotificationSchedules(
+        sql,
+        USER_DUE_SCHEDULE_LIMIT,
+        USER_DUE_SCHEDULE_DURATION_MS,
+        {
+          ensureInfrastructure: false,
+          reclaimStuckProcessing: false,
+          userId: user.id,
+        },
+      );
+      addScheduleSummaries(schedules, postSideEffectSchedules);
+    }
     const [notifications, enabled] = await Promise.all([
       listNotificationsForUser(sql, user.id),
       getNotificationsEnabled(sql, user.id),
@@ -459,12 +484,15 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       processed: schedules.processedSchedules,
       sent: schedules.sentSchedules,
       failed: schedules.failedSchedules,
+      sideEffectsProcessed: sideEffects.processed,
+      sideEffectsDone: sideEffects.done,
       durationMs: schedules.durationMs,
     }));
 
     return json(200, {
       ok: true,
       schedules,
+      sideEffects,
       notifications,
       enabled,
       pushConfigured: isPushConfigured(),

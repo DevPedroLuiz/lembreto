@@ -205,7 +205,11 @@ function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, nu
   return Object.fromEntries(rows.map((row) => [String(row.kind), toCount(row.count)]));
 }
 
-async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagnostics> {
+async function getSideEffectDiagnostics(
+  sql: SqlClient,
+  options: { userId?: string } = {},
+): Promise<SideEffectDiagnostics> {
+  const userId = options.userId ?? null;
   const [
     nowRows,
     pendingOverviewRows,
@@ -226,11 +230,13 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
         EXTRACT(EPOCH FROM (NOW() - MIN(available_at))) AS "oldestPendingAgeSeconds"
       FROM task_side_effects
       WHERE status = 'pending'
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
     `,
     sql`
       SELECT kind, COUNT(*) AS count
       FROM task_side_effects
       WHERE status = 'pending'
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       GROUP BY kind
       ORDER BY kind ASC
     `,
@@ -240,12 +246,13 @@ async function getSideEffectDiagnostics(sql: SqlClient): Promise<SideEffectDiagn
       WHERE status = 'pending'
         AND available_at <= NOW()
         AND cancelled_at IS NULL
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
       GROUP BY kind
       ORDER BY kind ASC
     `,
-    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'processing'`,
-    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'failed'`,
-    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'done'`,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'processing' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'failed' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
+    sql`SELECT COUNT(*) AS count FROM task_side_effects WHERE status = 'done' AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)`,
   ]);
 
   const now = nowRows[0] ?? {};
@@ -301,8 +308,9 @@ async function reclaimStuckProcessingSideEffects(
 async function claimDueSideEffects(
   sql: SqlClient,
   limit: number,
-  options: { notificationSchedulesOnly?: boolean; externalCalendarOnly?: boolean } = {},
+  options: { notificationSchedulesOnly?: boolean; externalCalendarOnly?: boolean; userId?: string } = {},
 ) {
+  const userId = options.userId ?? null;
   const rows = await sql`
     WITH due AS (
       SELECT id
@@ -310,6 +318,7 @@ async function claimDueSideEffects(
       WHERE status = 'pending'
         AND available_at <= NOW()
         AND cancelled_at IS NULL
+        AND (${userId}::uuid IS NULL OR user_id = ${userId}::uuid)
         AND (
           ${Boolean(options.notificationSchedulesOnly)} = FALSE
           OR kind IN ('sync_notification_schedules', 'cancel_notification_schedules')
@@ -525,6 +534,7 @@ export async function processTaskSideEffects(
     notificationSchedulesOnly?: boolean;
     externalCalendarOnly?: boolean;
     precomputedDiagnostics?: SideEffectDiagnostics;
+    userId?: string;
   } = {},
 ): Promise<ProcessTaskSideEffectsSummary> {
   const startedAt = Date.now();
@@ -543,10 +553,11 @@ export async function processTaskSideEffects(
     logWarn('task_side_effects_reclaimed', { reclaimed });
   }
 
-  const sideEffectDiagnostics = options.precomputedDiagnostics ?? await getSideEffectDiagnostics(sql);
+  const sideEffectDiagnostics = options.precomputedDiagnostics ?? await getSideEffectDiagnostics(sql, { userId: options.userId });
   const jobs = await claimDueSideEffects(sql, processLimit, {
     notificationSchedulesOnly: options.notificationSchedulesOnly,
     externalCalendarOnly: options.externalCalendarOnly,
+    userId: options.userId,
   });
   const summary: ProcessTaskSideEffectsSummary = {
     fetched: jobs.length,

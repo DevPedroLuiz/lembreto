@@ -6,6 +6,7 @@ export const NOTIFICATION_TARGET_TYPES = ['task', 'notifications', 'profile', 's
 export const CALENDAR_PROVIDERS = ['google', 'outlook'] as const;
 export const EXTERNAL_CALENDAR_SYNC_STATUSES = ['idle', 'pending', 'synced', 'failed'] as const;
 export const REMINDER_MODES = ['timed', 'floating'] as const;
+export const OVERDUE_REMINDER_INTENSITIES = ['gentle', 'normal', 'insistent', 'silent'] as const;
 export const NOTIFICATION_SCHEDULE_KINDS = [
   'pre_notice',
   'notification',
@@ -23,6 +24,7 @@ export type NotificationTargetType = (typeof NOTIFICATION_TARGET_TYPES)[number];
 export type CalendarProvider = (typeof CALENDAR_PROVIDERS)[number];
 export type ExternalCalendarSyncStatus = (typeof EXTERNAL_CALENDAR_SYNC_STATUSES)[number];
 export type ReminderMode = (typeof REMINDER_MODES)[number];
+export type OverdueReminderIntensity = (typeof OVERDUE_REMINDER_INTENSITIES)[number];
 export type NotificationScheduleKind = (typeof NOTIFICATION_SCHEDULE_KINDS)[number];
 export type NotificationScheduleStatus = (typeof NOTIFICATION_SCHEDULE_STATUSES)[number];
 

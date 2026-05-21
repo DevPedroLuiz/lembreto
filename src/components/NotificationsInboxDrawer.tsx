@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, BellRing, X } from 'lucide-react';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { NotificationFeed } from './NotificationFeed';
-import type { AppNotification } from '../types';
+import type { AppNotification, OverdueNotificationSnoozePreset } from '../types';
 
 interface NotificationsInboxDrawerProps {
   open: boolean;
@@ -12,6 +12,11 @@ interface NotificationsInboxDrawerProps {
   onClose: () => void;
   onOpenNotification: (notification: AppNotification) => void;
   onPreviewNotification: (notification: AppNotification) => void;
+  onSnoozeOverdueNotification: (
+    notification: AppNotification,
+    preset: OverdueNotificationSnoozePreset,
+  ) => void;
+  isNotificationActionBusy: (notification: AppNotification) => boolean;
   onOpenCenter: () => void;
 }
 
@@ -22,6 +27,8 @@ export function NotificationsInboxDrawer({
   onClose,
   onOpenNotification,
   onPreviewNotification,
+  onSnoozeOverdueNotification,
+  isNotificationActionBusy,
   onOpenCenter,
 }: NotificationsInboxDrawerProps) {
   const recentNotifications = notifications.slice(0, 6);
@@ -106,6 +113,8 @@ export function NotificationsInboxDrawer({
                 notifications={recentNotifications}
                 onOpenNotification={onOpenNotification}
                 onPreviewNotification={onPreviewNotification}
+                onSnoozeOverdueNotification={onSnoozeOverdueNotification}
+                isNotificationActionBusy={isNotificationActionBusy}
                 emptyTitle="Sua caixa está tranquila"
                 emptyDescription="Quando o sistema tiver novos avisos, eles vão aparecer primeiro aqui."
                 itemTestId="recent-notification-item"

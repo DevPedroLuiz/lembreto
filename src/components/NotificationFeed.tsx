@@ -1,17 +1,32 @@
 import React from 'react';
-import { ChevronRight, Info, ShieldAlert } from 'lucide-react';
+import { CalendarDays, ChevronRight, Clock3, Info, ShieldAlert } from 'lucide-react';
 import { formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import type { AppNotification } from '../types';
+import type { AppNotification, OverdueNotificationSnoozePreset } from '../types';
 
 interface NotificationFeedProps {
   notifications: AppNotification[];
   onOpenNotification: (notification: AppNotification) => void;
   onPreviewNotification?: (notification: AppNotification) => void;
+  onSnoozeOverdueNotification?: (
+    notification: AppNotification,
+    preset: OverdueNotificationSnoozePreset,
+  ) => void;
+  isNotificationActionBusy?: (notification: AppNotification) => boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   itemTestId?: string;
 }
+
+const overdueSnoozeActions: Array<{
+  preset: OverdueNotificationSnoozePreset;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { preset: 'tenMinutes', label: 'Lembrar em 10 min', icon: <Clock3 size={14} /> },
+  { preset: 'oneHour', label: '1 hora', icon: <Clock3 size={14} /> },
+  { preset: 'tomorrow', label: 'Amanhã', icon: <CalendarDays size={14} /> },
+];
 
 const toneStyles: Record<AppNotification['tone'], string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300',
@@ -49,6 +64,8 @@ export function NotificationFeed({
   notifications,
   onOpenNotification,
   onPreviewNotification,
+  onSnoozeOverdueNotification,
+  isNotificationActionBusy,
   emptyTitle = 'Nenhuma notificação por aqui',
   emptyDescription = 'Quando o sistema gerar novos avisos e confirmações, eles vão aparecer aqui.',
   itemTestId = 'notification-item',
@@ -71,6 +88,12 @@ export function NotificationFeed({
     <div className="space-y-3">
       {notifications.map((notification) => {
         const isInteractive = Boolean(notification.target);
+        const canSnoozeOverdue = Boolean(
+          notification.kind === 'overdue_reminder' &&
+          notification.target?.type === 'task' &&
+          onSnoozeOverdueNotification,
+        );
+        const actionBusy = isNotificationActionBusy?.(notification) ?? false;
 
         return (
           <article
@@ -130,17 +153,35 @@ export function NotificationFeed({
                 </p>
 
                 {isInteractive && (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenNotification(notification);
-                    }}
-                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-                  >
-                    {getActionLabel(notification)}
-                    <ChevronRight size={14} />
-                  </button>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenNotification(notification);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                    >
+                      {getActionLabel(notification)}
+                      <ChevronRight size={14} />
+                    </button>
+
+                    {canSnoozeOverdue && overdueSnoozeActions.map((action) => (
+                      <button
+                        key={action.preset}
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSnoozeOverdueNotification?.(notification, action.preset);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                      >
+                        {action.icon}
+                        {actionBusy ? 'Adiando...' : action.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 

@@ -5,6 +5,7 @@ import {
   NOTE_MODES,
   NOTIFICATION_SCHEDULE_KINDS,
   NOTIFICATION_TONES,
+  OVERDUE_REMINDER_INTENSITIES,
   TASK_PRIORITIES,
   TASK_STATUSES,
 } from './contracts.js';
@@ -110,6 +111,7 @@ export const createTaskSchema = z.object({
   category: categorySchema.default('Geral'),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').default([]),
   suppressHolidayNotifications: z.boolean().default(false),
+  overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).default('normal'),
   alarmEnabled: z.boolean().default(false),
   mutedUntil: optionalDateSchema,
   noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
@@ -141,6 +143,7 @@ export const updateTaskSchema = z.object({
   category: categorySchema.optional(),
   tags: z.array(tagNameSchema).max(12, 'Muitas tags').optional(),
   suppressHolidayNotifications: z.boolean().optional(),
+  overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).optional(),
   alarmEnabled: z.boolean().optional(),
   mutedUntil: optionalDateSchema,
   noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),

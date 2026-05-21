@@ -21,6 +21,10 @@ import {
   registerSchema,
   updateTaskSchema,
 } from '../lib/schemas.js';
+import {
+  buildOverdueScheduleOffsets,
+  getOverdueReminderSequence,
+} from '../lib/overdue-reminders.js';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../src/lib/taskStatus.ts';
 
 process.env.JWT_SECRET ||= 'test-secret-with-at-least-thirty-two-characters';
@@ -427,6 +431,7 @@ function createTaskSideEffectsSqlMock(options?: {
     completedAt: null,
     mutedUntil: null,
     suppressHolidayNotifications: false,
+    overdueReminderIntensity: 'normal' as const,
     floatingIntervalMinutes: null,
     notificationsEnabled: true,
     stateCode: null,
@@ -1487,6 +1492,36 @@ async function main() {
       deletedAt: null,
     }, now), 'cancelled');
     assert.equal(getDerivedTaskStatusLabel('overdue'), 'Atrasado');
+  });
+
+  await run('shared overdue reminder progression matches backend thresholds', () => {
+    assert.deepEqual(
+      buildOverdueScheduleOffsets().slice(0, 8).map((item) => item.intervalMinutes),
+      [15, 30, 45, 75, 120, 195, 315, 360],
+    );
+    assert.deepEqual(
+      buildOverdueScheduleOffsets().slice(0, 5).map((item) => item.thresholdMinutes),
+      [15, 45, 90, 165, 285],
+    );
+    assert.deepEqual(
+      buildOverdueScheduleOffsets(undefined, 'gentle').slice(0, 3).map((item) => item.intervalMinutes),
+      [30, 120, 360],
+    );
+    assert.deepEqual(
+      buildOverdueScheduleOffsets(undefined, 'insistent').slice(0, 5).map((item) => item.intervalMinutes),
+      [5, 15, 30, 60, 120],
+    );
+    assert.deepEqual(buildOverdueScheduleOffsets(undefined, 'silent'), []);
+    assert.equal(getOverdueReminderSequence(14), null);
+    assert.equal(getOverdueReminderSequence(15)?.sequenceIndex, 0);
+    assert.equal(getOverdueReminderSequence(44)?.sequenceIndex, 0);
+    assert.equal(getOverdueReminderSequence(45)?.sequenceIndex, 1);
+    assert.equal(getOverdueReminderSequence(90)?.sequenceIndex, 2);
+    assert.equal(getOverdueReminderSequence(4, 'insistent'), null);
+    assert.equal(getOverdueReminderSequence(5, 'insistent')?.sequenceIndex, 0);
+    assert.equal(getOverdueReminderSequence(29, 'gentle'), null);
+    assert.equal(getOverdueReminderSequence(30, 'gentle')?.sequenceIndex, 0);
+    assert.equal(getOverdueReminderSequence(500, 'silent'), null);
   });
 
   await run('calendar export builds Google/Outlook compatible ICS', () => {

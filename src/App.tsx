@@ -18,7 +18,7 @@ import {
   Sparkles,
   User as UserIcon,
 } from 'lucide-react';
-import { addDays, addHours, format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
+import { addDays, addHours, addMinutes, format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -45,6 +45,11 @@ import {
 } from './lib/taskDueDate';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from './lib/taskStatus';
 import {
+  OVERDUE_LIFETIME_HOURS,
+  formatOverdueDuration,
+  getOverdueReminderSequence,
+} from '../lib/overdue-reminders';
+import {
   buildRecurringDates,
   countDateKeyMatches,
   getRecurrenceSuggestion,
@@ -58,8 +63,10 @@ import {
   type Note,
   type NoteMode,
   type NotificationTarget,
+  type OverdueNotificationSnoozePreset,
   type Priority,
   type Task,
+  type TaskOverdueReminderIntensity,
 } from './types';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Sidebar } from './components/Sidebar';
@@ -127,8 +134,8 @@ type CalendarFeedResponse = {
 };
 
 const UPCOMING_REMINDER_MINUTES = 15;
-const OVERDUE_REMINDER_INTERVAL_MINUTES = 30;
 const ALARM_SNOOZE_MINUTES = 10;
+const OVERDUE_VIEWED_MUTE_MINUTES = 30;
 const ALARM_RING_DURATION_MS = 2 * 60 * 1000;
 
 type ActiveAlarm = {
@@ -286,6 +293,60 @@ function buildQuickRescheduleDate(task: Task, preset: QuickReschedulePreset): st
   );
 }
 
+function buildOverdueNotificationSnoozeDate(task: Task, preset: OverdueNotificationSnoozePreset): Date {
+  if (preset === 'tenMinutes') {
+    const date = addMinutes(new Date(), 10);
+    date.setSeconds(0, 0);
+    return date;
+  }
+
+  if (preset === 'oneHour') {
+    const date = addHours(new Date(), 1);
+    date.setSeconds(0, 0);
+    return date;
+  }
+
+  const currentDue = parseDueDateToForm(task.dueDate);
+  const tomorrow = addDays(new Date(), 1);
+  return new Date(buildDueDateFromForm(formatDateInputValue(tomorrow), currentDue.time || '09:00'));
+}
+
+function buildOverdueNotificationSnoozePayload(task: Task, preset: OverdueNotificationSnoozePreset) {
+  const nextDueDate = buildOverdueNotificationSnoozeDate(task, preset);
+  const payload: {
+    dueDate: string;
+    endDate?: string | null;
+    status: 'pending';
+  } = {
+    dueDate: nextDueDate.toISOString(),
+    status: 'pending',
+  };
+
+  if (task.dueDate && task.endDate) {
+    const currentDueDate = new Date(task.dueDate);
+    const currentEndDate = new Date(task.endDate);
+    if (
+      !Number.isNaN(currentDueDate.getTime()) &&
+      !Number.isNaN(currentEndDate.getTime()) &&
+      currentEndDate > currentDueDate
+    ) {
+      payload.endDate = new Date(nextDueDate.getTime() + (currentEndDate.getTime() - currentDueDate.getTime())).toISOString();
+    }
+  }
+
+  return payload;
+}
+
+function getOverdueNotificationSnoozeLabel(preset: OverdueNotificationSnoozePreset) {
+  if (preset === 'tenMinutes') return 'em 10 minutos';
+  if (preset === 'oneHour') return 'em 1 hora';
+  return 'amanhã';
+}
+
+function isOverdueNotificationSnoozePreset(value: string | null): value is OverdueNotificationSnoozePreset {
+  return value === 'tenMinutes' || value === 'oneHour' || value === 'tomorrow';
+}
+
 function formatDateTimeLocalValue(isoDate: string | Date | null | undefined): string {
   if (!isoDate) return '';
   const date = isoDate instanceof Date ? isoDate : new Date(isoDate);
@@ -440,6 +501,7 @@ export default function App() {
   const [formCategory, setFormCategory] = useState('Geral');
   const [formTags, setFormTags] = useState<string[]>([]);
   const [formSuppressHolidayNotifications, setFormSuppressHolidayNotifications] = useState(false);
+  const [formOverdueReminderIntensity, setFormOverdueReminderIntensity] = useState<TaskOverdueReminderIntensity>('normal');
   const [formAlarmEnabled, setFormAlarmEnabled] = useState(false);
   const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
   const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
@@ -512,6 +574,7 @@ export default function App() {
   const previousPendingOfflineTaskCountRef = useRef(0);
   const seenPushKeysRef = useRef<Set<string>>(new Set());
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
+  const viewedOverdueMuteInFlightRef = useRef<Set<string>>(new Set());
   const alarmDismissedKeysRef = useRef<Set<string>>(new Set());
   const alarmSnoozeUntilRef = useRef<Map<string, number>>(new Map());
   const alarmAutoCloseTimerRef = useRef<number | null>(null);
@@ -1020,6 +1083,7 @@ export default function App() {
     setFormCategory('Geral');
     setFormTags([]);
     setFormSuppressHolidayNotifications(false);
+    setFormOverdueReminderIntensity('normal');
     setFormAlarmEnabled(false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
@@ -1042,6 +1106,34 @@ export default function App() {
     setEditingNote(null);
     setShowNoteDrawer(false);
   }, []);
+
+  const markOverdueTaskViewed = useCallback((task: Task) => {
+    if (!hasTaskDueDate(task)) return;
+    if (task.status === 'completed' || task.status === 'draft' || task.status === 'inactive') return;
+    if (getDerivedTaskStatus(task) !== 'overdue') return;
+    if (viewedOverdueMuteInFlightRef.current.has(task.id)) return;
+
+    const now = new Date();
+    const currentMutedUntil = task.mutedUntil ? new Date(task.mutedUntil) : null;
+    if (currentMutedUntil && !Number.isNaN(currentMutedUntil.getTime()) && currentMutedUntil > now) {
+      return;
+    }
+
+    const mutedUntil = addMinutes(now, OVERDUE_VIEWED_MUTE_MINUTES).toISOString();
+    viewedOverdueMuteInFlightRef.current.add(task.id);
+
+    void updateTask(task.id, { mutedUntil }).then((updated) => {
+      setSelectedTask((current) => (current?.id === task.id ? updated : current));
+      triggerToastOnly(
+        'Lembrete visto',
+        `Avisos de atraso reduzidos por ${OVERDUE_VIEWED_MUTE_MINUTES} minutos.`,
+      );
+    }).catch(() => {
+      // The detail still opens; reducing the frequency is best effort.
+    }).finally(() => {
+      viewedOverdueMuteInFlightRef.current.delete(task.id);
+    });
+  }, [triggerToastOnly, updateTask]);
 
   useEffect(() => {
     if (!selectedTask) return;
@@ -1076,8 +1168,9 @@ export default function App() {
     );
     setSelectedTask(relatedTask);
     setShowTaskDetails(true);
+    markOverdueTaskViewed(relatedTask);
     setPendingNotificationTaskId(null);
-  }, [configShowCompleted, pendingNotificationTaskId, tasks]);
+  }, [configShowCompleted, markOverdueTaskViewed, pendingNotificationTaskId, tasks]);
 
   const openNewTask = useCallback(() => {
     resetTaskForm();
@@ -1112,6 +1205,7 @@ export default function App() {
     setFormCategory(template.category);
     setFormTags([]);
     setFormSuppressHolidayNotifications(false);
+    setFormOverdueReminderIntensity('normal');
     setFormAlarmEnabled(false);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
@@ -1129,6 +1223,7 @@ export default function App() {
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
+    setFormOverdueReminderIntensity(task.overdueReminderIntensity ?? 'normal');
     setFormAlarmEnabled(task.alarmEnabled ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
@@ -1153,6 +1248,7 @@ export default function App() {
     setFormCategory(task.category || 'Geral');
     setFormTags(task.tags ?? []);
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
+    setFormOverdueReminderIntensity(task.overdueReminderIntensity ?? 'normal');
     setFormAlarmEnabled(task.alarmEnabled ?? false);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
@@ -1170,7 +1266,8 @@ export default function App() {
     setTaskDetailsReturnMetric(null);
     setSelectedTask(task);
     setShowTaskDetails(true);
-  }, []);
+    markOverdueTaskViewed(task);
+  }, [markOverdueTaskViewed]);
 
   const openEditNote = useCallback((note: Note, options?: { taskContextId?: string | null }) => {
     setShowNotificationsInbox(false);
@@ -1210,7 +1307,8 @@ export default function App() {
     setTaskDetailsReturnMetric(metric);
     setSelectedTask(task);
     setShowTaskDetails(true);
-  }, []);
+    markOverdueTaskViewed(task);
+  }, [markOverdueTaskViewed]);
 
   const closeTaskDetails = useCallback(() => {
     setShowTaskDetails(false);
@@ -1455,6 +1553,65 @@ export default function App() {
       });
     }
   }, [emitNotification, reschedulingTaskIds, updateTask]);
+
+  const isNotificationActionBusy = useCallback((notification: AppNotification) => {
+    return notification.target?.type === 'task'
+      ? reschedulingTaskIds.has(notification.target.taskId)
+      : false;
+  }, [reschedulingTaskIds]);
+
+  const handleSnoozeOverdueNotification = useCallback(async (
+    notification: AppNotification,
+    preset: OverdueNotificationSnoozePreset,
+  ) => {
+    if (notification.kind !== 'overdue_reminder' || notification.target?.type !== 'task') return;
+
+    const taskId = notification.target.taskId;
+    if (reschedulingTaskIds.has(taskId)) return;
+
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) {
+      setActiveTab('tasks');
+      setPendingNotificationTaskId(taskId);
+      triggerToastOnly('Abrindo lembrete', 'Não encontrei o lembrete na lista atual; vou abrir a agenda para sincronizar.');
+      return;
+    }
+
+    try {
+      setReschedulingTaskIds((prev) => new Set(prev).add(taskId));
+      const updated = await updateTask(taskId, buildOverdueNotificationSnoozePayload(task, preset));
+
+      setSelectedTask((current) => (current?.id === taskId ? updated : current));
+      if (!notification.read) {
+        void markNotificationRead(notification.id, true).catch(() => {
+          // the reschedule is the important part; read state can sync later
+        });
+      }
+      triggerToastOnly(
+        'Lembrete adiado',
+        `"${task.title}" será lembrado ${getOverdueNotificationSnoozeLabel(preset)}.`,
+      );
+    } catch (error) {
+      emitNotification(
+        'Não foi possível adiar',
+        error instanceof Error ? error.message : 'Tente novamente em instantes.',
+        'error',
+      );
+    } finally {
+      setReschedulingTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }
+  }, [
+    emitNotification,
+    markNotificationRead,
+    reschedulingTaskIds,
+    tasks,
+    triggerToastOnly,
+    updateTask,
+  ]);
 
   const taskDueDateError = useMemo(() => {
     if (isWorkCategory(formCategory) && (!formDate || !formTime)) {
@@ -1701,6 +1858,7 @@ export default function App() {
       category: formCategory,
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
+      overdueReminderIntensity: formOverdueReminderIntensity,
       alarmEnabled: hasStart && formAlarmEnabled,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       ...(editingTask?.status === 'draft' ? { status: 'pending' as const } : {}),
@@ -1793,6 +1951,7 @@ export default function App() {
     formTitle,
     formTags,
     noTimeReminderFallbackTime,
+    formOverdueReminderIntensity,
     formSuppressHolidayNotifications,
     isTaskSubmitting,
     resetTaskForm,
@@ -1845,6 +2004,7 @@ export default function App() {
       category: formCategory,
       tags: formTags,
       suppressHolidayNotifications: formSuppressHolidayNotifications,
+      overdueReminderIntensity: formOverdueReminderIntensity,
       alarmEnabled: hasStart && formAlarmEnabled,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       status: 'draft' as const,
@@ -1879,6 +2039,7 @@ export default function App() {
     formAlarmEnabled,
     configNoTimeReminderMinutes,
     formPriority,
+    formOverdueReminderIntensity,
     formSuppressHolidayNotifications,
     formTags,
     formTime,
@@ -2508,18 +2669,24 @@ export default function App() {
       if (shouldSuppressHolidayNotification(task)) return;
 
       const dueDate = parseISO(task.dueDate);
+      const overdueExpiresAt = task.overdueExpiresAt
+        ? parseISO(task.overdueExpiresAt)
+        : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
+      if (now > overdueExpiresAt) return;
+
       const minutesOverdue = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / 60000));
-      const overdueBucket = Math.floor(minutesOverdue / OVERDUE_REMINDER_INTERVAL_MINUTES);
+      const overdueSequence = getOverdueReminderSequence(minutesOverdue, task.overdueReminderIntensity ?? 'normal');
+      if (!overdueSequence) return;
 
       emitLocalOfflineNotification(
         'Lembrete atrasado',
-        overdueBucket === 0
+        overdueSequence.sequenceIndex === 0
           ? `"${task.title}" passou do prazo e precisa da sua atenção.`
-          : `"${task.title}" continua atrasado há ${minutesOverdue} minuto${minutesOverdue === 1 ? '' : 's'}.`,
+          : `"${task.title}" continua atrasado há ${formatOverdueDuration(minutesOverdue)}.`,
         'warning',
         {
           target: { type: 'task', taskId: task.id },
-          dedupeKey: `overdue:${task.id}:${overdueBucket}`,
+          dedupeKey: `overdue:${task.id}:${overdueSequence.sequenceIndex}`,
         },
       );
     });
@@ -2842,8 +3009,28 @@ export default function App() {
       if (notificationTarget === 'task') {
         const taskId = params.get('taskId');
         if (taskId) {
-          setActiveTab('tasks');
-          setPendingNotificationTaskId(taskId);
+          const notificationAction = params.get('notificationAction');
+          const snoozePreset = params.get('snoozePreset');
+          const notificationId = params.get('notificationId');
+
+          if (
+            notificationAction === 'overdueSnooze' &&
+            isOverdueNotificationSnoozePreset(snoozePreset)
+          ) {
+            void handleSnoozeOverdueNotification({
+              id: notificationId ?? `push-action:${taskId}:${snoozePreset}`,
+              title: 'Lembrete atrasado',
+              message: '',
+              createdAt: new Date().toISOString(),
+              read: true,
+              tone: 'warning',
+              target: { type: 'task', taskId },
+              kind: 'overdue_reminder',
+            }, snoozePreset);
+          } else {
+            setActiveTab('tasks');
+            setPendingNotificationTaskId(taskId);
+          }
         }
       } else if (notificationTarget === 'profile') {
         openProfile();
@@ -2855,6 +3042,9 @@ export default function App() {
 
       params.delete('notificationTarget');
       params.delete('taskId');
+      params.delete('notificationAction');
+      params.delete('snoozePreset');
+      params.delete('notificationId');
     } else {
       return;
     }
@@ -2871,6 +3061,7 @@ export default function App() {
     auth.restoring,
     auth.token,
     locationSearch,
+    handleSnoozeOverdueNotification,
     openNotificationsCenter,
     openNewTask,
     openProfile,
@@ -3473,6 +3664,8 @@ export default function App() {
                     onMarkAllRead={markAllNotificationsRead}
                     onClearAll={clearNotifications}
                     onOpenNotification={handleOpenNotification}
+                    onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
+                    isNotificationActionBusy={isNotificationActionBusy}
                   />
                 )}
               </Suspense>
@@ -3689,6 +3882,8 @@ export default function App() {
             setRecurrenceUntil={setFormRecurrenceUntil}
             suppressHolidayNotifications={formSuppressHolidayNotifications}
             setSuppressHolidayNotifications={setFormSuppressHolidayNotifications}
+            overdueReminderIntensity={formOverdueReminderIntensity}
+            setOverdueReminderIntensity={setFormOverdueReminderIntensity}
             alarmEnabled={formAlarmEnabled}
             setAlarmEnabled={setFormAlarmEnabled}
             recurrenceError={recurrenceError}
@@ -3816,6 +4011,8 @@ export default function App() {
             onClose={closeNotificationsInbox}
             onOpenNotification={handleOpenNotification}
             onPreviewNotification={handlePreviewNotification}
+            onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
+            isNotificationActionBusy={isNotificationActionBusy}
             onOpenCenter={openNotificationsCenter}
           />
         )}
