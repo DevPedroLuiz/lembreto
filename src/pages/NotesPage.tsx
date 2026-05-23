@@ -73,20 +73,20 @@ export function NotesPage({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="space-y-6"
+      className="space-y-4 sm:space-y-6"
     >
-      <section className="surface-panel p-5 md:p-6">
-        <div className="flex flex-col gap-5">
+      <section className="surface-panel p-4 md:p-6">
+        <div className="flex flex-col gap-4 sm:gap-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
+            <div className="min-w-0">
               <span className="section-eyebrow">
                 <NotebookPen size={14} />
                 Caderno pessoal
               </span>
-              <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
+              <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-4 sm:text-2xl">
                 Capture contexto e mantenha seus lembretes bem acompanhados.
               </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400 sm:leading-7">
                 Use notas para guardar observações, ideias, links e pontos de apoio. Quando fizer sentido, vincule tudo a um lembrete já existente.
               </p>
             </div>
@@ -102,29 +102,29 @@ export function NotesPage({
             </button>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <div className="surface-soft p-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="surface-soft p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total de notas</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{notes.length}</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white sm:text-3xl">{notes.length}</p>
             </div>
-            <div className="surface-soft p-4">
+            <div className="surface-soft p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Notas fixas</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{fixedCount}</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white sm:text-3xl">{fixedCount}</p>
             </div>
-            <div className="surface-soft p-4">
+            <div className="surface-soft p-3 sm:p-4">
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Notas temporárias</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{temporaryCount}</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white sm:text-3xl">{temporaryCount}</p>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             <button
               type="button"
               data-testid="notes-view-active"
               onClick={() => setActiveView('notes')}
               aria-pressed={activeView === 'notes'}
               className={[
-                'flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all',
+                'flex min-h-[68px] items-center justify-between gap-2 rounded-2xl border px-3 py-3 text-left transition-all sm:min-h-[72px] sm:px-4',
                 activeView === 'notes'
                   ? 'border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-white'
                   : 'border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300',
@@ -144,7 +144,7 @@ export function NotesPage({
               onClick={() => setActiveView('trash')}
               aria-pressed={activeView === 'trash'}
               className={[
-                'flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all',
+                'flex min-h-[68px] items-center justify-between gap-2 rounded-2xl border px-3 py-3 text-left transition-all sm:min-h-[72px] sm:px-4',
                 activeView === 'trash'
                   ? 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-white'
                   : 'border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300',
@@ -164,7 +164,7 @@ export function NotesPage({
           </div>
 
           {!isTrashView && (
-          <div className="surface-soft p-4">
+          <div className="surface-soft p-3 sm:p-4">
             <div className="relative">
               <Search className="field-icon" size={18} />
               <input
@@ -198,7 +198,7 @@ export function NotesPage({
               />
             </div>
 
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
               <FilterTag
                 active={categoryFilter === 'Todas'}
                 onClick={() => setCategoryFilter('Todas')}

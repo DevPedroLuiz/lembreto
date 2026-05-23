@@ -3482,7 +3482,7 @@ export default function App() {
         : '';
 
   return (
-    <div className="flex h-[100dvh] min-h-[100dvh] w-full overflow-hidden text-slate-900 dark:text-slate-100">
+    <div className="flex h-[100dvh] min-h-[100dvh] w-full min-w-0 overflow-hidden text-slate-900 dark:text-slate-100">
       {!isSidebarHidden && (
         <Sidebar
           currentUser={auth.currentUser}
@@ -3519,20 +3519,30 @@ export default function App() {
         </button>
       )}
 
-      <main className="relative flex h-full flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="pointer-events-none absolute inset-0 bg-grid opacity-40 dark:opacity-20" />
 
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/70 bg-white/80 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/75 sm:p-4 lg:hidden">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-white/88 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/86 sm:p-4 lg:hidden">
           <div className="flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_30px_-22px_rgba(37,99,235,0.8)]">
               <Sparkles size={18} />
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Painel</p>
+            <div className="min-w-0">
+              <p className="truncate text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                {activeTab === 'dashboard'
+                  ? 'Painel'
+                  : activeTab === 'calendar'
+                    ? 'Agenda'
+                    : activeTab === 'tasks'
+                      ? 'Tarefas'
+                      : activeTab === 'notes'
+                        ? 'Notas'
+                        : 'Avisos'}
+              </p>
               <h1 className="text-lg font-semibold">Lembreto</h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {pendingOfflineTaskCount > 0 && (
               <span
                 data-testid="offline-sync-badge-mobile"
@@ -3576,7 +3586,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="relative mx-auto flex-1 w-full max-w-7xl p-4 pb-28 sm:p-6 sm:pb-28 lg:p-8 lg:pb-8 xl:p-10">
+        <div className="relative mx-auto w-full min-w-0 flex-1 max-w-7xl p-3 pb-28 sm:p-6 sm:pb-28 lg:p-8 lg:pb-8 xl:p-10">
           {!isMobileViewport && (
             <div className="surface-panel mb-4 p-4 md:mb-8 md:p-6">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -3635,7 +3645,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="mb-8 hidden flex-col justify-between gap-4 sm:flex-row sm:items-center lg:flex">
             {activeTab === 'tasks' && (
               <button
                 onClick={openNewTask}
@@ -3765,8 +3775,8 @@ export default function App() {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/92 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/88 lg:hidden">
-        <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/94 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 lg:hidden">
+        <div className="mx-auto grid max-w-lg grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -3789,13 +3799,13 @@ export default function App() {
             <CalendarDays size={22} />
             <span className="text-[10px] font-semibold leading-none">Agenda</span>
           </button>
-          <div className="relative -top-6">
+          <div className="relative -top-5">
             <button
               onClick={openNewTask}
               aria-label="Criar novo lembrete"
-              className="flex h-16 w-16 items-center justify-center rounded-full border-[6px] border-slate-100 bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_24px_40px_-22px_rgba(37,99,235,0.7)] transition-transform active:scale-95 dark:border-slate-950"
+              className="flex h-14 w-14 items-center justify-center rounded-full border-[5px] border-slate-100 bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_24px_40px_-22px_rgba(37,99,235,0.7)] transition-transform active:scale-95 dark:border-slate-950"
             >
-              <Plus size={32} />
+              <Plus size={28} />
             </button>
           </div>
           <button

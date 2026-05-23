@@ -498,43 +498,43 @@ export function CalendarPage({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="space-y-6"
+      className="space-y-4 sm:space-y-6"
     >
-      <section className="surface-panel p-5 md:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div>
+      <section className="surface-panel p-4 md:p-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="min-w-0">
             <span className="section-eyebrow">
               <CalendarDays size={14} />
               Dashboard semanal
             </span>
-            <h3 className="mt-4 text-2xl font-semibold text-slate-950 dark:text-white md:text-3xl">
+            <h3 className="mt-3 text-xl font-semibold text-slate-950 dark:text-white sm:mt-4 sm:text-2xl md:text-3xl">
               Calendário de lembretes
             </h3>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400 sm:leading-7">
               Veja cada lembrete posicionado no dia certo e acompanhe a semana com leitura rápida.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-            <div className="surface-soft px-4 py-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 xl:min-w-[520px]">
+            <div className="surface-soft px-3 py-3 sm:px-4">
               <p className="text-xs font-semibold uppercase text-slate-400 dark:text-slate-500">Mês</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{monthTaskCount}</p>
+              <p className="mt-1 text-xl font-semibold text-slate-950 dark:text-white sm:text-2xl">{monthTaskCount}</p>
             </div>
-            <div className="surface-soft px-4 py-3">
+            <div className="surface-soft px-3 py-3 sm:px-4">
               <p className="text-xs font-semibold uppercase text-slate-400 dark:text-slate-500">Semana</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{selectedWeekCount}</p>
+              <p className="mt-1 text-xl font-semibold text-slate-950 dark:text-white sm:text-2xl">{selectedWeekCount}</p>
             </div>
-            <div className="surface-soft px-4 py-3">
+            <div className="surface-soft px-3 py-3 sm:px-4">
               <p className="text-xs font-semibold uppercase text-slate-400 dark:text-slate-500">Atrasados</p>
-              <p className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-300">{overdueCount}</p>
+              <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-300 sm:text-2xl">{overdueCount}</p>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div
             className={cn(
-              'inline-grid rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05] md:w-auto',
+              'grid w-full rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05] md:inline-grid md:w-auto',
               dayTimelineDate ? 'grid-cols-3' : 'grid-cols-2',
             )}
           >
@@ -543,7 +543,7 @@ export function CalendarPage({
               onClick={() => setActivePanel('calendar')}
               aria-pressed={activePanel === 'calendar'}
               className={cn(
-                'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all',
+                'inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold transition-all sm:gap-2 sm:px-4 sm:text-sm',
                 activePanel === 'calendar'
                   ? 'bg-white text-slate-950 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] dark:bg-white/[0.12] dark:text-white'
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
@@ -557,7 +557,7 @@ export function CalendarPage({
               onClick={() => setActivePanel('timeline')}
               aria-pressed={activePanel === 'timeline'}
               className={cn(
-                'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all',
+                'inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold transition-all sm:gap-2 sm:px-4 sm:text-sm',
                 activePanel === 'timeline'
                   ? 'bg-white text-slate-950 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] dark:bg-white/[0.12] dark:text-white'
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
@@ -572,7 +572,7 @@ export function CalendarPage({
                 onClick={() => setActivePanel('day-timeline')}
                 aria-pressed={activePanel === 'day-timeline'}
                 className={cn(
-                  'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all',
+                  'inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold transition-all sm:gap-2 sm:px-4 sm:text-sm',
                   activePanel === 'day-timeline'
                     ? 'bg-white text-slate-950 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] dark:bg-white/[0.12] dark:text-white'
                     : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white',
@@ -584,19 +584,19 @@ export function CalendarPage({
             )}
           </div>
 
-          <button type="button" onClick={onNewTask} className="action-primary">
+          <button type="button" onClick={onNewTask} className="action-primary justify-center md:justify-start">
             <Plus size={18} />
             Novo lembrete
           </button>
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-6">
+      <div className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-4 sm:space-y-6">
           {activePanel === 'calendar' ? (
             <>
               <section className="surface-panel overflow-hidden">
-            <div className="flex flex-col gap-4 border-b border-slate-200/70 p-4 dark:border-white/10 md:flex-row md:items-center md:justify-between md:p-5">
+            <div className="flex flex-col gap-3 border-b border-slate-200/70 p-3 dark:border-white/10 sm:p-4 md:flex-row md:items-center md:justify-between md:p-5">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -620,10 +620,10 @@ export function CalendarPage({
               </div>
 
               <div className="min-w-0">
-                <h3 className="text-xl font-semibold capitalize text-slate-950 dark:text-white md:text-2xl">
+                <h3 className="text-lg font-semibold capitalize text-slate-950 dark:text-white sm:text-xl md:text-2xl">
                   {formatMonthLabel(cursorDate)}
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 sm:text-sm">
                   {filteredTasks.length} lembrete{filteredTasks.length === 1 ? '' : 's'} com os filtros atuais
                 </p>
               </div>
@@ -662,7 +662,7 @@ export function CalendarPage({
                       setSelectedDate(day);
                     }}
                     className={cn(
-                      'group min-h-[94px] cursor-pointer border-b border-r border-slate-200/70 p-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:border-white/10 sm:min-h-[122px] sm:p-2.5',
+                      'group min-h-[72px] cursor-pointer border-b border-r border-slate-200/70 p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:border-white/10 sm:min-h-[122px] sm:p-2.5',
                       isCurrentMonth
                         ? 'bg-white/70 hover:bg-blue-50/70 dark:bg-slate-950/38 dark:hover:bg-blue-500/10'
                         : 'bg-slate-50/60 text-slate-400 dark:bg-white/[0.02] dark:text-slate-600',
@@ -672,7 +672,7 @@ export function CalendarPage({
                     <div className="flex items-center justify-between gap-1">
                       <span
                         className={cn(
-                          'inline-flex h-7 min-w-7 items-center justify-center rounded-xl px-1 text-xs font-bold sm:h-8 sm:min-w-8 sm:text-sm',
+                          'inline-flex h-6 min-w-6 items-center justify-center rounded-lg px-1 text-[11px] font-bold sm:h-8 sm:min-w-8 sm:rounded-xl sm:text-sm',
                           isToday(day)
                             ? 'bg-blue-600 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.8)]'
                             : isSelected
@@ -686,7 +686,7 @@ export function CalendarPage({
                       {dayTasks.length > 0 && (
                         <span
                           className={cn(
-                            'inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[10px] font-bold',
+                            'inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold sm:h-6 sm:min-w-6',
                             hasOverdue
                               ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200'
                               : 'bg-slate-100 text-slate-600 dark:bg-white/[0.07] dark:text-slate-300',
@@ -697,7 +697,27 @@ export function CalendarPage({
                       )}
                     </div>
 
-                    <div className="mt-1.5 space-y-1 sm:mt-2">
+                    <div className="mt-1.5 flex flex-wrap gap-1 sm:hidden">
+                      {dayTasks.slice(0, 4).map((task) => (
+                        <span
+                          key={task.id}
+                          className={cn(
+                            'h-1.5 w-1.5 rounded-full',
+                            getDerivedTaskStatus(task) === 'completed'
+                              ? 'bg-emerald-500'
+                              : getDerivedTaskStatus(task) === 'overdue'
+                                ? 'bg-rose-500'
+                                : task.priority === 'high'
+                                  ? 'bg-rose-400'
+                                  : task.priority === 'medium'
+                                    ? 'bg-amber-400'
+                                    : 'bg-slate-400 dark:bg-slate-500',
+                          )}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="mt-1.5 hidden space-y-1 sm:mt-2 sm:block">
                       {dayTasks.slice(0, 3).map((task) => {
                         const timeLabel = getTaskTimeLabel(task.dueDate);
                         return (

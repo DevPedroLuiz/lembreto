@@ -148,13 +148,13 @@ export function NoteDrawer({
             className="fixed inset-0 z-[120] bg-slate-950/60 backdrop-blur-sm"
           />
 
-          <div className="fixed inset-0 z-[121] flex items-end justify-center p-1.5 sm:items-center sm:p-5">
+          <div className="fixed inset-0 z-[121] flex items-end justify-center p-0 sm:items-center sm:p-5">
             <motion.div
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex max-h-[calc(100dvh-0.25rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
+              className="flex max-h-[96dvh] w-full max-w-3xl flex-col overflow-hidden rounded-b-none rounded-t-[26px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="note-drawer-title"
