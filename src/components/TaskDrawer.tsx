@@ -197,10 +197,10 @@ function SummaryPill({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="min-w-[96px] rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-white/90 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04] sm:min-w-0 sm:px-4 sm:py-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
+    <div className="min-w-0 rounded-2xl border border-white/15 bg-white/10 px-2.5 py-2 text-white/90 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04] sm:px-4 sm:py-3">
+      <div className="flex min-w-0 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-white/60 sm:gap-2 sm:text-[11px] sm:tracking-[0.16em]">
         <span className="icon-slot h-3.5 w-3.5 sm:h-4 sm:w-4">{icon}</span>
-        {label}
+        <span className="truncate">{label}</span>
       </div>
       <p className="mt-1 truncate text-[12px] font-semibold text-white dark:text-slate-100 sm:mt-2 sm:text-sm">{value}</p>
     </div>
@@ -227,7 +227,7 @@ function DrawerTabButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all',
+        'inline-flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-semibold transition-all sm:gap-2 sm:px-4 sm:text-sm',
         active
           ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.7)]'
           : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]',
@@ -467,7 +467,7 @@ export function TaskDrawer({
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex max-h-[96dvh] w-full max-w-4xl flex-col overflow-hidden rounded-b-none rounded-t-[26px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
+              className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-drawer-title"
@@ -482,13 +482,13 @@ export function TaskDrawer({
                 </div>
               )}
 
-              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-4 py-2.5 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7">
+              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-3.5 py-2.5 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="max-w-3xl">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm">
+                  <div className="min-w-0 max-w-3xl">
+                    <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/80 backdrop-blur-sm sm:text-[11px] sm:tracking-[0.18em]">
                       {isEditing ? 'Atualização' : 'Planejamento'}
                     </span>
-                    <h2 id="task-drawer-title" className="mt-2 text-[1.4rem] font-semibold leading-tight text-white sm:mt-4 sm:text-2xl md:text-[2rem]">
+                    <h2 id="task-drawer-title" className="mt-2 text-xl font-semibold leading-tight text-white sm:mt-4 sm:text-2xl md:text-[2rem]">
                       {isEditing ? 'Editar lembrete' : 'Novo lembrete'}
                     </h2>
                     <p className="mt-1 hidden max-w-2xl text-[12px] leading-5 text-blue-50/88 sm:mt-2 sm:block sm:text-sm sm:leading-6">
@@ -506,15 +506,15 @@ export function TaskDrawer({
                   </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-5 sm:gap-3">
+                <div className="mt-3 grid min-w-0 grid-cols-3 gap-1.5 sm:mt-5 sm:gap-3">
                   <SummaryPill label="Prazo" value={summaryDue} icon={<CalendarDays size={14} />} />
                   <SummaryPill label="Horário" value={summaryTime} icon={<Clock3 size={14} />} />
                   <SummaryPill label="Prioridade" value={summaryPriority} icon={<Flag size={14} />} />
                 </div>
               </div>
 
-              <div className="border-b border-slate-200/80 bg-white/80 px-4 py-2.5 dark:border-white/10 dark:bg-slate-950/86 sm:px-5 sm:py-4 md:px-7">
-                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              <div className="border-b border-slate-200/80 bg-white/80 px-3.5 py-2.5 dark:border-white/10 dark:bg-slate-950/86 sm:px-5 sm:py-4 md:px-7">
+                <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   <DrawerTabButton
                     active={activeTab === 'details'}
                     icon={<Layers3 size={16} />}
@@ -541,7 +541,7 @@ export function TaskDrawer({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-5 sm:py-5 md:px-7 md:py-6">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-3.5 py-3 sm:px-5 sm:py-5 md:px-7 md:py-6">
                 <form id="task-form" onSubmit={onSubmit} className="space-y-4 sm:space-y-6" aria-busy={isSubmitting}>
                   {activeTab === 'details' && (
                     <>
@@ -761,7 +761,7 @@ export function TaskDrawer({
 
                           <div>
                             <FieldLabel>Tags</FieldLabel>
-                            <div className="flex gap-2">
+                            <div className="flex flex-col gap-2 sm:flex-row">
                               <input
                                 type="text"
                                 value={tagDraft}
@@ -788,7 +788,7 @@ export function TaskDrawer({
                                 data-testid="task-tag-add-button"
                                 onClick={handleAddExistingTag}
                                 disabled={isSubmitting || !normalizeTaxonomyValue(tagDraft)}
-                                className="action-secondary min-w-[120px] justify-center rounded-xl px-4 py-0 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="action-secondary justify-center rounded-xl px-4 py-3 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[120px] sm:py-0"
                               >
                                 Adicionar
                               </button>
@@ -864,15 +864,15 @@ export function TaskDrawer({
                       />
 
                       <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-4 rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                          <div>
+                        <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:rounded-[24px]">
+                          <div className="min-w-0">
                             <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar repetição</p>
                             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                               Gere vários lembretes em um único envio.
                             </p>
                           </div>
 
-                          <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                          <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
                             <input
                               type="checkbox"
                               data-testid="task-recurrence-toggle"
@@ -887,9 +887,9 @@ export function TaskDrawer({
 
                         {recurrenceEnabled && (
                           <div className="space-y-5">
-                            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="pr-2">
+                            <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0 sm:pr-2">
                                   <div className="flex items-center gap-2">
                                     <span className="icon-slot h-8 w-8 rounded-xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
                                       <BellOff size={15} />
@@ -903,7 +903,7 @@ export function TaskDrawer({
                                   </p>
                                 </div>
 
-                                <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                                <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
                                   <input
                                     type="checkbox"
                                     data-testid="task-holiday-notification-toggle"
@@ -972,7 +972,7 @@ export function TaskDrawer({
                               </div>
                             </div>
 
-                            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+                            <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
                               <div className="flex items-start gap-3">
                                 <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
                                   <Repeat size={18} />
@@ -1026,15 +1026,15 @@ export function TaskDrawer({
                       />
 
                       <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-4 rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                          <div>
+                        <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:rounded-[24px]">
+                          <div className="min-w-0">
                             <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar alarme sonoro</p>
                             <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
                               Quando ativo, você recebe um aviso 15 minutos antes e o alarme toca por 2 minutos no horário inicial.
                             </p>
                           </div>
 
-                          <label className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
+                          <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
                             <input
                               type="checkbox"
                               data-testid="task-alarm-toggle"
@@ -1047,7 +1047,7 @@ export function TaskDrawer({
                           </label>
                         </div>
 
-                        <div className="rounded-[24px] border border-amber-200/80 bg-amber-50/70 p-4 text-sm leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                        <div className="rounded-[20px] border border-amber-200/80 bg-amber-50/70 p-4 text-sm leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100 sm:rounded-[24px]">
                           {date && time
                             ? alarmEnabled
                               ? 'Alarme ativado para o horário inicial definido.'
@@ -1055,7 +1055,7 @@ export function TaskDrawer({
                             : 'Defina data e horário inicial para ativar o alarme sonoro.'}
                         </div>
 
-                        <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                        <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
                           <FieldLabel>Intensidade dos avisos de atraso</FieldLabel>
                           <select
                             value={overdueReminderIntensity}
@@ -1081,25 +1081,25 @@ export function TaskDrawer({
                 </form>
               </div>
 
-              <div className="border-t border-slate-200/80 bg-white/88 px-4 py-3 dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
-                <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
+              <div className="border-t border-slate-200/80 bg-white/88 px-3.5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <button
                     type="button"
                     onClick={onClose}
                     disabled={isSubmitting}
-                    className="action-ghost justify-center rounded-2xl border border-slate-200/80 px-4 py-3 text-sm dark:border-white/10 sm:min-w-[140px]"
+                    className="action-ghost justify-center rounded-2xl border border-slate-200/80 px-3 py-3 text-sm dark:border-white/10 sm:min-w-[140px] sm:px-4"
                   >
                     Cancelar
                   </button>
 
-                  <div className="grid gap-3 sm:flex sm:justify-end">
+                  <div className="contents sm:flex sm:justify-end sm:gap-3">
                     {(!isEditing || isEditingDraft) && (
                       <button
                         type="button"
                         data-testid="task-save-draft-button"
                         onClick={onSaveDraft}
                         disabled={isSubmitting || !title.trim()}
-                        className="action-secondary w-full justify-center rounded-2xl py-3.5 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:py-4"
+                        className="action-secondary w-full justify-center rounded-2xl px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:px-5 sm:py-4 sm:text-base"
                       >
                         {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : null}
                         Salvar rascunho
@@ -1111,7 +1111,7 @@ export function TaskDrawer({
                       type="submit"
                       data-testid="task-submit-button"
                       disabled={isSubmitting || Boolean(dueDateError) || Boolean(endTimeError) || Boolean(recurrenceError)}
-                      className="action-primary w-full justify-center rounded-2xl py-3.5 disabled:cursor-wait disabled:opacity-70 sm:min-w-[220px] sm:w-auto sm:py-4"
+                      className="action-primary col-span-2 w-full justify-center rounded-2xl px-3 py-3.5 text-sm disabled:cursor-wait disabled:opacity-70 sm:min-w-[220px] sm:w-auto sm:px-5 sm:py-4 sm:text-base"
                     >
                       {isSubmitting ? (
                         <>

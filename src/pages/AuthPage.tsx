@@ -238,10 +238,10 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8">
+    <div className="relative flex h-[100dvh] min-h-[100dvh] items-start justify-center overflow-y-auto overflow-x-hidden px-3 py-4 sm:items-center sm:px-4 sm:py-8">
       <div className="absolute inset-0 bg-grid opacity-50 dark:opacity-30" />
 
-      <div className="relative grid w-full min-w-0 max-w-6xl overflow-hidden rounded-[36px] border border-slate-200/80 bg-white/90 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="relative my-auto grid w-full min-w-0 max-w-6xl overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/90 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] sm:rounded-[36px] lg:grid-cols-[1.1fr_0.9fr]">
         <aside className="hidden border-r border-slate-200/80 bg-slate-50/80 p-10 dark:border-white/10 dark:bg-white/[0.04] lg:flex lg:flex-col">
           <div>
             <span className="section-eyebrow">
@@ -293,16 +293,16 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
           </div>
         </aside>
 
-        <section className="min-w-0 p-5 sm:p-8 lg:p-10">
+        <section className="min-w-0 p-4 sm:p-8 lg:p-10">
           <div className="mx-auto w-full min-w-0 max-w-md">
-            <div className="mb-8 text-center lg:text-left">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)] lg:mx-0 lg:hidden">
-                <Target size={28} />
+            <div className="mb-5 text-center sm:mb-8 lg:text-left">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)] sm:mb-4 sm:h-14 sm:w-14 sm:rounded-3xl lg:mx-0 lg:hidden">
+                <Target size={24} className="sm:h-7 sm:w-7" />
               </div>
               <span className="section-eyebrow">
                 {isRecovering ? 'Acesso' : isLogin ? 'Entrar' : 'Criar conta'}
               </span>
-              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-4 sm:text-3xl">
                 {isRecovering
                   ? recoverSuccess
                     ? 'Verifique seu e-mail'
@@ -324,7 +324,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
             {isRecovering ? (
               recoverSuccess ? (
-                <div className="surface-soft space-y-6 p-6 text-center">
+                <div className="surface-soft space-y-6 p-4 text-center sm:p-6">
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
                     <Mail size={28} />
                   </div>
@@ -350,7 +350,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 </div>
               ) : (
                 <form onSubmit={handleRecover} className="space-y-4">
-                  <div className="surface-soft space-y-4 p-6">
+                  <div className="surface-soft space-y-4 p-4 sm:p-6">
                     <div className="relative">
                       <Mail size={18} className="field-icon" />
                       <input
@@ -410,7 +410,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               )
             ) : (
               <form onSubmit={handleAuth} className="space-y-4">
-                <div className="surface-soft space-y-4 p-6">
+                <div className="surface-soft space-y-4 p-4 sm:p-6">
                   <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05]">
                     <button
                       type="button"
@@ -420,7 +420,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                         resetRecaptcha();
                       }}
                       className={[
-                        'rounded-2xl px-4 py-3 text-sm font-semibold transition-colors',
+                        'min-w-0 rounded-2xl px-2 py-3 text-sm font-semibold transition-colors sm:px-4',
                         isLogin
                           ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white'
                           : 'text-slate-500 dark:text-slate-400',
@@ -437,7 +437,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                         resetRecaptcha();
                       }}
                       className={[
-                        'rounded-2xl px-4 py-3 text-sm font-semibold transition-colors',
+                        'min-w-0 rounded-2xl px-2 py-3 text-sm font-semibold transition-colors sm:px-4',
                         !isLogin
                           ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white'
                           : 'text-slate-500 dark:text-slate-400',
@@ -496,7 +496,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
                   {!isLogin && authPassword.trim().length > 0 && (
                     <div data-testid="password-strength-indicator" className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <p className="text-sm font-semibold text-slate-900 dark:text-white">
                           {passwordStrength.label}
                         </p>

@@ -184,8 +184,8 @@ export function RecaptchaCheckbox({
   if (!siteKey) return null;
 
   return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white/80 p-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/[0.04]">
-      <div className="mb-4 flex items-start gap-3">
+    <div className="rounded-[20px] border border-slate-200/80 bg-white/80 p-3 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-white/[0.04] sm:rounded-[24px] sm:p-4">
+      <div className="mb-3 flex items-start gap-3 sm:mb-4">
         <div
           className={[
             'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors',
@@ -209,7 +209,7 @@ export function RecaptchaCheckbox({
       </div>
 
       <div className="overflow-hidden rounded-2xl bg-white p-2 ring-1 ring-slate-200/80 dark:ring-white/10">
-        <div ref={containerRef} className="min-h-[78px] origin-top-left max-[390px]:scale-[0.88]" />
+        <div ref={containerRef} className="min-h-[78px] origin-top-left max-[390px]:scale-[0.78] max-[340px]:!scale-[0.72]" />
       </div>
 
       {status === 'loading' && (
