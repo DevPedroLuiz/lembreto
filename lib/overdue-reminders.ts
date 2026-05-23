@@ -1,6 +1,8 @@
 import type { OverdueReminderIntensity } from './contracts.js';
 
 export const OVERDUE_LIFETIME_HOURS = 72;
+export const SIMPLE_OVERDUE_LIFETIME_HOURS = 24;
+export const IMPORTANT_OVERDUE_LIFETIME_HOURS = 72;
 
 const MAX_OVERDUE_INTERVAL_MINUTES = 360;
 const MAX_OVERDUE_SEQUENCE_COUNT = 100;
@@ -11,6 +13,40 @@ export interface OverdueReminderSequence {
   sequenceIndex: number;
   thresholdMinutes: number;
   intervalMinutes: number;
+}
+
+export interface OverdueExpirationInput {
+  priority?: string | null;
+  category?: string | null;
+  endDate?: string | Date | null;
+}
+
+function normalizeCategory(value?: string | null): string {
+  return String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function hasValidEndDate(value?: string | Date | null): boolean {
+  if (!value) return false;
+  const date = value instanceof Date ? value : new Date(value);
+  return !Number.isNaN(date.getTime());
+}
+
+export function getOverdueLifetimeHours(input: OverdueExpirationInput): number | null {
+  if (!hasValidEndDate(input.endDate)) return null;
+  if (input.priority === 'high' || normalizeCategory(input.category) === 'trabalho') {
+    return IMPORTANT_OVERDUE_LIFETIME_HOURS;
+  }
+  return SIMPLE_OVERDUE_LIFETIME_HOURS;
+}
+
+export function buildOverdueExpiresAt(dueDate: Date, input: OverdueExpirationInput): Date | null {
+  const lifetimeHours = getOverdueLifetimeHours(input);
+  if (lifetimeHours === null || Number.isNaN(dueDate.getTime())) return null;
+  return new Date(dueDate.getTime() + lifetimeHours * 60 * 60 * 1000);
 }
 
 function normalizeIntensity(intensity?: string | null): OverdueReminderIntensity {
@@ -74,11 +110,13 @@ export function buildOverdueScheduleOffsets(
 export function getOverdueReminderSequence(
   minutesOverdue: number,
   intensity?: string | null,
+  maxMinutes = OVERDUE_LIFETIME_HOURS * 60,
 ): OverdueReminderSequence | null {
   if (!Number.isFinite(minutesOverdue) || minutesOverdue < 0) return null;
 
+  const scheduleWindowMinutes = Math.min(minutesOverdue, maxMinutes);
   let activeSequence: OverdueReminderSequence | null = null;
-  for (const sequence of buildOverdueScheduleOffsets(undefined, intensity)) {
+  for (const sequence of buildOverdueScheduleOffsets(scheduleWindowMinutes, intensity)) {
     if (sequence.thresholdMinutes > minutesOverdue) break;
     activeSequence = sequence;
   }
@@ -86,12 +124,35 @@ export function getOverdueReminderSequence(
   return activeSequence;
 }
 
+export function getOverdueReminderSequenceAtIndex(
+  sequenceIndex: number,
+  intensity?: string | null,
+): OverdueReminderSequence | null {
+  if (!Number.isInteger(sequenceIndex) || sequenceIndex < 0) return null;
+
+  const normalizedIntensity = normalizeIntensity(intensity);
+  if (normalizedIntensity === 'silent') return null;
+
+  let thresholdMinutes = 0;
+  for (let index = 0; index <= sequenceIndex; index += 1) {
+    thresholdMinutes += getOverdueIntervalMinutes(index, normalizedIntensity);
+  }
+
+  return {
+    sequenceIndex,
+    thresholdMinutes,
+    intervalMinutes: getOverdueIntervalMinutes(sequenceIndex, normalizedIntensity),
+  };
+}
+
 export function buildOverdueScheduleTimes(
   dueDate: Date,
-  overdueExpiresAt: Date,
+  overdueExpiresAt: Date | null,
   intensity?: string | null,
 ) {
-  const lifetimeMinutes = Math.max(0, Math.floor((overdueExpiresAt.getTime() - dueDate.getTime()) / 60000));
+  const lifetimeMinutes = overdueExpiresAt
+    ? Math.max(0, Math.floor((overdueExpiresAt.getTime() - dueDate.getTime()) / 60000))
+    : Number.POSITIVE_INFINITY;
 
   return buildOverdueScheduleOffsets(lifetimeMinutes, intensity).map((sequence) => ({
     notifyAt: new Date(dueDate.getTime() + sequence.thresholdMinutes * 60 * 1000),

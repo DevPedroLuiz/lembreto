@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AlertTriangle,
   ArrowDownAZ,
   ArrowUpDown,
   CalendarDays,
@@ -890,6 +891,70 @@ export function TasksPage({
     search.trim().length > 0,
   ].filter(Boolean).length;
   const showFiltersForCurrentView = activeView === 'agenda' || (activeView === 'completed' && showCompleted);
+  const todayOpenCount = pendingTasks.filter((task) => {
+    if (!task.dueDate) return false;
+    const dueTimestamp = Date.parse(task.dueDate);
+    if (Number.isNaN(dueTimestamp)) return false;
+    return formatDateKey(new Date(dueTimestamp)) === todayKey;
+  }).length;
+  const overdueOpenCount = pendingTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
+  const highPriorityOpenCount = pendingTasks.filter((task) => task.priority === 'high').length;
+  const quickTriageCards = [
+    {
+      label: 'Hoje',
+      count: todayOpenCount,
+      description: 'Foco imediato',
+      icon: <CalendarDays size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        handleStatusFilterChange('all');
+        handlePriorityFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        updateDateFilter('day', todayKey, '');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Atrasados',
+      count: overdueOpenCount,
+      description: 'Recuperar prazo',
+      icon: <AlertTriangle size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        handleStatusFilterChange('overdue');
+        handlePriorityFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        updateDateFilter('all', todayKey, '');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Alta prioridade',
+      count: highPriorityOpenCount,
+      description: 'Decidir primeiro',
+      icon: <Flag size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        handlePriorityFilterChange('high');
+        handleStatusFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Rascunhos',
+      count: drafts.length,
+      description: 'Revisar ideias',
+      icon: <FileText size={16} />,
+      onClick: () => {
+        onActiveViewChange('drafts');
+        setFiltersOpen(false);
+      },
+    },
+  ];
   const pageTabs = React.useMemo<Array<{
     value: TasksPageView;
     label: string;
@@ -1390,6 +1455,34 @@ export function TasksPage({
                 </button>
               );
             })}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {quickTriageCards.map((card) => (
+              <button
+                key={card.label}
+                type="button"
+                onClick={card.onClick}
+                className="flex min-h-[74px] items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/78 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-400/20 dark:hover:bg-blue-500/10"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="icon-slot h-10 w-10 rounded-2xl bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+                    {card.icon}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-950 dark:text-white">
+                      {card.label}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                      {card.description}
+                    </span>
+                  </span>
+                </span>
+                <span className="inline-flex min-w-9 items-center justify-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 dark:bg-white/[0.07] dark:text-slate-200">
+                  {card.count}
+                </span>
+              </button>
+            ))}
           </div>
 
           {showFiltersForCurrentView && (

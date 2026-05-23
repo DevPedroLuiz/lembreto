@@ -145,7 +145,21 @@ function normalizeNotificationPayload(payload) {
 }
 
 function buildNotificationActionPath(action, data, fallbackPath) {
-  if (!action || !data || typeof data.taskId !== 'string') return fallbackPath;
+  if (!action || !data) return fallbackPath;
+
+  if (action === 'alarm_snooze_10') {
+    if (typeof data.taskId !== 'string' || typeof data.scheduleId !== 'string') return fallbackPath;
+
+    const params = new URLSearchParams();
+    params.set('notificationTarget', 'task');
+    params.set('taskId', data.taskId);
+    params.set('notificationAction', 'alarmSnooze');
+    params.set('scheduleId', data.scheduleId);
+    if (typeof data.notificationId === 'string') params.set('notificationId', data.notificationId);
+    return `/?${params.toString()}`;
+  }
+
+  if (typeof data.taskId !== 'string') return fallbackPath;
 
   const presetByAction = {
     overdue_snooze_10: 'tenMinutes',

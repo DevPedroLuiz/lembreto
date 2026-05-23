@@ -112,7 +112,7 @@ export function NotesPage({
               <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{fixedCount}</p>
             </div>
             <div className="surface-soft p-4">
-              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Notas temporarias</p>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Notas temporárias</p>
               <p className="mt-2 text-3xl font-semibold text-slate-950 dark:text-white">{temporaryCount}</p>
             </div>
           </div>

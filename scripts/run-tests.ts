@@ -22,6 +22,7 @@ import {
   updateTaskSchema,
 } from '../lib/schemas.js';
 import {
+  buildOverdueExpiresAt,
   buildOverdueScheduleOffsets,
   getOverdueReminderSequence,
 } from '../lib/overdue-reminders.js';
@@ -420,6 +421,9 @@ function createTaskSideEffectsSqlMock(options?: {
     title: 'Teste side effect',
     description: '',
     dueDate: dueDate.toISOString(),
+    endDate: dueDate.toISOString(),
+    priority: 'medium',
+    category: 'Geral',
     status: 'pending',
     createdAt: new Date(now.getTime() - 60_000).toISOString(),
     alarmEnabled: Boolean(options?.alarmEnabled),
@@ -1522,6 +1526,78 @@ async function main() {
     assert.equal(getOverdueReminderSequence(29, 'gentle'), null);
     assert.equal(getOverdueReminderSequence(30, 'gentle')?.sequenceIndex, 0);
     assert.equal(getOverdueReminderSequence(500, 'silent'), null);
+
+    const cappedSequence = getOverdueReminderSequence(5 * 24 * 60, 'normal');
+    const uncappedSequence = getOverdueReminderSequence(5 * 24 * 60, 'normal', Number.POSITIVE_INFINITY);
+    assert.ok(cappedSequence);
+    assert.ok(uncappedSequence);
+    assert.ok(uncappedSequence.sequenceIndex > cappedSequence.sequenceIndex);
+  });
+
+  await run('offline due notification is exact even when alarm is enabled', () => {
+    const appSource = readFileSync('src/App.tsx', 'utf8');
+
+    assert.ok(appSource.includes('millisecondsSinceDue < 0 || millisecondsSinceDue >= 60_000'));
+    assert.ok(appSource.includes('const timedActiveTasks = useMemo'));
+    assert.equal(appSource.includes('if (!task.alarmEnabled && minutesUntil === 0)'), false);
+  });
+
+  await run('alarm lifecycle and push actions are actionable', () => {
+    const appSource = readFileSync('src/App.tsx', 'utf8');
+    const scheduleSource = readFileSync('lib/notification-schedules.ts', 'utf8');
+    const serviceWorkerSource = readFileSync('public/push-sw.js', 'utf8');
+
+    assert.ok(appSource.includes('if (!activeAlarm) return;'));
+    assert.ok(appSource.includes('alarmAutoCloseTimerRef.current = window.setTimeout'));
+    assert.ok(appSource.includes("notificationAction === 'alarmSnooze'"));
+    assert.ok(scheduleSource.includes("action: 'alarm_snooze_10'"));
+    assert.ok(serviceWorkerSource.includes("action === 'alarm_snooze_10'"));
+  });
+
+  await run('silent overdue reminders do not re-enter overdue cron backlog', () => {
+    const scheduleSource = readFileSync('lib/notification-schedules.ts', 'utf8');
+    const notificationHandlerSource = readFileSync('lib/handlers/notifications.ts', 'utf8');
+
+    assert.ok(scheduleSource.includes("COALESCE(tasks.overdue_reminder_intensity, 'normal') <> 'silent'"));
+    assert.ok(notificationHandlerSource.includes("COALESCE(overdue_reminder_intensity, 'normal') <> 'silent'"));
+  });
+
+  await run('overdue expiration adapts by reminder context', () => {
+    const dueDate = new Date('2026-05-15T12:00:00.000Z');
+    const endDate = new Date('2026-05-15T13:00:00.000Z');
+
+    assert.equal(
+      buildOverdueExpiresAt(dueDate, {
+        endDate,
+        priority: 'medium',
+        category: 'Geral',
+      })?.toISOString(),
+      '2026-05-16T12:00:00.000Z',
+    );
+    assert.equal(
+      buildOverdueExpiresAt(dueDate, {
+        endDate,
+        priority: 'high',
+        category: 'Geral',
+      })?.toISOString(),
+      '2026-05-18T12:00:00.000Z',
+    );
+    assert.equal(
+      buildOverdueExpiresAt(dueDate, {
+        endDate,
+        priority: 'medium',
+        category: 'Trabalho',
+      })?.toISOString(),
+      '2026-05-18T12:00:00.000Z',
+    );
+    assert.equal(
+      buildOverdueExpiresAt(dueDate, {
+        endDate: null,
+        priority: 'medium',
+        category: 'Geral',
+      }),
+      null,
+    );
   });
 
   await run('calendar export builds Google/Outlook compatible ICS', () => {
@@ -1913,7 +1989,7 @@ async function main() {
     )));
   });
 
-  await run('side effect sync creates alarm schedule when alarm is enabled', async () => {
+  await run('side effect sync keeps exact notification when alarm is enabled', async () => {
     const { sql, schedules, task } = createTaskSideEffectsSqlMock({
       alarmEnabled: true,
       dueMinutesFromNow: 5,
@@ -1927,11 +2003,11 @@ async function main() {
       schedule.kind === 'alarm' &&
       schedule.status === 'pending'
     )));
-    assert.equal(schedules.some((schedule) => (
+    assert.ok(schedules.some((schedule) => (
       schedule.taskId === task.id &&
       schedule.kind === 'notification' &&
       schedule.notifyAt === task.dueDate
-    )), false);
+    )));
   });
 
   await run('side effect sync creates pre notice when there is enough time', async () => {

@@ -17,10 +17,11 @@ import {
   sendPushPayloadToUser,
 } from './notifications.js';
 import {
-  OVERDUE_LIFETIME_HOURS,
+  buildOverdueExpiresAt,
   buildOverdueScheduleTimes,
   formatOverdueDuration,
   getOverdueIntervalMinutes,
+  getOverdueReminderSequenceAtIndex,
 } from './overdue-reminders.js';
 
 const PRE_NOTICE_MINUTES = 15;
@@ -46,6 +47,9 @@ interface TaskForScheduling {
   title: string;
   description: string;
   dueDate: string | null;
+  endDate: string | null;
+  priority: string;
+  category: string;
   status: string;
   createdAt: string;
   alarmEnabled: boolean;
@@ -148,6 +152,9 @@ function mapTask(row: Record<string, unknown>): TaskForScheduling {
     title: String(row.title ?? ''),
     description: String(row.description ?? ''),
     dueDate: toIso(row.dueDate),
+    endDate: toIso(row.endDate),
+    priority: String(row.priority ?? 'medium'),
+    category: String(row.category ?? ''),
     status: String(row.status ?? 'pending'),
     createdAt: toIso(row.createdAt) ?? new Date().toISOString(),
     alarmEnabled: Boolean(row.alarmEnabled),
@@ -403,6 +410,9 @@ async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: st
       tasks.title,
       tasks.description,
       tasks.due_date AS "dueDate",
+      tasks.end_date AS "endDate",
+      tasks.priority,
+      tasks.category,
       tasks.status,
       tasks.created_at AS "createdAt",
       tasks.alarm_enabled AS "alarmEnabled",
@@ -552,28 +562,36 @@ async function scheduleTimedTask(
   }
 
   if (dueDate >= now) {
-    const kind: NotificationScheduleKind = task.alarmEnabled ? 'alarm' : 'notification';
-    const adjusted = applyScheduleSuppression(task, kind, dueDate);
-    if (kind === 'alarm' || adjusted.action === 'send') {
+    const notification = applyScheduleSuppression(task, 'notification', dueDate);
+    if (notification.action === 'send') {
       const inserted = await insertSchedule(sql, task, {
-        kind,
-        notifyAt: adjusted.notifyAt,
-        title: kind === 'alarm' ? 'Alarme' : 'Está na hora',
-        message: kind === 'alarm'
-          ? `"${task.title}"`
-          : `"${task.title}" chegou ao horário definido.`,
-        tone: kind === 'alarm' ? 'warning' : 'info',
+        kind: 'notification',
+        notifyAt: notification.notifyAt,
+        title: 'Está na hora',
+        message: `"${task.title}" chegou ao horário definido.`,
+        tone: 'info',
       });
       if (inserted) created += 1;
-    } else if (adjusted.holiday) {
+    } else if (notification.holiday) {
       logInfo('notification_schedule_holiday_cancelled', {
         userId: task.userId,
         taskId: task.id,
-        kind,
+        kind: 'notification',
         notifyAt: dueDate.toISOString(),
-        holidayName: adjusted.holiday.name,
-        holidayScope: adjusted.holiday.scope,
+        holidayName: notification.holiday.name,
+        holidayScope: notification.holiday.scope,
       });
+    }
+
+    if (task.alarmEnabled) {
+      const inserted = await insertSchedule(sql, task, {
+        kind: 'alarm',
+        notifyAt: dueDate,
+        title: 'Alarme',
+        message: `"${task.title}"`,
+        tone: 'warning',
+      });
+      if (inserted) created += 1;
     }
     return created;
   }
@@ -696,7 +714,7 @@ export async function scheduleOverdueRemindersForTask(
   const dueDate = new Date(task.dueDate);
   const overdueExpiresAt = task.overdueExpiresAt
     ? new Date(task.overdueExpiresAt)
-    : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
+    : buildOverdueExpiresAt(dueDate, task);
   const times = buildOverdueScheduleTimes(dueDate, overdueExpiresAt, task.overdueReminderIntensity);
   const maxSchedules = options.maxSchedules ?? Number.POSITIVE_INFINITY;
   let created = 0;
@@ -726,7 +744,7 @@ export async function scheduleOverdueRemindersForTask(
   for (const item of times) {
     if (created >= maxSchedules) break;
     const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
-    if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt) continue;
+    if (adjusted.action === 'cancel' || (overdueExpiresAt && adjusted.notifyAt > overdueExpiresAt)) continue;
     if (options.notBefore && adjusted.notifyAt < options.notBefore) {
       catchUpReminder = {
         notifyAt: options.notBefore,
@@ -754,7 +772,7 @@ export async function scheduleOverdueRemindersForTask(
     if (inserted) created += 1;
   }
 
-  if (created === 0 && catchUpReminder && catchUpReminder.notifyAt <= overdueExpiresAt) {
+  if (created === 0 && catchUpReminder && (!overdueExpiresAt || catchUpReminder.notifyAt <= overdueExpiresAt)) {
     const inserted = await insertOverdueReminder(catchUpReminder);
     if (inserted) created += 1;
   }
@@ -769,7 +787,7 @@ async function markTaskOverdueAndSchedule(
   options: { maxOverdueSchedules?: number; overdueNotBefore?: Date } = {},
 ) {
   if (task.reminderMode === 'floating' || !isSchedulableStatus(task.status)) return 0;
-  const overdueExpiresAt = addHours(dueDate, OVERDUE_LIFETIME_HOURS);
+  const overdueExpiresAt = buildOverdueExpiresAt(dueDate, task);
   await sql`
     UPDATE tasks
     SET
@@ -786,7 +804,7 @@ async function markTaskOverdueAndSchedule(
     ...task,
     status: 'overdue',
     overdueSince: dueDate.toISOString(),
-    overdueExpiresAt: overdueExpiresAt.toISOString(),
+    overdueExpiresAt: overdueExpiresAt?.toISOString() ?? null,
   }, {
     maxSchedules: options.maxOverdueSchedules,
     notBefore: options.overdueNotBefore,
@@ -806,6 +824,9 @@ async function detectAndScheduleOverdueTasks(
       tasks.title,
       tasks.description,
       tasks.due_date AS "dueDate",
+      tasks.end_date AS "endDate",
+      tasks.priority,
+      tasks.category,
       tasks.status,
       tasks.created_at AS "createdAt",
       tasks.alarm_enabled AS "alarmEnabled",
@@ -828,7 +849,8 @@ async function detectAndScheduleOverdueTasks(
         tasks.status = 'pending'
         OR (
           tasks.status = 'overdue'
-          AND COALESCE(tasks.overdue_expires_at, tasks.due_date + INTERVAL '72 hours') > NOW()
+          AND COALESCE(tasks.overdue_reminder_intensity, 'normal') <> 'silent'
+          AND (tasks.overdue_expires_at IS NULL OR tasks.overdue_expires_at > NOW())
           AND NOT EXISTS (
             SELECT 1
             FROM notification_schedules existing_overdue
@@ -1180,15 +1202,21 @@ async function scheduleNextOverdueReminder(sql: SqlClient, schedule: ScheduleRow
   const dueDate = new Date(task.dueDate);
   const overdueExpiresAt = task.overdueExpiresAt
     ? new Date(task.overdueExpiresAt)
-    : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
+    : buildOverdueExpiresAt(dueDate, task);
   const currentSequenceIndex = schedule.sequenceIndex ?? -1;
   const now = new Date();
 
-  for (const item of buildOverdueScheduleTimes(dueDate, overdueExpiresAt, task.overdueReminderIntensity)) {
-    if (item.sequenceIndex <= currentSequenceIndex) continue;
+  for (let offset = 1; offset <= 100; offset += 1) {
+    const item = getOverdueReminderSequenceAtIndex(
+      currentSequenceIndex + offset,
+      task.overdueReminderIntensity,
+    );
+    if (!item) return false;
+    const notifyAt = new Date(dueDate.getTime() + item.thresholdMinutes * 60 * 1000);
+    if (overdueExpiresAt && notifyAt > overdueExpiresAt) return false;
 
-    const adjusted = applyScheduleSuppression(task, 'overdue_reminder', item.notifyAt);
-    if (adjusted.action === 'cancel' || adjusted.notifyAt > overdueExpiresAt || adjusted.notifyAt < now) continue;
+    const adjusted = applyScheduleSuppression(task, 'overdue_reminder', notifyAt);
+    if (adjusted.action === 'cancel' || (overdueExpiresAt && adjusted.notifyAt > overdueExpiresAt) || adjusted.notifyAt < now) continue;
 
     const minutesOverdue = Math.max(0, Math.floor((adjusted.notifyAt.getTime() - dueDate.getTime()) / 60000));
     const inserted = await insertSchedule(sql, task, {
@@ -1251,6 +1279,9 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
     tag: schedule.dedupeKey,
     icon: '/icon.png',
     badge: '/icon.png',
+    actions: [
+      { action: 'alarm_snooze_10', title: 'Adiar 10 min' },
+    ],
     data: {
       id: result.notification.id,
       notificationId: result.notification.id,
@@ -1718,6 +1749,9 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
     title: String(row.taskTitle ?? ''),
     description: '',
     dueDate: null,
+    endDate: null,
+    priority: 'medium',
+    category: '',
     status: 'pending',
     createdAt: new Date().toISOString(),
     alarmEnabled: true,

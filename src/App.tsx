@@ -45,7 +45,7 @@ import {
 } from './lib/taskDueDate';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from './lib/taskStatus';
 import {
-  OVERDUE_LIFETIME_HOURS,
+  buildOverdueExpiresAt,
   formatOverdueDuration,
   getOverdueReminderSequence,
 } from '../lib/overdue-reminders';
@@ -95,7 +95,7 @@ const TaskDrawer = lazy(() => import('./components/TaskDrawer').then((module) =>
 function PageChunkFallback() {
   return (
     <div className="surface-panel flex min-h-[320px] items-center justify-center p-8 text-sm font-medium text-slate-500 dark:text-slate-400">
-      Carregando area...
+      Carregando área...
     </div>
   );
 }
@@ -126,6 +126,15 @@ type EmitNotificationOptions = {
 };
 
 type LocalNotificationOptions = Pick<EmitNotificationOptions, 'skipToast' | 'target' | 'dedupeKey'>;
+type LocalNotificationAction = {
+  action: string;
+  title: string;
+};
+
+type LocalDesktopNotificationOptions = LocalNotificationOptions & {
+  kind?: AppNotification['kind'];
+  actions?: LocalNotificationAction[];
+};
 
 type CalendarFeedResponse = {
   feedPath: string;
@@ -966,9 +975,41 @@ export default function App() {
   }, [deleteTag, refreshNotes]);
 
   useEffect(() => {
-    if (!activeAlarm?.scheduleId) return;
+    if (!activeAlarm) return;
+
+    const alarmSnapshot = activeAlarm;
+    const alarmKey = buildAlarmInstanceKey(alarmSnapshot);
     startAlarmSound();
-  }, [activeAlarm?.scheduleId, startAlarmSound]);
+
+    if (alarmAutoCloseTimerRef.current) {
+      window.clearTimeout(alarmAutoCloseTimerRef.current);
+    }
+
+    alarmAutoCloseTimerRef.current = window.setTimeout(() => {
+      alarmDismissedKeysRef.current.add(alarmKey);
+      rememberDismissedAlarmKey(alarmKey);
+      stopAlarmSound();
+      setActiveAlarm((current) => (current === alarmSnapshot ? null : current));
+    }, ALARM_RING_DURATION_MS);
+
+    return () => {
+      if (alarmAutoCloseTimerRef.current) {
+        window.clearTimeout(alarmAutoCloseTimerRef.current);
+        alarmAutoCloseTimerRef.current = null;
+      }
+      stopAlarmTone();
+    };
+  }, [activeAlarm, startAlarmSound, stopAlarmSound, stopAlarmTone]);
+
+  useEffect(() => {
+    if (!activeAlarm?.taskId) return;
+
+    const currentTask = tasks.find((task) => task.id === activeAlarm.taskId);
+    if (!currentTask || currentTask.status === 'completed' || currentTask.status === 'cancelled' || currentTask.status === 'inactive') {
+      stopAlarmSound();
+      setActiveAlarm(null);
+    }
+  }, [activeAlarm?.taskId, stopAlarmSound, tasks]);
 
   const emitNotification = useCallback((
     title: string,
@@ -1024,7 +1065,7 @@ export default function App() {
     title: string,
     message: string,
     _tone: NotificationTone = 'info',
-    options?: LocalNotificationOptions,
+    options?: LocalDesktopNotificationOptions,
   ) => {
     const notificationsAllowed = notificationsOverrideRef.current ?? notificationsEnabled;
     if (!notificationsAllowed) return;
@@ -1048,14 +1089,20 @@ export default function App() {
       return;
     }
 
-    const notificationOptions: NotificationOptions = {
+    const taskId = options?.target?.type === 'task' ? options.target.taskId : undefined;
+    const notificationOptions: NotificationOptions & { actions?: LocalNotificationAction[] } = {
       body: message,
       icon: '/icon.png',
       badge: '/icon.png',
       tag: options?.dedupeKey ? `offline:${options.dedupeKey}` : `offline:${title}:${message}`,
+      actions: options?.actions,
       data: {
         path: buildNotificationNavigationPath(options?.target),
         target: options?.target ?? { type: 'notifications' },
+        kind: options?.kind,
+        type: options?.kind,
+        taskId,
+        dedupeKey: options?.dedupeKey,
         offline: true,
       },
     };
@@ -2649,6 +2696,17 @@ export default function App() {
     ));
   }, [pendingTasks]);
 
+  const timedActiveTasks = useMemo(() => {
+    return tasks.filter((task): task is TaskWithDueDate => (
+      hasTaskDueDate(task) &&
+      Boolean(getTaskTimeLabel(task.dueDate)) &&
+      task.status !== 'completed' &&
+      task.status !== 'draft' &&
+      task.status !== 'inactive' &&
+      task.status !== 'cancelled'
+    ));
+  }, [tasks]);
+
   const shouldSuppressHolidayNotification = useCallback((task: Task) => {
     if (!task.suppressHolidayNotifications) return false;
     if (!hasTaskDueDate(task)) return false;
@@ -2671,11 +2729,18 @@ export default function App() {
       const dueDate = parseISO(task.dueDate);
       const overdueExpiresAt = task.overdueExpiresAt
         ? parseISO(task.overdueExpiresAt)
-        : addHours(dueDate, OVERDUE_LIFETIME_HOURS);
-      if (now > overdueExpiresAt) return;
+        : buildOverdueExpiresAt(dueDate, task);
+      if (overdueExpiresAt && now > overdueExpiresAt) return;
 
       const minutesOverdue = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / 60000));
-      const overdueSequence = getOverdueReminderSequence(minutesOverdue, task.overdueReminderIntensity ?? 'normal');
+      const overdueWindowMinutes = overdueExpiresAt
+        ? Math.max(0, Math.floor((overdueExpiresAt.getTime() - dueDate.getTime()) / 60000))
+        : Number.POSITIVE_INFINITY;
+      const overdueSequence = getOverdueReminderSequence(
+        minutesOverdue,
+        task.overdueReminderIntensity ?? 'normal',
+        overdueWindowMinutes,
+      );
       if (!overdueSequence) return;
 
       emitLocalOfflineNotification(
@@ -2687,10 +2752,41 @@ export default function App() {
         {
           target: { type: 'task', taskId: task.id },
           dedupeKey: `overdue:${task.id}:${overdueSequence.sequenceIndex}`,
+          kind: 'overdue_reminder',
+          actions: [
+            { action: 'overdue_snooze_10', title: '10 min' },
+            { action: 'overdue_snooze_60', title: '1 hora' },
+            { action: 'overdue_snooze_tomorrow', title: 'Amanhã' },
+          ],
         },
       );
     });
   }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, overdueTasks, shouldSuppressHolidayNotification]);
+
+  useEffect(() => {
+    if (isOnline || !notificationsEnabled || timedActiveTasks.length === 0) return;
+
+    const now = new Date(notificationClock);
+
+    timedActiveTasks.forEach((task) => {
+      if (shouldSuppressHolidayNotification(task)) return;
+
+      const dueDate = parseISO(task.dueDate);
+      const millisecondsSinceDue = now.getTime() - dueDate.getTime();
+      if (millisecondsSinceDue < 0 || millisecondsSinceDue >= 60_000) return;
+
+      emitLocalOfflineNotification(
+        'Lembrete para agora',
+        `"${task.title}" chegou ao horário definido.`,
+        'info',
+        {
+          target: { type: 'task', taskId: task.id },
+          dedupeKey: `due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,
+          kind: 'notification',
+        },
+      );
+    });
+  }, [emitLocalOfflineNotification, isOnline, notificationClock, notificationsEnabled, shouldSuppressHolidayNotification, timedActiveTasks]);
 
   useEffect(() => {
     if (isOnline || !notificationsEnabled || timedPendingTasks.length === 0) return;
@@ -2703,32 +2799,20 @@ export default function App() {
       const dueDate = parseISO(task.dueDate);
       const minutesUntil = getMinutesDifference(dueDate, now);
 
-      if (minutesUntil < 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
-
-      if (!task.alarmEnabled && minutesUntil === 0) {
-        emitLocalOfflineNotification(
-          'Lembrete para agora',
-          `"${task.title}" chegou ao horário definido.`,
-          'info',
-          {
-            target: { type: 'task', taskId: task.id },
-            dedupeKey: `due:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}`,
-          },
-        );
-        return;
-      }
+      if (minutesUntil <= 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
 
       emitLocalOfflineNotification(
         task.alarmEnabled
-          ? 'Alarme em 15 minutos'
+          ? `Alarme em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`
           : `Lembrete em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`,
         task.alarmEnabled
-          ? `O alarme do seu lembrete vai tocar em 15 minutos! "${task.title}" está chegando.`
+          ? `O alarme do seu lembrete vai tocar em ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}! "${task.title}" está chegando.`
           : `"${task.title}" está chegando. Falta pouco para o horário definido.`,
         task.alarmEnabled || minutesUntil <= 5 ? 'warning' : 'info',
         {
           target: { type: 'task', taskId: task.id },
           dedupeKey: `${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+          kind: 'pre_notice',
         },
       );
     });
@@ -2760,21 +2844,12 @@ export default function App() {
         dueDate: task.dueDate,
         startedAt: now,
       });
-      startAlarmSound();
-      alarmAutoCloseTimerRef.current = window.setTimeout(() => {
-        alarmDismissedKeysRef.current.add(alarmKey);
-        rememberDismissedAlarmKey(alarmKey);
-        stopAlarmSound();
-        setActiveAlarm(null);
-      }, ALARM_RING_DURATION_MS);
       break;
     }
   }, [
     activeAlarm,
     notificationClock,
     notificationsEnabled,
-    startAlarmSound,
-    stopAlarmSound,
     timedPendingTasks,
   ]);
 
@@ -3012,6 +3087,7 @@ export default function App() {
           const notificationAction = params.get('notificationAction');
           const snoozePreset = params.get('snoozePreset');
           const notificationId = params.get('notificationId');
+          const scheduleId = params.get('scheduleId');
 
           if (
             notificationAction === 'overdueSnooze' &&
@@ -3027,6 +3103,19 @@ export default function App() {
               target: { type: 'task', taskId },
               kind: 'overdue_reminder',
             }, snoozePreset);
+          } else if (notificationAction === 'alarmSnooze' && scheduleId) {
+            void apiPost(
+              `/api/notifications/alarms/${scheduleId}/snooze`,
+              { minutes: ALARM_SNOOZE_MINUTES },
+              auth.token,
+            ).then(() => {
+              triggerToastOnly('Alarme adiado', `Vamos tocar novamente em ${ALARM_SNOOZE_MINUTES} minutos.`);
+              stopAlarmSound();
+              setActiveAlarm(null);
+            }).catch(() => {
+              setActiveTab('tasks');
+              setPendingNotificationTaskId(taskId);
+            });
           } else {
             setActiveTab('tasks');
             setPendingNotificationTaskId(taskId);
@@ -3045,6 +3134,7 @@ export default function App() {
       params.delete('notificationAction');
       params.delete('snoozePreset');
       params.delete('notificationId');
+      params.delete('scheduleId');
     } else {
       return;
     }
@@ -3067,6 +3157,7 @@ export default function App() {
     openProfile,
     openSettings,
     refreshCalendarIntegrations,
+    stopAlarmSound,
     triggerToastOnly,
   ]);
 
@@ -3680,21 +3771,23 @@ export default function App() {
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
             className={cn(
-              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
               activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
             >
-              <Sparkles size={24} />
+              <Sparkles size={22} />
+              <span className="text-[10px] font-semibold leading-none">Painel</span>
             </button>
           <button
             onClick={openCalendarTab}
             aria-label="Abrir calendário"
             className={cn(
-              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
               activeTab === 'calendar' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
             )}
           >
-            <CalendarDays size={24} />
+            <CalendarDays size={22} />
+            <span className="text-[10px] font-semibold leading-none">Agenda</span>
           </button>
           <div className="relative -top-6">
             <button
@@ -3709,11 +3802,12 @@ export default function App() {
             onClick={openTasksTab}
             aria-label="Abrir lista de lembretes"
             className={cn(
-              'relative flex flex-col items-center rounded-2xl p-3 transition-colors',
+              'relative flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
               activeTab === 'tasks' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500'
             )}
           >
-            <ListTodo size={24} />
+            <ListTodo size={22} />
+            <span className="text-[10px] font-semibold leading-none">Tarefas</span>
             {pendingSummary.overdueCount > 0 && (
               <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
                 {Math.min(pendingSummary.overdueCount, 99)}
@@ -3724,11 +3818,12 @@ export default function App() {
             onClick={openNotesTab}
             aria-label="Abrir notas"
             className={cn(
-              'flex flex-col items-center rounded-2xl p-3 transition-colors',
+              'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
               activeTab === 'notes' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
             )}
           >
-            <NotebookPen size={24} />
+            <NotebookPen size={22} />
+            <span className="text-[10px] font-semibold leading-none">Notas</span>
           </button>
         </div>
       </nav>

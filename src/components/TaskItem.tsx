@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Bell,
   BellOff,
+  ChevronRight,
   Check,
   CheckCircle2,
   Circle,
@@ -177,17 +178,8 @@ function TaskItemComponent({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.96 }}
       whileHover={!isBusy ? { y: -2 } : {}}
-      role={!isBusy ? 'button' : undefined}
-      tabIndex={!isBusy ? 0 : -1}
-      aria-label={!isBusy ? `Abrir lembrete ${task.title}` : undefined}
       onClick={() => {
         if (!isBusy) onEdit(task);
-      }}
-      onKeyDown={(event) => {
-        if (isBusy) return;
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        onEdit(task);
       }}
       className={cn(
         'group relative flex items-start gap-3 overflow-hidden rounded-[26px] border p-3 shadow-[0_18px_52px_-38px_rgba(15,23,42,0.55)] backdrop-blur-xl transition-all sm:gap-4 sm:p-4 md:p-5',
@@ -296,12 +288,18 @@ function TaskItemComponent({
                 {task.title}
               </h3>
               {!compact && (
-                <span
-                  aria-hidden="true"
-                  className="icon-slot h-7 w-7 rounded-xl border border-slate-200 bg-white text-slate-400 transition-colors group-hover:border-blue-200 group-hover:text-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:text-blue-300"
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  aria-label={`Abrir detalhes de ${task.title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onEdit(task);
+                  }}
+                  className="icon-slot h-7 w-7 rounded-xl border border-slate-200 bg-white text-slate-400 transition-colors hover:border-blue-200 hover:text-blue-500 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-500 dark:hover:border-blue-400/20 dark:hover:text-blue-300"
                 >
                   <PencilLine size={14} />
-                </span>
+                </button>
               )}
             </div>
             {!compact && task.description && (
@@ -357,7 +355,10 @@ function TaskItemComponent({
               data-testid="task-delete"
               disabled={isBusy}
               aria-label={`Excluir lembrete ${task.title}`}
-              onClick={(event) => onDelete(task.id, event)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(task.id, event);
+              }}
               className={cn(
                 'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-all disabled:cursor-wait md:opacity-0 md:group-hover:opacity-100',
                 isDeleting
@@ -477,6 +478,21 @@ function TaskItemComponent({
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
               Calendário pendente
             </span>
+          )}
+
+          {compact && !isBusy && (
+            <button
+              type="button"
+              aria-label={`Abrir ${task.title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEdit(task);
+              }}
+              className="ml-auto inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:border-blue-400/20 dark:hover:text-blue-300"
+            >
+              Abrir
+              <ChevronRight size={12} />
+            </button>
           )}
         </div>
       </div>

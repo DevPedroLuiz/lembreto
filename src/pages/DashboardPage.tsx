@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  Flag,
   ListTodo,
   Plus,
   Sparkles,
@@ -170,6 +171,20 @@ export function DashboardPage({
   const activeTasks = React.useMemo(() => [...overdueTasks, ...pendingTasks], [overdueTasks, pendingTasks]);
   const sortedPendingTasks = [...activeTasks].sort(compareDashboardTasks);
   const nextTasks = sortedPendingTasks.slice(0, 5);
+  const now = React.useMemo(() => new Date(), []);
+  const next24Hours = React.useMemo(() => new Date(now.getTime() + 24 * 60 * 60 * 1000), [now]);
+  const next24HourCount = pendingTasks.filter((task) => {
+    if (!task.dueDate) return false;
+
+    try {
+      const dueDate = parseISO(task.dueDate);
+      return dueDate >= now && dueDate <= next24Hours;
+    } catch {
+      return false;
+    }
+  }).length;
+  const highPriorityOpenCount = activeTasks.filter((task) => task.priority === 'high').length;
+  const unscheduledOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -346,6 +361,66 @@ export function DashboardPage({
             </span>
           </button>
         </aside>
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          {
+            label: 'Próximas 24h',
+            value: next24HourCount,
+            helper: 'Itens com prazo logo à frente',
+            icon: <Clock3 size={18} />,
+            tone: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
+            onClick: onOpenToday,
+          },
+          {
+            label: 'Alta prioridade',
+            value: highPriorityOpenCount,
+            helper: 'Tarefas que pedem decisão',
+            icon: <Flag size={18} />,
+            tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
+            onClick: onViewAll,
+          },
+          {
+            label: 'Sem prazo',
+            value: unscheduledOpenCount,
+            helper: 'Bom para revisar e datar',
+            icon: <ListTodo size={18} />,
+            tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+            onClick: onViewAll,
+          },
+          {
+            label: 'Ritmo',
+            value: completedPercentage,
+            helper: 'Progresso geral concluído',
+            icon: <CheckCircle2 size={18} />,
+            tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+            onClick: onOpenCompleted,
+            suffix: '%',
+          },
+        ].map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            onClick={item.onClick}
+            className="surface-soft flex min-h-[118px] items-start justify-between gap-4 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]"
+          >
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                {item.label}
+              </p>
+              <p className="mt-2 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                {item.value}{item.suffix ?? ''}
+              </p>
+              <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">
+                {item.helper}
+              </p>
+            </div>
+            <span className={`icon-slot h-10 w-10 rounded-2xl ${item.tone}`}>
+              {item.icon}
+            </span>
+          </button>
+        ))}
       </section>
 
       {assistantTask && (

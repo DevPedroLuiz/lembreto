@@ -922,7 +922,14 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
         AND status IN ('pending', 'overdue')
         AND (
           status = 'pending'
-          OR COALESCE(overdue_expires_at, due_date + INTERVAL '72 hours') > NOW()
+          OR (
+            status = 'overdue'
+            AND COALESCE(overdue_reminder_intensity, 'normal') <> 'silent'
+            AND (
+              overdue_expires_at IS NULL
+              OR overdue_expires_at > NOW()
+            )
+          )
         )
     `,
   );

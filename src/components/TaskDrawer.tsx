@@ -68,11 +68,32 @@ const OVERDUE_INTENSITY_OPTIONS: Array<{
   value: TaskOverdueReminderIntensity;
   label: string;
   description: string;
+  policy: string;
 }> = [
-  { value: 'gentle', label: 'Suave', description: '30 min, 2h e depois 6h.' },
-  { value: 'normal', label: 'Normal', description: '15 min, 30 min, 45 min, 75 min...' },
-  { value: 'insistent', label: 'Insistente', description: '5 min, 15 min, 30 min, 1h...' },
-  { value: 'silent', label: 'Silencioso', description: 'Sem alertas de atraso; aparece apenas no app.' },
+  {
+    value: 'gentle',
+    label: 'Suave',
+    description: 'Menos interrupções para lembretes de baixa urgência.',
+    policy: 'Após atrasar: 30 min, 2h, depois no máximo a cada 6h.',
+  },
+  {
+    value: 'normal',
+    label: 'Normal',
+    description: 'Equilíbrio entre lembrar e não incomodar.',
+    policy: 'Após atrasar: 15 min, 30 min, 45 min, depois espaça gradualmente.',
+  },
+  {
+    value: 'insistent',
+    label: 'Insistente',
+    description: 'Mais atenção para itens que não podem escapar.',
+    policy: 'Após atrasar: 5 min, 15 min, 30 min, 1h, depois espaça gradualmente.',
+  },
+  {
+    value: 'silent',
+    label: 'Silencioso',
+    description: 'Sem alertas de atraso; aparece apenas no app.',
+    policy: 'Após atrasar: não envia novas notificações, apenas marca como atrasado no app.',
+  },
 ];
 
 type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
@@ -350,6 +371,8 @@ export function TaskDrawer({
     ? `${time} - ${endTime}`
     : hasStart ? time : 'Sem início';
   const summaryPriority = PRIORITY_LABELS[priority];
+  const selectedOverdueIntensityOption = OVERDUE_INTENSITY_OPTIONS.find((option) => option.value === overdueReminderIntensity)
+    ?? OVERDUE_INTENSITY_OPTIONS[1];
   const availableTagSuggestions = React.useMemo(
     () => tagOptions.filter((item) => (
       !tags.some((tag) => normalizeSearchValue(tag) === normalizeSearchValue(item))
@@ -1047,9 +1070,10 @@ export function TaskDrawer({
                               </option>
                             ))}
                           </select>
-                          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                            {OVERDUE_INTENSITY_OPTIONS.find((option) => option.value === overdueReminderIntensity)?.description}
-                          </p>
+                          <div className="mt-3 border-l-2 border-blue-300 pl-3 text-sm leading-6 dark:border-blue-400/60">
+                            <p className="font-semibold text-slate-800 dark:text-slate-100">{selectedOverdueIntensityOption.policy}</p>
+                            <p className="mt-1 text-slate-500 dark:text-slate-400">{selectedOverdueIntensityOption.description}</p>
+                          </div>
                         </div>
                       </div>
                     </section>
