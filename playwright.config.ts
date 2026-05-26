@@ -1,10 +1,20 @@
 import { defineConfig } from '@playwright/test';
+import webpush from 'web-push';
 import { configureE2EDatabaseEnv } from './e2e/support/e2e-env';
 
 configureE2EDatabaseEnv();
 
 process.env.VITE_DISABLE_RECAPTCHA = 'true';
 process.env.RECAPTCHA_SKIP_VERIFY = 'true';
+process.env.CRON_SECRET ||= 'e2e-cron-secret-with-enough-entropy';
+
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  const vapidKeys = webpush.generateVAPIDKeys();
+  process.env.VAPID_PUBLIC_KEY = vapidKeys.publicKey;
+  process.env.VAPID_PRIVATE_KEY = vapidKeys.privateKey;
+}
+
+process.env.VAPID_SUBJECT ||= 'mailto:e2e@example.com';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;

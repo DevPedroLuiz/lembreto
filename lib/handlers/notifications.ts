@@ -9,6 +9,9 @@ import {
   getPushPublicKey,
   isPushConfigured,
   listNotificationsForUser,
+  NotificationCursorError,
+  type ListNotificationsOptions,
+  type NotificationListFilters,
   markAllNotificationsRead,
   markNotificationReadState,
   NotificationReferenceUnavailableError,
@@ -17,6 +20,7 @@ import {
 } from '../notifications.js';
 import {
   backfillMissingNotificationSchedules,
+  cancelPendingNotificationSchedulesForUser,
   detectOverdueNotificationSchedules,
   dismissAlarmSchedule,
   processDueNotificationSchedules,
@@ -42,7 +46,9 @@ import {
 } from '../schemas.js';
 import {
   NOTIFICATION_SCHEDULE_KINDS,
+  NOTIFICATION_TONES,
   type NotificationScheduleKind,
+  type NotificationTone,
 } from '../contracts.js';
 import {
   empty,
@@ -58,6 +64,7 @@ const CALENDAR_SYNC_DURATION_MS = 3000;
 const MAX_CRON_RESPONSE_MS = 20000;
 const DUE_SCHEDULE_LIMIT = 5;
 const DUE_SCHEDULE_DURATION_MS = 8000;
+const DUE_SCHEDULE_RECLAIM_LIMIT = 2;
 const SIDE_EFFECT_LIMIT = 3;
 const BACKFILL_LIMIT = 3;
 const BACKFILL_DURATION_MS = 3000;
@@ -98,6 +105,7 @@ type CronDbHealth = {
     taskSideEffectsDueByKindMs: number | null;
     schedulesPendingMs: number | null;
     schedulesDueMs: number | null;
+    schedulesProcessingMs: number | null;
     tasksPendingMs: number | null;
     overdueCandidatesMs: number | null;
   };
@@ -109,6 +117,8 @@ type CronDbHealth = {
     schedulesPending: number | null;
     schedulesDue: number | null;
     schedulesDueByKind: ScheduleKindCounts;
+    schedulesProcessing: number | null;
+    schedulesStuckProcessing: number | null;
     tasksPending: number | null;
     overdueCandidates: number | null;
   };
@@ -366,6 +376,82 @@ function resolveNotificationId(context: HandlerContext): string | null {
   return null;
 }
 
+function firstQueryValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return undefined;
+}
+
+function normalizeDateQueryValue(value: unknown, endOfDay = false): string | null | undefined {
+  const raw = firstQueryValue(value);
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`)
+    : new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function parseNotificationFilters(source: Record<string, unknown>): NotificationListFilters | { error: string } {
+  const filters: NotificationListFilters = {};
+  const search = firstQueryValue(source.search)?.trim();
+  if (search) filters.search = search.slice(0, 120);
+
+  const read = typeof source.read === 'boolean'
+    ? (source.read ? 'true' : 'false')
+    : firstQueryValue(source.read);
+  if (read === 'true' || read === 'read') filters.read = true;
+  else if (read === 'false' || read === 'unread') filters.read = false;
+  else if (read && read !== 'all') return { error: 'Filtro de leitura invÃ¡lido.' };
+
+  const tone = firstQueryValue(source.tone);
+  if (tone && tone !== 'all') {
+    if (!NOTIFICATION_TONES.includes(tone as NotificationTone)) return { error: 'Tipo de notificaÃ§Ã£o invÃ¡lido.' };
+    filters.tone = tone as NotificationTone;
+  }
+
+  const kind = firstQueryValue(source.kind);
+  if (kind && kind !== 'all') {
+    if (!NOTIFICATION_SCHEDULE_KINDS.includes(kind as NotificationScheduleKind)) return { error: 'Origem de notificaÃ§Ã£o invÃ¡lida.' };
+    filters.kind = kind as NotificationScheduleKind;
+  }
+
+  const createdFrom = normalizeDateQueryValue(source.createdFrom ?? source.from);
+  if (createdFrom === null) return { error: 'Data inicial invÃ¡lida.' };
+  if (createdFrom) filters.createdFrom = createdFrom;
+
+  const createdTo = normalizeDateQueryValue(source.createdTo ?? source.to ?? source.before, true);
+  if (createdTo === null) return { error: 'Data final invÃ¡lida.' };
+  if (createdTo) filters.createdTo = createdTo;
+
+  return filters;
+}
+
+function parseNotificationListOptions(query: Record<string, unknown> | undefined): ListNotificationsOptions | { error: string } {
+  const source = query ?? {};
+  const filters = parseNotificationFilters(source);
+  if ('error' in filters) return filters;
+  const limitRaw = firstQueryValue(source.limit);
+  const limit = limitRaw ? Number(limitRaw) : 50;
+  if (limitRaw && (!Number.isFinite(limit) || limit <= 0)) return { error: 'Limite de notificaÃ§Ãµes invÃ¡lido.' };
+
+  return {
+    ...filters,
+    cursor: firstQueryValue(source.cursor) ?? null,
+    limit,
+  };
+}
+
+function parseNotificationDeleteFilters(request: HandlerContext['request']): NotificationListFilters | { error: string } {
+  const body = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+    ? request.body as Record<string, unknown>
+    : {};
+  return parseNotificationFilters({
+    ...(request.query ?? {}),
+    ...body,
+  });
+}
+
 export async function handleNotificationsCollection(context: HandlerContext): Promise<HandlerResult> {
   const auth = await requireNotificationAuth(context);
   if ('status' in auth) return auth;
@@ -374,18 +460,26 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
   const { request, sql } = context;
 
   if (request.method === 'GET') {
+    const options = parseNotificationListOptions(request.query);
+    if ('error' in options) return json(400, { error: options.error });
+
     try {
-      const [notifications, enabled] = await Promise.all([
-        listNotificationsForUser(sql, user.id),
+      const [page, enabled] = await Promise.all([
+        listNotificationsForUser(sql, user.id, options),
         getNotificationsEnabled(sql, user.id),
       ]);
       return json(200, {
-        notifications,
+        notifications: page.notifications,
+        pageInfo: page.pageInfo,
         enabled,
         pushConfigured: isPushConfigured(),
         pushPublicKey: getPushPublicKey(),
       });
     } catch (error) {
+      if (error instanceof NotificationCursorError) {
+        return json(400, { error: 'Cursor de notificações inválido.' });
+      }
+
       logError('notifications_list_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao buscar notificações' });
     }
@@ -422,9 +516,12 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
   }
 
   if (request.method === 'DELETE') {
+    const filters = parseNotificationDeleteFilters(request);
+    if ('error' in filters) return json(400, { error: filters.error });
+
     try {
-      const deletedCount = await clearNotificationsForUser(sql, user.id);
-      logInfo('notifications_cleared', getRequestMeta(request, { userId: user.id, deletedCount }));
+      const deletedCount = await clearNotificationsForUser(sql, user.id, filters);
+      logInfo('notifications_cleared', getRequestMeta(request, { userId: user.id, deletedCount, filters }));
       return json(200, { deletedCount });
     } catch (error) {
       logError('notifications_clear_failed', error, getRequestMeta(request, { userId: user.id }));
@@ -473,7 +570,7 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       );
       addScheduleSummaries(schedules, postSideEffectSchedules);
     }
-    const [notifications, enabled] = await Promise.all([
+    const [page, enabled] = await Promise.all([
       listNotificationsForUser(sql, user.id),
       getNotificationsEnabled(sql, user.id),
     ]);
@@ -493,7 +590,8 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       ok: true,
       schedules,
       sideEffects,
-      notifications,
+      notifications: page.notifications,
+      pageInfo: page.pageInfo,
       enabled,
       pushConfigured: isPushConfigured(),
       pushPublicKey: getPushPublicKey(),
@@ -585,6 +683,16 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
 
     try {
       await setNotificationsEnabled(sql, user.id, parsed.data.enabled);
+      if (!parsed.data.enabled) {
+        try {
+          await cancelPendingNotificationSchedulesForUser(sql, user.id, {
+            reason: 'notifications_disabled',
+            caller: 'handleNotificationSettings',
+          });
+        } catch (error) {
+          logError('notification_settings_cancel_schedules_failed', error, getRequestMeta(request, { userId: user.id }));
+        }
+      }
       logInfo('notification_settings_updated', getRequestMeta(request, { userId: user.id, enabled: parsed.data.enabled }));
       return json(200, { enabled: parsed.data.enabled });
     } catch (error) {
@@ -744,6 +852,8 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     schedulesPending: null,
     schedulesDue: null,
     schedulesDueByKind: emptyScheduleKindCounts(),
+    schedulesProcessing: null,
+    schedulesStuckProcessing: null,
     tasksPending: null,
     overdueCandidates: null,
   };
@@ -755,6 +865,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     taskSideEffectsDueByKindMs: null,
     schedulesPendingMs: null,
     schedulesDueMs: null,
+    schedulesProcessingMs: null,
     tasksPendingMs: null,
     overdueCandidatesMs: null,
   };
@@ -772,6 +883,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     steps.schedulesPending = skippedStep();
     steps.schedulesDue = skippedStep();
     steps.schedulesDueByKind = skippedStep();
+    steps.schedulesProcessing = skippedStep();
     steps.tasksPending = skippedStep();
     steps.overdueCandidates = skippedStep();
     return {
@@ -897,6 +1009,23 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     );
   }
 
+  const schedulesProcessing = await measureQuery(
+    'notification_schedules_processing',
+    () => sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'processing') AS "processingCount",
+        COUNT(*) FILTER (
+          WHERE status = 'processing'
+            AND processing_started_at < NOW() - INTERVAL '10 minutes'
+        ) AS "stuckProcessingCount"
+      FROM notification_schedules
+    `,
+  );
+  steps.schedulesProcessing = schedulesProcessing.step;
+  db.schedulesProcessingMs = schedulesProcessing.step.durationMs;
+  counts.schedulesProcessing = schedulesProcessing.step.ok ? toCount(schedulesProcessing.rows[0]?.processingCount) : null;
+  counts.schedulesStuckProcessing = schedulesProcessing.step.ok ? toCount(schedulesProcessing.rows[0]?.stuckProcessingCount) : null;
+
   const tasksPending = await measureQuery(
     'tasks_pending',
     () => sql`
@@ -1003,7 +1132,7 @@ function buildPreliminaryScheduleDiagnostics(dbHealth: CronDbHealth): ScheduleDi
     futurePendingCount: Math.max(0, pending - due),
     pendingByKind: emptyScheduleKindCounts(),
     dueByKind: dbHealth.counts.schedulesDueByKind,
-    processingCount: 0,
+    processingCount: dbHealth.counts.schedulesProcessing ?? 0,
     failedCount: 0,
     cancelledCount: 0,
   };
@@ -1261,13 +1390,15 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
     }
 
     const hasDueSchedules = preliminaryScheduleDiagnostics.duePendingCount > 0;
+    const hasStuckProcessingSchedules = (dbHealth.counts.schedulesStuckProcessing ?? 0) > 0;
+    const shouldProcessSchedules = hasDueSchedules || hasStuckProcessingSchedules;
     const scheduleBudgetMs = remainingBudgetMs(deadline, DUE_SCHEDULE_DURATION_MS);
-    const result = hasDueSchedules
+    const result = shouldProcessSchedules
       ? await withTimeout(
           processDueNotificationSchedules(sql, DUE_SCHEDULE_LIMIT, scheduleBudgetMs, {
             ensureInfrastructure: false,
             precomputedDiagnostics: preliminaryScheduleDiagnostics,
-            reclaimStuckProcessing: false,
+            reclaimStuckProcessingLimit: DUE_SCHEDULE_RECLAIM_LIMIT,
           }),
           scheduleBudgetMs,
           fallbackSchedules(scheduleBudgetMs),
@@ -1293,7 +1424,7 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
           scheduleDiagnostics: preliminaryScheduleDiagnostics,
           schedulesByKindProcessed: emptyScheduleKindCounts(),
         };
-    if (!hasDueSchedules) {
+    if (!shouldProcessSchedules) {
       logInfo('cron_notifications_schedules_skipped_no_due', getRequestMeta(request, {
         scheduleDiagnostics: preliminaryScheduleDiagnostics,
       }));

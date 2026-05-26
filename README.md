@@ -42,6 +42,9 @@ VITE_RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
 RECAPTCHA_SITE_KEY=sua_chave_do_site_recaptcha_v2
 RECAPTCHA_SECRET_KEY=sua_chave_secreta_recaptcha_v2
 CRON_SECRET=uma_segunda_chave_longa_para_rotas_agendadas
+VAPID_PUBLIC_KEY=sua_chave_publica_vapid
+VAPID_PRIVATE_KEY=sua_chave_privada_vapid
+VAPID_SUBJECT=mailto:seu-email@example.com
 ```
 
 Notas:
@@ -58,6 +61,8 @@ Notas:
 - `CALENDAR_TOKEN_ENCRYPTION_KEY` é opcional, mas recomendada em produção; se ausente, o app deriva a chave de criptografia a partir de `JWT_SECRET`.
 - `VITE_RECAPTCHA_SITE_KEY` e `RECAPTCHA_SECRET_KEY` habilitam o reCAPTCHA v2 checkbox no login, cadastro e recuperação de senha. Em produção, `RECAPTCHA_SITE_KEY` pode ser usada como fallback runtime pela rota `/api/auth/config`.
 - `CRON_SECRET` protege as rotas internas chamadas por agendadores externos.
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` habilitam push notifications via Web Push. Sem essas variáveis, a central ainda registra notificações, mas o envio push para dispositivos fica desativado.
+- Gere o par VAPID com `npx web-push generate-vapid-keys`; mantenha `VAPID_PRIVATE_KEY` somente no backend/Vercel e use um `VAPID_SUBJECT` de contato válido, como `mailto:suporte@seudominio.com`.
 - Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no frontend; o app usa somente `DATABASE_URL` no backend.
 - Para E2E, use `.env.e2e` com `DATABASE_URL_TEST`; o Playwright e os helpers recusam hosts que nao parecam ser de teste.
 

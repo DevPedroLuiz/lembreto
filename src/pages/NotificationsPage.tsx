@@ -1,16 +1,22 @@
 import React from 'react';
-import { BellRing, CheckCheck, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { BellRing, CalendarDays, CheckCheck, Loader2, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { NotificationFeed } from '../components/NotificationFeed';
+import type { NotificationListQuery, NotificationPageInfo } from '../hooks/useNotifications';
 import type { AppNotification, OverdueNotificationSnoozePreset } from '../types';
 
 type NotificationVisibility = 'all' | 'unread' | 'read';
 type NotificationToneFilter = 'all' | AppNotification['tone'];
+type NotificationKindFilter = 'all' | NonNullable<AppNotification['kind']>;
 
 interface NotificationsPageProps {
   notifications: AppNotification[];
+  pageInfo: NotificationPageInfo;
+  isLoadingMore: boolean;
   onMarkAllRead: () => void;
-  onClearAll: () => void;
+  onClearAll: (filters?: NotificationListQuery) => void;
+  onFiltersChange: (filters: NotificationListQuery) => void;
+  onLoadMore: () => void;
   onOpenNotification: (notification: AppNotification) => void;
   onSnoozeOverdueNotification: (
     notification: AppNotification,
@@ -47,10 +53,23 @@ function FilterButton({
   );
 }
 
+function getKindLabel(kind: NotificationKindFilter) {
+  if (kind === 'pre_notice') return 'Pre-aviso';
+  if (kind === 'notification') return 'Notificação';
+  if (kind === 'alarm') return 'Alarme';
+  if (kind === 'floating_reminder') return 'Lembrete flutuante';
+  if (kind === 'overdue_reminder') return 'Atraso';
+  return 'Todas as origens';
+}
+
 export function NotificationsPage({
   notifications,
+  pageInfo,
+  isLoadingMore,
   onMarkAllRead,
   onClearAll,
+  onFiltersChange,
+  onLoadMore,
   onOpenNotification,
   onSnoozeOverdueNotification,
   isNotificationActionBusy,
@@ -58,29 +77,33 @@ export function NotificationsPage({
   const [search, setSearch] = React.useState('');
   const [visibility, setVisibility] = React.useState<NotificationVisibility>('all');
   const [toneFilter, setToneFilter] = React.useState<NotificationToneFilter>('all');
+  const [kindFilter, setKindFilter] = React.useState<NotificationKindFilter>('all');
+  const [createdFrom, setCreatedFrom] = React.useState('');
+  const [createdTo, setCreatedTo] = React.useState('');
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
 
   const unreadCount = notifications.filter((notification) => !notification.read).length;
+  const currentFilters = React.useMemo<NotificationListQuery>(() => ({
+    search: search.trim() || undefined,
+    read: visibility === 'all' ? null : visibility === 'read',
+    tone: toneFilter === 'all' ? null : toneFilter,
+    kind: kindFilter === 'all' ? null : kindFilter,
+    createdFrom: createdFrom || null,
+    createdTo: createdTo || null,
+  }), [createdFrom, createdTo, kindFilter, search, toneFilter, visibility]);
+  const hasActiveFilters = Boolean(
+    currentFilters.search ||
+    currentFilters.read !== null ||
+    currentFilters.tone ||
+    currentFilters.kind ||
+    currentFilters.createdFrom ||
+    currentFilters.createdTo,
+  );
 
-  const filteredNotifications = React.useMemo(() => {
-    const normalizedSearch = search.trim().toLocaleLowerCase('pt-BR');
-
-    return notifications.filter((notification) => {
-      const matchesSearch =
-        normalizedSearch.length === 0 ||
-        notification.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch) ||
-        notification.message.toLocaleLowerCase('pt-BR').includes(normalizedSearch);
-
-      const matchesVisibility =
-        visibility === 'all' ||
-        (visibility === 'unread' && !notification.read) ||
-        (visibility === 'read' && notification.read);
-
-      const matchesTone = toneFilter === 'all' || notification.tone === toneFilter;
-
-      return matchesSearch && matchesVisibility && matchesTone;
-    });
-  }, [notifications, search, toneFilter, visibility]);
+  React.useEffect(() => {
+    const timeoutId = window.setTimeout(() => onFiltersChange(currentFilters), 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [currentFilters, onFiltersChange]);
 
   React.useEffect(() => {
     if (!feedbackMessage) return undefined;
@@ -95,9 +118,9 @@ export function NotificationsPage({
   }, [onMarkAllRead]);
 
   const handleClearAll = React.useCallback(() => {
-    onClearAll();
-    setFeedbackMessage('Histórico de notificações limpo.');
-  }, [onClearAll]);
+    onClearAll(hasActiveFilters ? currentFilters : undefined);
+    setFeedbackMessage(hasActiveFilters ? 'Notificações filtradas removidas.' : 'Histórico de notificações limpo.');
+  }, [currentFilters, hasActiveFilters, onClearAll]);
 
   return (
     <motion.div
@@ -141,14 +164,14 @@ export function NotificationsPage({
               data-testid="notifications-clear-all"
             >
               <Trash2 size={18} />
-              Limpar histórico
+              {hasActiveFilters ? 'Limpar resultados' : 'Limpar histórico'}
             </button>
           </div>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3">
           <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
-            {notifications.length} no histórico
+            {notifications.length} carregada{notifications.length === 1 ? '' : 's'}
           </span>
           <span className="rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
             {unreadCount} não lida{unreadCount === 1 ? '' : 's'}
@@ -226,11 +249,62 @@ export function NotificationsPage({
                 </div>
               </div>
             </div>
+
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                    <SlidersHorizontal size={15} />
+                  </span>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Origem</p>
+                </div>
+                <select
+                  value={kindFilter}
+                  onChange={(event) => setKindFilter(event.target.value as NotificationKindFilter)}
+                  className="field-control"
+                  data-testid="notifications-kind-filter"
+                >
+                  <option value="all">Todas as origens</option>
+                  <option value="pre_notice">Pre-aviso</option>
+                  <option value="notification">Notificação</option>
+                  <option value="alarm">Alarme</option>
+                  <option value="floating_reminder">Lembrete flutuante</option>
+                  <option value="overdue_reminder">Atraso</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="icon-slot h-8 w-8 rounded-xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                    <CalendarDays size={15} />
+                  </span>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Período</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    value={createdFrom}
+                    onChange={(event) => setCreatedFrom(event.target.value)}
+                    className="field-control"
+                    aria-label="Data inicial"
+                    data-testid="notifications-created-from"
+                  />
+                  <input
+                    type="date"
+                    value={createdTo}
+                    onChange={(event) => setCreatedTo(event.target.value)}
+                    className="field-control"
+                    aria-label="Data final"
+                    data-testid="notifications-created-to"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
-              Exibindo {filteredNotifications.length} resultado{filteredNotifications.length === 1 ? '' : 's'}
+              Exibindo {notifications.length} resultado{notifications.length === 1 ? '' : 's'}
             </span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
               {visibility === 'all' ? 'Todas as leituras' : visibility === 'unread' ? 'Somente não lidas' : 'Somente lidas'}
@@ -238,16 +312,39 @@ export function NotificationsPage({
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
               {toneFilter === 'all' ? 'Todos os tipos' : `Tipo: ${toneFilter === 'info' ? 'Informação' : toneFilter === 'success' ? 'Sucesso' : toneFilter === 'warning' ? 'Aviso' : 'Erro'}`}
             </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+              {getKindLabel(kindFilter)}
+            </span>
+            {hasActiveFilters && (
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
+                Filtros aplicados no servidor
+              </span>
+            )}
           </div>
 
           <NotificationFeed
-            notifications={filteredNotifications}
+            notifications={notifications}
             onOpenNotification={onOpenNotification}
             onSnoozeOverdueNotification={onSnoozeOverdueNotification}
             isNotificationActionBusy={isNotificationActionBusy}
             emptyTitle="Nenhuma notificação por aqui"
             emptyDescription="Quando o sistema gerar novos avisos e confirmações, eles vão aparecer nesta central."
           />
+
+          {pageInfo.hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={onLoadMore}
+                disabled={isLoadingMore}
+                className="action-secondary justify-center"
+                data-testid="notifications-load-more"
+              >
+                {isLoadingMore ? <Loader2 size={18} className="animate-spin" /> : null}
+                Carregar mais
+              </button>
+            </div>
+          )}
         </div>
       </section>
     </motion.div>

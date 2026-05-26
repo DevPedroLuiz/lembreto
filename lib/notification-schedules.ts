@@ -481,6 +481,36 @@ export async function cancelPendingNotificationSchedulesForTask(
   return rows.length;
 }
 
+export async function cancelPendingNotificationSchedulesForUser(
+  sql: SqlClient,
+  userId: string,
+  options: {
+    ensureInfrastructure?: boolean;
+    reason?: string;
+    caller?: string;
+  } = {},
+) {
+  if (options.ensureInfrastructure !== false) {
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
+  const rows = await sql`
+    UPDATE notification_schedules
+    SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
+    WHERE user_id = ${userId}
+      AND status IN ('pending', 'processing')
+    RETURNING id
+  `;
+  if (rows.length > 0) {
+    logInfo('schedule_cancel_requested', {
+      reason: options.reason ?? 'unspecified',
+      caller: options.caller ?? 'unknown',
+      userId,
+      scheduleCount: rows.length,
+    });
+  }
+  return rows.length;
+}
+
 async function insertSchedule(
   sql: SqlClient,
   task: TaskForScheduling,
@@ -677,6 +707,7 @@ export async function syncTaskNotificationSchedules(sql: SqlClient, userId: stri
     taskStatus: task.status,
   });
 
+  if (task.notificationsEnabled === false) return 0;
   if (!isSchedulableStatus(task.status) || task.deletedAt || task.status === 'cancelled') return 0;
   if (reminderMode === 'floating') {
     return scheduleFloatingTask(sql, { ...task, reminderMode, floatingIntervalMinutes }, new Date(), {
@@ -1362,6 +1393,21 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
     return 'cancelled' as const;
   }
 
+  if (task.notificationsEnabled === false) {
+    logInfo('schedule_cancel_requested', {
+      reason: 'notifications_disabled',
+      caller: 'processSingleSchedule',
+      taskId: schedule.taskId,
+      userId: schedule.userId,
+      taskStatus: task.status,
+      scheduleCount: 1,
+      scheduleId: schedule.id,
+      kind: schedule.kind,
+    });
+    await updateScheduleStatus(sql, schedule.id, 'cancelled', 'notifications_disabled');
+    return 'cancelled' as const;
+  }
+
   if (
     (schedule.kind === 'floating_reminder' || schedule.kind === 'overdue_reminder') &&
     task.mutedUntil &&
@@ -1537,14 +1583,19 @@ export async function processDueNotificationSchedules(
     ensureInfrastructure?: boolean;
     precomputedDiagnostics?: ScheduleDiagnostics;
     reclaimStuckProcessing?: boolean;
+    reclaimStuckProcessingLimit?: number;
     userId?: string;
   } = {},
 ): Promise<ProcessNotificationSchedulesSummary> {
   const startedAt = Date.now();
   const processLimit = Math.min(Math.max(1, limit), PROCESS_LIMIT);
+  const requestedReclaimLimit = options.reclaimStuckProcessingLimit ?? STUCK_PROCESSING_RECLAIM_LIMIT;
+  const stuckProcessingReclaimLimit = Number.isFinite(requestedReclaimLimit)
+    ? Math.min(Math.max(1, Math.floor(requestedReclaimLimit)), STUCK_PROCESSING_RECLAIM_LIMIT)
+    : STUCK_PROCESSING_RECLAIM_LIMIT;
   logInfo('cron_notifications_started', {
     processLimit,
-    stuckProcessingReclaimLimit: STUCK_PROCESSING_RECLAIM_LIMIT,
+    stuckProcessingReclaimLimit,
     maxDurationMs,
   });
 
@@ -1553,7 +1604,7 @@ export async function processDueNotificationSchedules(
   }
   const reclaimedSchedules = options.reclaimStuckProcessing === false
     ? 0
-    : await reclaimStuckProcessingSchedules(sql, STUCK_PROCESSING_RECLAIM_LIMIT, { userId: options.userId });
+    : await reclaimStuckProcessingSchedules(sql, stuckProcessingReclaimLimit, { userId: options.userId });
   const scheduleDiagnostics = options.precomputedDiagnostics ?? await getScheduleDiagnostics(sql, { userId: options.userId });
   const outOfTimeBeforeClaim = Date.now() - startedAt >= maxDurationMs;
   if (outOfTimeBeforeClaim) {
@@ -1572,7 +1623,7 @@ export async function processDueNotificationSchedules(
     diagnostics: scheduleDiagnostics,
     reclaimedSchedules,
     fetchedSchedules: schedules.length,
-    hasMore: outOfTimeBeforeClaim || reclaimedSchedules >= STUCK_PROCESSING_RECLAIM_LIMIT || schedules.length >= processLimit,
+    hasMore: outOfTimeBeforeClaim || reclaimedSchedules >= stuckProcessingReclaimLimit || schedules.length >= processLimit,
     stoppedByTimeLimit: outOfTimeBeforeClaim,
   });
 

@@ -27,7 +27,7 @@ export function buildE2ETestUser(): E2ETestUser {
   };
 }
 
-async function getUserIdByEmail(email: string): Promise<string> {
+export async function getUserIdByEmail(email: string): Promise<string> {
   const users = (await sql`
     SELECT id
     FROM users
@@ -192,7 +192,7 @@ export async function seedNotificationScheduleForTask(
     intervalMinutes?: number | null;
     dedupeKey?: string;
   },
-): Promise<void> {
+): Promise<string> {
   const userId = await getUserIdByEmail(email);
   const dedupeKey = input.dedupeKey ?? [
     'e2e',
@@ -203,7 +203,7 @@ export async function seedNotificationScheduleForTask(
     Math.random().toString(16).slice(2),
   ].join(':');
 
-  await sql`
+  const rows = (await sql`
     INSERT INTO notification_schedules (
       user_id,
       task_id,
@@ -228,7 +228,184 @@ export async function seedNotificationScheduleForTask(
       ${input.sequenceIndex ?? null},
       ${input.intervalMinutes ?? null}
     )
-  `;
+    RETURNING id
+  `) as Array<{ id: string }>;
+
+  if (!rows[0]?.id) {
+    throw new Error('Falha ao criar schedule de notificação E2E.');
+  }
+
+  return rows[0].id;
+}
+
+export async function countPushSubscriptionsForUser(email: string): Promise<number> {
+  const userId = await getUserIdByEmail(email);
+  const rows = (await sql`
+    SELECT COUNT(*) AS count
+    FROM push_subscriptions
+    WHERE user_id = ${userId}
+  `) as Array<{ count: string | number }>;
+
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function countNotificationsForUser(email: string): Promise<number> {
+  const userId = await getUserIdByEmail(email);
+  const rows = (await sql`
+    SELECT COUNT(*) AS count
+    FROM notifications
+    WHERE user_id = ${userId}
+  `) as Array<{ count: string | number }>;
+
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function countNotificationsForSchedule(scheduleId: string): Promise<number> {
+  const rows = (await sql`
+    SELECT COUNT(*) AS count
+    FROM notifications
+    WHERE source_schedule_id = ${scheduleId}
+  `) as Array<{ count: string | number }>;
+
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function getNotificationScheduleById(scheduleId: string): Promise<{
+  id: string;
+  taskId: string;
+  kind: NotificationScheduleKind;
+  status: string;
+  notifyAt: string;
+  sentAt: string | null;
+  dismissedAt: string | null;
+  cancelledAt: string | null;
+  errorMessage: string | null;
+} | null> {
+  const rows = (await sql`
+    SELECT
+      id,
+      task_id AS "taskId",
+      kind,
+      status,
+      notify_at AS "notifyAt",
+      sent_at AS "sentAt",
+      dismissed_at AS "dismissedAt",
+      cancelled_at AS "cancelledAt",
+      error_message AS "errorMessage"
+    FROM notification_schedules
+    WHERE id = ${scheduleId}
+    LIMIT 1
+  `) as Array<{
+    id: string;
+    taskId: string;
+    kind: NotificationScheduleKind;
+    status: string;
+    notifyAt: Date | string;
+    sentAt: Date | string | null;
+    dismissedAt: Date | string | null;
+    cancelledAt: Date | string | null;
+    errorMessage: string | null;
+  }>;
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    ...row,
+    notifyAt: new Date(row.notifyAt).toISOString(),
+    sentAt: row.sentAt ? new Date(row.sentAt).toISOString() : null,
+    dismissedAt: row.dismissedAt ? new Date(row.dismissedAt).toISOString() : null,
+    cancelledAt: row.cancelledAt ? new Date(row.cancelledAt).toISOString() : null,
+  };
+}
+
+export async function getNotificationSchedulesForTask(taskId: string, kind?: NotificationScheduleKind): Promise<Array<{
+  id: string;
+  kind: NotificationScheduleKind;
+  status: string;
+  notifyAt: string;
+  dismissedAt: string | null;
+}>> {
+  const rows = (await sql`
+    SELECT
+      id,
+      kind,
+      status,
+      notify_at AS "notifyAt",
+      dismissed_at AS "dismissedAt"
+    FROM notification_schedules
+    WHERE task_id = ${taskId}
+      AND (${kind ?? null}::text IS NULL OR kind = ${kind})
+    ORDER BY notify_at ASC
+  `) as Array<{
+    id: string;
+    kind: NotificationScheduleKind;
+    status: string;
+    notifyAt: Date | string;
+    dismissedAt: Date | string | null;
+  }>;
+
+  return rows.map((row) => ({
+    ...row,
+    notifyAt: new Date(row.notifyAt).toISOString(),
+    dismissedAt: row.dismissedAt ? new Date(row.dismissedAt).toISOString() : null,
+  }));
+}
+
+export async function createStuckProcessingScheduleForTask(
+  email: string,
+  taskId: string,
+  input: {
+    kind?: NotificationScheduleKind;
+    notifyAt?: Date;
+    title?: string;
+    message?: string;
+    tone?: NotificationTone;
+  } = {},
+): Promise<string> {
+  const userId = await getUserIdByEmail(email);
+  const notifyAt = input.notifyAt ?? new Date(Date.now() - 60_000);
+  const kind = input.kind ?? 'notification';
+  const rows = (await sql`
+    INSERT INTO notification_schedules (
+      user_id,
+      task_id,
+      kind,
+      notify_at,
+      status,
+      title,
+      message,
+      tone,
+      dedupe_key,
+      processing_started_at
+    )
+    VALUES (
+      ${userId},
+      ${taskId},
+      ${kind},
+      ${notifyAt},
+      'processing',
+      ${input.title ?? 'Schedule travado'},
+      ${input.message ?? 'Gerado para teste E2E.'},
+      ${input.tone ?? 'warning'},
+      ${[
+        'e2e',
+        userId,
+        taskId,
+        'stuck',
+        notifyAt.getTime(),
+        Math.random().toString(16).slice(2),
+      ].join(':')},
+      NOW() - INTERVAL '15 minutes'
+    )
+    RETURNING id
+  `) as Array<{ id: string }>;
+
+  if (!rows[0]?.id) {
+    throw new Error('Falha ao criar schedule travado E2E.');
+  }
+
+  return rows[0].id;
 }
 
 export async function runScheduledNotifications(options?: { passes?: number; delayMs?: number }): Promise<void> {

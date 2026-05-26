@@ -2,7 +2,12 @@ import { test, expect, type Page, type Response } from '@playwright/test';
 import {
   blacklistToken,
   buildE2ETestUser,
+  countNotificationsForSchedule,
+  countPushSubscriptionsForUser,
+  createStuckProcessingScheduleForTask,
   cleanupUsersByEmail,
+  getNotificationScheduleById,
+  getNotificationSchedulesForTask,
   runScheduledNotifications,
   seedCustomTasksForUser,
   seedNotificationForUser,
@@ -168,6 +173,10 @@ async function createTask(page: Page, title: string, options?: { time?: string }
 
 function taskCard(page: Page, title: string) {
   return page.locator(`[data-testid="task-item"][data-task-title="${title}"]`).first();
+}
+
+function authHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
 }
 
 async function expectFirstTaskTitle(page: Page, title: string): Promise<void> {
@@ -1278,6 +1287,234 @@ test.describe('Lembreto critical flows', () => {
       await expect(page.getByTestId('auth-email-input')).toHaveValue(user.email);
       await expect(page.getByTestId('remember-email-checkbox')).toBeChecked();
       await expect(page.getByTestId('auth-password-input')).toHaveValue('');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('registers the service worker and stores a real push subscription', async ({ page, context }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      const pushSupported = await page.evaluate(() => (
+        window.isSecureContext &&
+        'serviceWorker' in navigator &&
+        'PushManager' in window &&
+        'Notification' in window
+      ));
+      test.skip(!pushSupported, 'Este navegador do E2E nao suporta Service Worker + PushManager.');
+
+      await context.grantPermissions(['notifications']);
+      await registerUser(page, user);
+      await page.getByTestId('sidebar-settings-button').click();
+      await page.getByTestId('settings-nav-notifications').click();
+
+      const pushSwitch = page.getByRole('switch', { name: 'Alternar push do Windows' });
+      await expect(pushSwitch).toBeVisible();
+      const subscriptionResponsePromise = page.waitForResponse((response) =>
+        response.url().includes('/api/notifications/push-subscriptions') &&
+        response.request().method() === 'POST',
+      );
+
+      await pushSwitch.click();
+      const subscriptionResponse = await subscriptionResponsePromise;
+      expect(subscriptionResponse.ok()).toBeTruthy();
+
+      await expect(page.getByText('Notificações do Windows ativas')).toBeVisible({ timeout: 15000 });
+      await expect.poll(() => countPushSubscriptionsForUser(user.email)).toBeGreaterThan(0);
+
+      const registrationState = await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+
+        return {
+          scriptUrl: registration.active?.scriptURL ?? null,
+          scope: registration.scope,
+          endpoint: subscription?.endpoint ?? null,
+        };
+      });
+
+      expect(registrationState.scriptUrl).toContain('/push-sw.js');
+      expect(registrationState.scope).toContain('/');
+      expect(registrationState.endpoint).toContain('https://');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('snoozes and dismisses alarms through the real API routes', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      const token = await registerUser(page, user);
+      const [snoozeTaskId, dismissTaskId] = await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Alarme para adiar via API',
+          dueDate: new Date(Date.now() + 60_000).toISOString(),
+          priority: 'high',
+          category: 'Trabalho',
+          alarmEnabled: true,
+        },
+        {
+          title: 'Alarme para fechar via API',
+          dueDate: new Date(Date.now() + 120_000).toISOString(),
+          priority: 'medium',
+          category: 'Geral',
+          alarmEnabled: true,
+        },
+      ]);
+
+      const snoozeScheduleId = await seedNotificationScheduleForTask(user.email, snoozeTaskId, {
+        kind: 'alarm',
+        notifyAt: new Date(Date.now() - 30_000),
+        title: 'Alarme',
+        message: '"Alarme para adiar via API"',
+        tone: 'warning',
+      });
+      const dismissScheduleId = await seedNotificationScheduleForTask(user.email, dismissTaskId, {
+        kind: 'alarm',
+        notifyAt: new Date(Date.now() - 30_000),
+        title: 'Alarme',
+        message: '"Alarme para fechar via API"',
+        tone: 'warning',
+      });
+
+      const snoozeResponse = await page.request.post(`/api/notifications/alarms/${snoozeScheduleId}/snooze`, {
+        headers: authHeaders(token),
+        data: { minutes: 10 },
+      });
+      expect(snoozeResponse.status()).toBe(201);
+      const snoozePayload = await snoozeResponse.json() as { taskId: string; notifyAt: string };
+      expect(snoozePayload.taskId).toBe(snoozeTaskId);
+      expect(new Date(snoozePayload.notifyAt).getTime()).toBeGreaterThan(Date.now());
+
+      const snoozedOriginal = await getNotificationScheduleById(snoozeScheduleId);
+      expect(snoozedOriginal?.status).toBe('sent');
+      expect(snoozedOriginal?.dismissedAt).not.toBeNull();
+      const snoozeSchedules = await getNotificationSchedulesForTask(snoozeTaskId, 'alarm');
+      expect(snoozeSchedules.some((schedule) =>
+        schedule.id !== snoozeScheduleId &&
+        schedule.status === 'pending' &&
+        new Date(schedule.notifyAt).getTime() > Date.now(),
+      )).toBeTruthy();
+
+      const dismissResponse = await page.request.post(`/api/notifications/alarms/${dismissScheduleId}/dismiss`, {
+        headers: authHeaders(token),
+        data: {},
+      });
+      expect(dismissResponse.status()).toBe(200);
+      const dismissPayload = await dismissResponse.json() as { taskId: string; dismissedAt: string };
+      expect(dismissPayload.taskId).toBe(dismissTaskId);
+      expect(new Date(dismissPayload.dismissedAt).getTime()).toBeLessThanOrEqual(Date.now());
+
+      const dismissedSchedule = await getNotificationScheduleById(dismissScheduleId);
+      expect(dismissedSchedule?.status).toBe('sent');
+      expect(dismissedSchedule?.dismissedAt).not.toBeNull();
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('does not create schedule notifications after the user disables notifications', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      const token = await registerUser(page, user);
+      const [taskId] = await seedCustomTasksForUser(user.email, [
+        {
+          title: 'Schedule antigo com central desligada',
+          dueDate: new Date(Date.now() + 60_000).toISOString(),
+          priority: 'medium',
+          category: 'Geral',
+        },
+      ]);
+      const scheduleId = await seedNotificationScheduleForTask(user.email, taskId, {
+        kind: 'notification',
+        notifyAt: new Date(Date.now() - 30_000),
+        title: 'Notificação bloqueada',
+        message: 'Esta notificação não deve entrar na central.',
+        tone: 'info',
+      });
+
+      const settingsResponse = await page.request.put('/api/notifications/settings', {
+        headers: authHeaders(token),
+        data: { enabled: false },
+      });
+      expect(settingsResponse.ok()).toBeTruthy();
+
+      const processResponse = await page.request.post('/api/notifications/process-due', {
+        headers: authHeaders(token),
+        data: {},
+      });
+      expect(processResponse.ok()).toBeTruthy();
+
+      const schedule = await getNotificationScheduleById(scheduleId);
+      expect(schedule?.status).toBe('cancelled');
+      expect(schedule?.errorMessage).toBe('notifications_disabled');
+      await expect.poll(() => countNotificationsForSchedule(scheduleId)).toBe(0);
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
+  test('reports cron backlog and reclaims stuck schedules through the real cron endpoint', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+      const taskIds = await seedCustomTasksForUser(
+        user.email,
+        Array.from({ length: 7 }, (_, index) => ({
+          title: `Backlog cron E2E ${index + 1}`,
+          dueDate: new Date(Date.now() + (index + 1) * 60_000).toISOString(),
+          priority: 'medium' as const,
+          category: 'Geral',
+        })),
+      );
+
+      for (const [index, taskId] of taskIds.entries()) {
+        await seedNotificationScheduleForTask(user.email, taskId, {
+          kind: 'notification',
+          notifyAt: new Date(Date.now() - 60_000 - index * 1000),
+          title: `Backlog ${index + 1}`,
+          message: 'Schedule de backlog para cron real.',
+          tone: 'info',
+        });
+      }
+      const stuckScheduleId = await createStuckProcessingScheduleForTask(user.email, taskIds[0], {
+        title: 'Schedule travado para reclaim',
+      });
+
+      const cronResponse = await page.request.get('/api/cron/notifications', {
+        headers: authHeaders(process.env.CRON_SECRET ?? 'e2e-cron-secret-with-enough-entropy'),
+      });
+      expect(cronResponse.ok()).toBeTruthy();
+      const cronPayload = await cronResponse.json() as {
+        ok: boolean;
+        hasMore: boolean;
+        schedules: { processed: number; reclaimed: number; hasMore: boolean };
+        backlogWarnings: Array<{ kind: string }>;
+      };
+
+      expect(cronPayload.ok).toBe(true);
+      expect(cronPayload.schedules.processed).toBeGreaterThan(0);
+      expect(cronPayload.schedules.reclaimed).toBeGreaterThanOrEqual(1);
+      expect(cronPayload.schedules.hasMore || cronPayload.hasMore).toBe(true);
+      expect(cronPayload.backlogWarnings.some((warning) =>
+        warning.kind === 'schedule_backlog' || warning.kind === 'has_more',
+      )).toBeTruthy();
+
+      const stuckSchedule = await getNotificationScheduleById(stuckScheduleId);
+      expect(stuckSchedule?.status).not.toBe('processing');
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

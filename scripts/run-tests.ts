@@ -88,6 +88,7 @@ function createNotificationScheduleSqlMock(options?: {
   slowPushLookupMs?: number;
   scheduleUserId?: string;
   existingNotification?: boolean;
+  notificationsEnabled?: boolean;
 }) {
   const userId = '11111111-1111-4111-8111-111111111111';
   const scheduleUserId = options?.scheduleUserId ?? userId;
@@ -276,7 +277,7 @@ function createNotificationScheduleSqlMock(options?: {
         mutedUntil: null,
         suppressHolidayNotifications: false,
         floatingIntervalMinutes: null,
-        notificationsEnabled: true,
+        notificationsEnabled: options?.notificationsEnabled ?? true,
         stateCode: null,
         cityName: null,
         holidayRegionCode: null,
@@ -337,7 +338,11 @@ function createNotificationScheduleSqlMock(options?: {
       schedule.failedAt = status === 'failed' ? now.toISOString() : schedule.failedAt;
       schedule.cancelledAt = status === 'cancelled' ? now.toISOString() : schedule.cancelledAt;
       schedule.processingStartedAt = null;
-      schedule.errorMessage = typeof values[4] === 'string' ? values[4] : null;
+      schedule.errorMessage = values.includes('notifications_disabled')
+        ? 'notifications_disabled'
+        : typeof values[4] === 'string'
+          ? values[4]
+          : null;
       return [];
     }
 
@@ -365,6 +370,75 @@ function createNotificationScheduleSqlMock(options?: {
   };
 }
 
+function createPushDeliverySqlMock() {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const notificationId = '44444444-4444-4444-8444-444444444444';
+  const subscriptions = [
+    {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      endpoint: 'https://push.example.test/success',
+      p256dh: 'p256dh-success',
+      auth: 'auth-success',
+      userAgent: 'Browser A',
+    },
+    {
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      endpoint: 'https://push.example.test/fail',
+      p256dh: 'p256dh-fail',
+      auth: 'auth-fail',
+      userAgent: 'Browser B',
+    },
+  ];
+  const deliveries: Array<Record<string, unknown>> = [];
+
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(' ');
+
+    if (query.includes('FROM push_subscriptions')) {
+      return subscriptions.filter((subscription) => subscription.id && values.includes(userId));
+    }
+
+    if (query.includes('INSERT INTO notification_deliveries')) {
+      const delivery = {
+        id: crypto.randomUUID(),
+        notificationId: values[0],
+        userId: values[1],
+        pushSubscriptionId: values[2],
+        endpointHash: values[3],
+        endpoint: values[4],
+        userAgent: values[5],
+        status: 'attempted',
+        attemptCount: 1,
+        lastError: null,
+      };
+      deliveries.push(delivery);
+      return [{ id: delivery.id }];
+    }
+
+    if (query.includes('UPDATE notification_deliveries')) {
+      const status = String(values[0]);
+      const lastError = values.find((value) => typeof value === 'string' && String(value).includes('simulated')) ?? null;
+      const deliveryId = String(values[4]);
+      const delivery = deliveries.find((item) => item.id === deliveryId);
+      if (delivery) {
+        delivery.status = status;
+        delivery.lastError = lastError;
+      }
+      return [];
+    }
+
+    return [];
+  }) as SqlClient;
+
+  return {
+    sql,
+    userId,
+    notificationId,
+    subscriptions,
+    deliveries,
+  };
+}
+
 function createTaskSideEffectsSqlMock(options?: {
   alarmEnabled?: boolean;
   dueMinutesFromNow?: number;
@@ -372,6 +446,7 @@ function createTaskSideEffectsSqlMock(options?: {
   includeNotificationJob?: boolean;
   externalFirst?: boolean;
   hangExternalCalendarIntegrations?: boolean;
+  notificationsEnabled?: boolean;
 }) {
   const now = new Date();
   const userId = '55555555-5555-4555-8555-555555555555';
@@ -437,7 +512,7 @@ function createTaskSideEffectsSqlMock(options?: {
     suppressHolidayNotifications: false,
     overdueReminderIntensity: 'normal' as const,
     floatingIntervalMinutes: null,
-    notificationsEnabled: true,
+    notificationsEnabled: options?.notificationsEnabled ?? true,
     stateCode: null,
     cityName: null,
     holidayRegionCode: null,
@@ -686,6 +761,8 @@ function createCronHealthSqlMock(options?: {
   taskSideEffectsDue?: number;
   schedulesPending?: number;
   schedulesDue?: number;
+  schedulesProcessing?: number;
+  schedulesStuckProcessing?: number;
   tasksPending?: number;
   overdueCandidates?: number;
 }) {
@@ -746,6 +823,11 @@ function createCronHealthSqlMock(options?: {
       return [];
     }
 
+    if (query.includes('WITH stuck AS') && query.includes('UPDATE notification_schedules')) {
+      const count = Math.min(options?.schedulesStuckProcessing ?? 0, 2);
+      return Array.from({ length: count }, (_, index) => ({ id: `stuck-${index}` }));
+    }
+
     if (query.includes('FROM task_side_effects') && query.includes('available_at <= NOW()')) {
       return [{ count: options?.taskSideEffectsDue ?? 0 }];
     }
@@ -756,6 +838,13 @@ function createCronHealthSqlMock(options?: {
 
     if (query.includes('FROM notification_schedules') && query.includes('notify_at <= NOW()')) {
       return [{ count: options?.schedulesDue ?? 0 }];
+    }
+
+    if (query.includes('FROM notification_schedules') && query.includes('"stuckProcessingCount"')) {
+      return [{
+        processingCount: options?.schedulesProcessing ?? 0,
+        stuckProcessingCount: options?.schedulesStuckProcessing ?? 0,
+      }];
     }
 
     if (query.includes('FROM notification_schedules')) {
@@ -1095,12 +1184,17 @@ async function main() {
     handleCalendarIntegrations,
     handleCalendarSyncAll,
   } = await import('../lib/handlers/calendar.js');
-  const { handleNotificationProcessDue } = await import('../lib/handlers/notifications.js');
+  const { handleNotificationProcessDue, handleNotificationsCollection } = await import('../lib/handlers/notifications.js');
   const {
     handleTaskCalendarExport,
     handleTaskCalendarFeed,
     handleTasksCollection,
   } = await import('../lib/handlers/tasks.js');
+  const {
+    clearNotificationsForUser,
+    listNotificationsForUser,
+    sendPushPayloadToUser,
+  } = await import('../lib/notifications.js');
   const {
     backfillMissingNotificationSchedules,
     processDueNotificationSchedules,
@@ -1463,6 +1557,174 @@ async function main() {
     assert.equal(selectedValues[0].includes(1), true);
   });
 
+  await run('notifications list returns cursor pagination metadata', async () => {
+    const rows = [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+        title: 'Alarme',
+        message: 'Primeira',
+        createdAt: '2026-05-14T17:42:00.000Z',
+        read: false,
+        tone: 'warning',
+        targetType: null,
+        targetTaskId: null,
+        dedupeKey: null,
+        sourceScheduleId: null,
+        kind: 'alarm',
+      },
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+        title: 'Aviso',
+        message: 'Segunda',
+        createdAt: '2026-05-14T17:41:00.000Z',
+        read: false,
+        tone: 'warning',
+        targetType: null,
+        targetTaskId: null,
+        dedupeKey: null,
+        sourceScheduleId: null,
+        kind: 'notification',
+      },
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+        title: 'Antiga',
+        message: 'Terceira',
+        createdAt: '2026-05-14T17:40:00.000Z',
+        read: true,
+        tone: 'info',
+        targetType: null,
+        targetTaskId: null,
+        dedupeKey: null,
+        sourceScheduleId: null,
+        kind: 'pre_notice',
+      },
+    ];
+    const calls: unknown[][] = [];
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
+      if (query.includes('FROM notifications') && query.includes('ORDER BY created_at DESC')) {
+        calls.push(values);
+        return rows;
+      }
+      return [];
+    }) as SqlClient;
+
+    const result = await listNotificationsForUser(sql, 'user-1', {
+      search: 'aviso',
+      read: false,
+      tone: 'warning',
+      kind: 'notification',
+      createdFrom: '2026-05-14T00:00:00.000Z',
+      createdTo: '2026-05-14T23:59:59.999Z',
+      limit: 2,
+    });
+
+    assert.equal(result.notifications.length, 2);
+    assert.equal(result.pageInfo.hasMore, true);
+    assert.equal(result.pageInfo.limit, 2);
+    assert.equal(typeof result.pageInfo.nextCursor, 'string');
+    assert.deepEqual(calls[0]?.slice(0, 7), [
+      'user-1',
+      'aviso',
+      'aviso',
+      'aviso',
+      false,
+      false,
+      'warning',
+    ]);
+  });
+
+  await run('notifications delete applies server-side filters', async () => {
+    let deleteValues: unknown[] | null = null;
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
+      if (query.includes('DELETE FROM notifications')) {
+        deleteValues = values;
+        return [{ id: 'notification-1' }, { id: 'notification-2' }];
+      }
+      return [];
+    }) as SqlClient;
+
+    const deleted = await clearNotificationsForUser(sql, 'user-1', {
+      search: 'alarme',
+      read: true,
+      tone: 'error',
+      kind: 'alarm',
+      createdFrom: '2026-05-01T00:00:00.000Z',
+      createdTo: '2026-05-31T23:59:59.999Z',
+    });
+
+    assert.equal(deleted, 2);
+    assert.ok(deleteValues);
+    assert.deepEqual((deleteValues as unknown[]).slice(0, 7), [
+      'user-1',
+      'alarme',
+      'alarme',
+      'alarme',
+      true,
+      true,
+      'error',
+    ]);
+  });
+
+  await run('notifications delete route accepts JSON filter body', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    let deleteValues: unknown[] | null = null;
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join(' ');
+      const infrastructureRows = getInfrastructureCheckRows(query);
+      if (infrastructureRows) return infrastructureRows;
+      if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('FROM users')) {
+        return [{
+          id: 'user-1',
+          name: 'Pedro',
+          email: 'pedro@example.com',
+          avatar: null,
+        }];
+      }
+      if (query.includes('DELETE FROM notifications')) {
+        deleteValues = values;
+        return [{ id: 'notification-1' }];
+      }
+      return [];
+    }) as SqlClient;
+
+    const response = await handleNotificationsCollection({
+      sql,
+      request: {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        query: {},
+        body: {
+          search: 'falha',
+          read: false,
+          tone: 'error',
+          createdFrom: '2026-05-20',
+          createdTo: '2026-05-21',
+        },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.ok(deleteValues);
+    assert.deepEqual((deleteValues as unknown[]).slice(0, 7), [
+      'user-1',
+      'falha',
+      'falha',
+      'falha',
+      false,
+      false,
+      'error',
+    ]);
+    assert.equal(deleteValues[10], '2026-05-20T00:00:00.000Z');
+    assert.equal(deleteValues[12], '2026-05-21T23:59:59.999Z');
+  });
+
   await run('work end time requirement applies only to active statuses', () => {
     assert.equal(requiresWorkEndDateForStatus('pending'), true);
     assert.equal(requiresWorkEndDateForStatus('overdue'), true);
@@ -1805,6 +2067,19 @@ async function main() {
     assert.equal(result.schedulesByKindProcessed.notification, 1);
   });
 
+  await run('does not create central notification when user disabled notifications', async () => {
+    const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ notificationsEnabled: false });
+    const result = await processDueNotificationSchedules(sql, 20);
+
+    assert.equal(result.fetchedSchedules, 1);
+    assert.equal(result.processedSchedules, 1);
+    assert.equal(result.sentSchedules, 0);
+    assert.equal(result.cancelledSchedules, 1);
+    assert.equal(notifications.length, 0);
+    assert.equal(schedule.status, 'cancelled');
+    assert.equal(schedule.errorMessage, 'notifications_disabled');
+  });
+
   await run('processes due pre notice schedule and marks it sent', async () => {
     const { sql, schedule, notifications } = createNotificationScheduleSqlMock({ kind: 'pre_notice' });
     const result = await processDueNotificationSchedules(sql, 20);
@@ -1974,6 +2249,51 @@ async function main() {
     }
   });
 
+  await run('records push delivery status per subscription', async () => {
+    const previousPublicKey = process.env.VAPID_PUBLIC_KEY;
+    const previousPrivateKey = process.env.VAPID_PRIVATE_KEY;
+    const keys = webpush.generateVAPIDKeys();
+    const mutableWebPush = webpush as unknown as {
+      sendNotification: (
+        subscription: { endpoint: string },
+        payload?: string,
+        options?: Record<string, unknown>,
+      ) => Promise<unknown>;
+    };
+    const originalSendNotification = mutableWebPush.sendNotification;
+
+    try {
+      process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+      process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+      mutableWebPush.sendNotification = async (subscription) => {
+        if (subscription.endpoint.endsWith('/fail')) {
+          throw Object.assign(new Error('simulated push failure'), { statusCode: 503 });
+        }
+        return {};
+      };
+
+      const { sql, userId, notificationId, deliveries } = createPushDeliverySqlMock();
+      await sendPushPayloadToUser(sql, userId, { title: 'Teste' }, notificationId);
+
+      assert.equal(deliveries.length, 2);
+      assert.ok(deliveries.some((delivery) => (
+        delivery.endpoint === 'https://push.example.test/success' &&
+        delivery.status === 'delivered'
+      )));
+      assert.ok(deliveries.some((delivery) => (
+        delivery.endpoint === 'https://push.example.test/fail' &&
+        delivery.status === 'failed' &&
+        String(delivery.lastError).includes('simulated push failure')
+      )));
+    } finally {
+      mutableWebPush.sendNotification = originalSendNotification;
+      if (previousPublicKey === undefined) delete process.env.VAPID_PUBLIC_KEY;
+      else process.env.VAPID_PUBLIC_KEY = previousPublicKey;
+      if (previousPrivateKey === undefined) delete process.env.VAPID_PRIVATE_KEY;
+      else process.env.VAPID_PRIVATE_KEY = previousPrivateKey;
+    }
+  });
+
   await run('side effect sync creates notification schedule for timed task', async () => {
     const { sql, jobs, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 5 });
     const result = await processTaskSideEffects(sql, 3, 8000);
@@ -1987,6 +2307,19 @@ async function main() {
       schedule.kind === 'notification' &&
       schedule.status === 'pending'
     )));
+  });
+
+  await run('side effect sync skips schedules when user disabled notifications', async () => {
+    const { sql, jobs, schedules } = createTaskSideEffectsSqlMock({
+      dueMinutesFromNow: 5,
+      notificationsEnabled: false,
+    });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    assert.equal(jobs.find((job) => job.kind === 'sync_notification_schedules')?.status, 'done');
+    assert.equal(schedules.length, 0);
   });
 
   await run('side effect sync keeps exact notification when alarm is enabled', async () => {
@@ -2350,6 +2683,41 @@ async function main() {
       assert.equal(body.sideEffectDiagnostics?.duePendingCount, 1);
       assert.equal(body.backfill?.skippedReason, 'disabled_in_notification_cron');
       assert.equal(body.calendarSync?.skippedReason, 'no_external_calendar_side_effects_due');
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      if (previousMaintenance === undefined) delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      else process.env.CRON_ENABLE_MAINTENANCE_STAGES = previousMaintenance;
+    }
+  });
+
+  await run('cron reclaims a small batch of stuck processing schedules', async () => {
+    const previousSecret = process.env.CRON_SECRET;
+    const previousMaintenance = process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+    const { handleNotificationsCron } = await import('../lib/handlers/notifications.js');
+
+    try {
+      process.env.CRON_SECRET = 'test-cron-secret';
+      delete process.env.CRON_ENABLE_MAINTENANCE_STAGES;
+      const response = await handleNotificationsCron({
+        sql: createCronHealthSqlMock({
+          schedulesProcessing: 3,
+          schedulesStuckProcessing: 3,
+        }),
+        request: {
+          method: 'GET',
+          headers: { authorization: 'Bearer test-cron-secret' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const body = response.body as {
+        schedules?: { reclaimed?: number; fetched?: number };
+        scheduleDiagnostics?: { processingCount?: number };
+      };
+      assert.equal(body.schedules?.reclaimed, 2);
+      assert.equal(body.schedules?.fetched, 0);
+      assert.equal(body.scheduleDiagnostics?.processingCount, 3);
     } finally {
       if (previousSecret === undefined) delete process.env.CRON_SECRET;
       else process.env.CRON_SECRET = previousSecret;

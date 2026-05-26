@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import webpush from 'web-push';
 import {
   type NotificationScheduleKind,
@@ -48,6 +49,7 @@ interface NotificationRow {
 }
 
 interface PushSubscriptionRow {
+  id: string;
   endpoint: string;
   p256dh: string;
   auth: string;
@@ -82,12 +84,47 @@ export interface CreateNotificationResult {
   notification: AppNotificationRecord;
 }
 
+export interface NotificationListFilters {
+  search?: string;
+  read?: boolean | null;
+  tone?: NotificationTone | null;
+  kind?: NotificationScheduleKind | null;
+  createdFrom?: string | null;
+  createdTo?: string | null;
+}
+
+export interface ListNotificationsOptions extends NotificationListFilters {
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface NotificationPageInfo {
+  hasMore: boolean;
+  nextCursor: string | null;
+  limit: number;
+}
+
+export interface ListNotificationsResult {
+  notifications: AppNotificationRecord[];
+  pageInfo: NotificationPageInfo;
+}
+
+export class NotificationCursorError extends Error {
+  constructor(message = 'Invalid notification cursor') {
+    super(message);
+    this.name = 'NotificationCursorError';
+  }
+}
+
 export class NotificationReferenceUnavailableError extends Error {
   constructor(message = 'Notification reference unavailable') {
     super(message);
     this.name = 'NotificationReferenceUnavailableError';
   }
 }
+
+const DEFAULT_NOTIFICATION_LIST_LIMIT = 50;
+const MAX_NOTIFICATION_LIST_LIMIT = 100;
 
 let ensureNotificationsInfrastructurePromise: Promise<void> | null = null;
 
@@ -202,6 +239,145 @@ function buildPushPayload(notification: AppNotificationRecord) {
   };
 }
 
+function hashPushEndpoint(endpoint: string) {
+  return createHash('sha256').update(endpoint).digest('hex');
+}
+
+function getPushDeliveryError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return String(error ?? 'push_delivery_failed').slice(0, 1000);
+  }
+
+  const maybeError = error as { message?: unknown; body?: unknown; statusCode?: unknown };
+  const statusCode = typeof maybeError.statusCode === 'number' ? `status_${maybeError.statusCode}` : null;
+  const message = typeof maybeError.message === 'string' ? maybeError.message : null;
+  const body = typeof maybeError.body === 'string' ? maybeError.body : null;
+  return [statusCode, message, body].filter(Boolean).join(': ').slice(0, 1000) || 'push_delivery_failed';
+}
+
+function normalizeNotificationListLimit(limit: number | undefined) {
+  if (!Number.isFinite(limit)) return DEFAULT_NOTIFICATION_LIST_LIMIT;
+  return Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_NOTIFICATION_LIST_LIMIT)), MAX_NOTIFICATION_LIST_LIMIT);
+}
+
+function normalizeNullableDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function encodeNotificationCursor(row: AppNotificationRecord) {
+  return Buffer.from(JSON.stringify({
+    createdAt: row.createdAt,
+    id: row.id,
+  }), 'utf8').toString('base64url');
+}
+
+function decodeNotificationCursor(cursor: string | null | undefined) {
+  if (!cursor) return { createdAt: null as string | null, id: null as string | null };
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (typeof parsed.createdAt !== 'string' || typeof parsed.id !== 'string') {
+      throw new NotificationCursorError();
+    }
+    const createdAt = normalizeNullableDate(parsed.createdAt);
+    if (!createdAt) throw new NotificationCursorError();
+    return { createdAt, id: parsed.id };
+  } catch (error) {
+    if (error instanceof NotificationCursorError) throw error;
+    throw new NotificationCursorError();
+  }
+}
+
+async function recordPushDeliveryAttempt(
+  sql: SqlClient,
+  userId: string,
+  notificationId: string | undefined,
+  subscription: PushSubscriptionRow,
+) {
+  if (!notificationId) return null;
+
+  try {
+    const endpointHash = hashPushEndpoint(subscription.endpoint);
+    const rows = await sql`
+      INSERT INTO notification_deliveries (
+        notification_id,
+        user_id,
+        push_subscription_id,
+        endpoint_hash,
+        endpoint,
+        user_agent,
+        status,
+        attempt_count,
+        attempted_at,
+        updated_at
+      )
+      VALUES (
+        ${notificationId},
+        ${userId},
+        ${subscription.id},
+        ${endpointHash},
+        ${subscription.endpoint},
+        ${subscription.userAgent},
+        'attempted',
+        1,
+        NOW(),
+        NOW()
+      )
+      ON CONFLICT (notification_id, endpoint_hash)
+      DO UPDATE SET
+        push_subscription_id = EXCLUDED.push_subscription_id,
+        endpoint = EXCLUDED.endpoint,
+        user_agent = EXCLUDED.user_agent,
+        status = 'attempted',
+        attempt_count = notification_deliveries.attempt_count + 1,
+        attempted_at = NOW(),
+        last_error = NULL,
+        updated_at = NOW()
+      RETURNING id
+    `;
+    return rows[0]?.id ? String(rows[0].id) : null;
+  } catch (error) {
+    logError('push_delivery_attempt_record_failed', error, {
+      userId,
+      notificationId,
+      endpoint: subscription.endpoint,
+    });
+    return null;
+  }
+}
+
+async function updatePushDeliveryStatus(
+  sql: SqlClient,
+  deliveryId: string | null,
+  status: 'delivered' | 'failed',
+  lastError?: string,
+) {
+  if (!deliveryId) return;
+
+  try {
+    await sql`
+      UPDATE notification_deliveries
+      SET
+        status = ${status},
+        delivered_at = CASE WHEN ${status} = 'delivered' THEN NOW() ELSE delivered_at END,
+        failed_at = CASE WHEN ${status} = 'failed' THEN NOW() ELSE failed_at END,
+        last_error = ${lastError ?? null},
+        updated_at = NOW()
+      WHERE id = ${deliveryId}
+    `;
+  } catch (error) {
+    logError('push_delivery_status_update_failed', error, {
+      deliveryId,
+      status,
+    });
+  }
+}
+
 async function sendPushNotificationToUser(
   sql: SqlClient,
   userId: string,
@@ -221,6 +397,7 @@ export async function sendPushPayloadToUser(
 
   const rows = await sql`
     SELECT
+      id,
       endpoint,
       p256dh,
       auth,
@@ -236,6 +413,7 @@ export async function sendPushPayloadToUser(
 
   await Promise.allSettled(
     subscriptions.map(async (subscription) => {
+      const deliveryId = await recordPushDeliveryAttempt(sql, userId, notificationId, subscription);
       try {
         await client.sendNotification(
           {
@@ -248,7 +426,9 @@ export async function sendPushPayloadToUser(
           serializedPayload,
           { timeout: getPushSendTimeoutMs() },
         );
+        await updatePushDeliveryStatus(sql, deliveryId, 'delivered');
       } catch (error) {
+        const deliveryError = getPushDeliveryError(error);
         const statusCode =
           typeof error === 'object' &&
           error !== null &&
@@ -256,6 +436,8 @@ export async function sendPushPayloadToUser(
           typeof (error as { statusCode?: unknown }).statusCode === 'number'
             ? (error as { statusCode: number }).statusCode
             : null;
+
+        await updatePushDeliveryStatus(sql, deliveryId, 'failed', deliveryError);
 
         if (statusCode === 404 || statusCode === 410) {
           await sql`
@@ -274,6 +456,7 @@ export async function sendPushPayloadToUser(
           userId,
           endpoint: subscription.endpoint,
           notificationId,
+          deliveryId,
         });
       }
     }),
@@ -286,6 +469,7 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
       await assertInfrastructure(sql, 'notifications', {
         relations: [
           { name: 'notifications' },
+          { name: 'notification_deliveries' },
           { name: 'push_subscriptions' },
         ],
         columns: [
@@ -301,6 +485,18 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
           { table: 'notifications', column: 'source_schedule_id' },
           { table: 'notifications', column: 'kind' },
           { table: 'notifications', column: 'created_at' },
+          { table: 'notification_deliveries', column: 'notification_id' },
+          { table: 'notification_deliveries', column: 'user_id' },
+          { table: 'notification_deliveries', column: 'push_subscription_id' },
+          { table: 'notification_deliveries', column: 'endpoint_hash' },
+          { table: 'notification_deliveries', column: 'endpoint' },
+          { table: 'notification_deliveries', column: 'user_agent' },
+          { table: 'notification_deliveries', column: 'status' },
+          { table: 'notification_deliveries', column: 'attempt_count' },
+          { table: 'notification_deliveries', column: 'attempted_at' },
+          { table: 'notification_deliveries', column: 'delivered_at' },
+          { table: 'notification_deliveries', column: 'failed_at' },
+          { table: 'notification_deliveries', column: 'last_error' },
           { table: 'push_subscriptions', column: 'user_id' },
           { table: 'push_subscriptions', column: 'endpoint' },
           { table: 'push_subscriptions', column: 'p256dh' },
@@ -314,6 +510,9 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
           { name: 'idx_notifications_user_read' },
           { name: 'idx_notifications_user_dedupe' },
           { name: 'idx_notifications_source_schedule' },
+          { name: 'idx_notification_deliveries_notification' },
+          { name: 'idx_notification_deliveries_user_created' },
+          { name: 'idx_notification_deliveries_status' },
           { name: 'idx_push_subscriptions_user_seen' },
         ],
       });
@@ -326,8 +525,22 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
   await ensureNotificationsInfrastructurePromise;
 }
 
-export async function listNotificationsForUser(sql: SqlClient, userId: string) {
+export async function listNotificationsForUser(
+  sql: SqlClient,
+  userId: string,
+  options: ListNotificationsOptions = {},
+): Promise<ListNotificationsResult> {
   await ensureNotificationsInfrastructure(sql);
+
+  const limit = normalizeNotificationListLimit(options.limit);
+  const queryLimit = limit + 1;
+  const search = options.search?.trim() ? options.search.trim() : null;
+  const read = options.read ?? null;
+  const tone = options.tone ?? null;
+  const kind = options.kind ?? null;
+  const createdFrom = normalizeNullableDate(options.createdFrom);
+  const createdTo = normalizeNullableDate(options.createdTo);
+  const cursor = decodeNotificationCursor(options.cursor);
 
   const rows = await sql`
     SELECT
@@ -344,11 +557,32 @@ export async function listNotificationsForUser(sql: SqlClient, userId: string) {
       kind
     FROM notifications
     WHERE user_id = ${userId}
+      AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
+      AND (${read}::boolean IS NULL OR read = ${read}::boolean)
+      AND (${tone}::text IS NULL OR tone = ${tone})
+      AND (${kind}::text IS NULL OR kind = ${kind})
+      AND (${createdFrom}::timestamptz IS NULL OR created_at >= ${createdFrom}::timestamptz)
+      AND (${createdTo}::timestamptz IS NULL OR created_at <= ${createdTo}::timestamptz)
+      AND (
+        ${cursor.createdAt}::timestamptz IS NULL
+        OR created_at < ${cursor.createdAt}::timestamptz
+        OR (created_at = ${cursor.createdAt}::timestamptz AND id < ${cursor.id}::uuid)
+      )
     ORDER BY created_at DESC
-    LIMIT 200
+    LIMIT ${queryLimit}
   `;
 
-  return rows.map((row) => mapNotificationRow(row as unknown as NotificationRow));
+  const notifications = rows.slice(0, limit).map((row) => mapNotificationRow(row as unknown as NotificationRow));
+  const lastNotification = notifications.at(-1);
+
+  return {
+    notifications,
+    pageInfo: {
+      hasMore: rows.length > limit,
+      nextCursor: rows.length > limit && lastNotification ? encodeNotificationCursor(lastNotification) : null,
+      limit,
+    },
+  };
 }
 
 export async function getNotificationsEnabled(sql: SqlClient, userId: string) {
@@ -617,12 +851,29 @@ export async function markAllNotificationsRead(sql: SqlClient, userId: string) {
   return rows.length;
 }
 
-export async function clearNotificationsForUser(sql: SqlClient, userId: string) {
+export async function clearNotificationsForUser(
+  sql: SqlClient,
+  userId: string,
+  filters: NotificationListFilters = {},
+) {
   await ensureNotificationsInfrastructure(sql);
+
+  const search = filters.search?.trim() ? filters.search.trim() : null;
+  const read = filters.read ?? null;
+  const tone = filters.tone ?? null;
+  const kind = filters.kind ?? null;
+  const createdFrom = normalizeNullableDate(filters.createdFrom);
+  const createdTo = normalizeNullableDate(filters.createdTo);
 
   const rows = await sql`
     DELETE FROM notifications
     WHERE user_id = ${userId}
+      AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
+      AND (${read}::boolean IS NULL OR read = ${read}::boolean)
+      AND (${tone}::text IS NULL OR tone = ${tone})
+      AND (${kind}::text IS NULL OR kind = ${kind})
+      AND (${createdFrom}::timestamptz IS NULL OR created_at >= ${createdFrom}::timestamptz)
+      AND (${createdTo}::timestamptz IS NULL OR created_at <= ${createdTo}::timestamptz)
     RETURNING id
   `;
 

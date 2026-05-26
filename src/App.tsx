@@ -29,7 +29,7 @@ import { useHolidays } from './hooks/useHolidays';
 import { useAlarmSound } from './hooks/useAlarmSound';
 import { useAppConfig } from './hooks/useAppConfig';
 import { useNotes } from './hooks/useNotes';
-import { useNotifications } from './hooks/useNotifications';
+import { useNotifications, type NotificationListQuery, type NotificationsSnapshot } from './hooks/useNotifications';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
@@ -159,6 +159,27 @@ type ActiveAlarm = {
 
 const DISMISSED_ALARMS_STORAGE_KEY = 'lembreto.dismissedAlarms.v1';
 const LOCAL_NOTIFICATION_DEDUPE_STORAGE_KEY = 'lembreto.localNotificationDedupe.v1';
+const CLIENT_SYNC_CHANNEL_NAME = 'lembreto.clientSync.v1';
+const CLIENT_SYNC_LOCK_STORAGE_KEY = 'lembreto.clientSync.lock.v1';
+const CLIENT_SYNC_EVENT_STORAGE_KEY = 'lembreto.clientSync.event.v1';
+const CLIENT_SYNC_LOCK_TTL_MS = 45000;
+const CLIENT_SYNC_TICK_MS = 30000;
+const CLIENT_SYNC_NOTES_INTERVAL_MS = 60000;
+const CLIENT_SYNC_NOTIFICATIONS_INTERVAL_MS = 60000;
+const CLIENT_SYNC_DUE_INTERVAL_MS = 30000;
+
+type ClientSyncLock = {
+  ownerId: string;
+  userId: string;
+  expiresAt: number;
+};
+
+type ClientSyncMessage = {
+  type: 'notifications-snapshot';
+  senderId: string;
+  userId: string;
+  snapshot: NotificationsSnapshot;
+};
 
 function hasTaskDueDate(task: Task): task is TaskWithDueDate {
   return typeof task.dueDate === 'string' && task.dueDate.length > 0;
@@ -205,6 +226,49 @@ function rememberStringInLocalStorage(storageKey: string, value: string) {
   } catch {
     // Local dedupe is best effort; backend state is still authoritative online.
   }
+}
+
+function createClientSyncId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function readClientSyncLock(lockKey: string): ClientSyncLock | null {
+  try {
+    const raw = window.localStorage.getItem(lockKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ClientSyncLock>;
+    if (
+      typeof parsed.ownerId !== 'string' ||
+      typeof parsed.userId !== 'string' ||
+      typeof parsed.expiresAt !== 'number'
+    ) {
+      return null;
+    }
+    return parsed as ClientSyncLock;
+  } catch {
+    return null;
+  }
+}
+
+function isNotificationsSnapshot(value: unknown): value is NotificationsSnapshot {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    Array.isArray((value as { notifications?: unknown }).notifications) &&
+    typeof (value as { enabled?: unknown }).enabled === 'boolean',
+  );
+}
+
+function isClientSyncMessage(value: unknown): value is ClientSyncMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<ClientSyncMessage>;
+  return message.type === 'notifications-snapshot' &&
+    typeof message.senderId === 'string' &&
+    typeof message.userId === 'string' &&
+    isNotificationsSnapshot(message.snapshot);
 }
 
 function buildAlarmInstanceKey(input: {
@@ -441,12 +505,16 @@ export default function App() {
   } = useNotes(isResetPasswordRoute ? null : auth.token);
   const {
     notifications,
+    pageInfo: notificationPageInfo,
     serverEnabled: serverNotificationsEnabled,
     pushConfigured,
     pushPublicKey,
     loaded: notificationsLoaded,
+    isLoadingMore: isLoadingMoreNotifications,
     refreshNotifications,
+    applyNotificationsSnapshot,
     processDueNotifications,
+    loadMoreNotifications,
     createNotification,
     markNotificationRead,
     markAllRead,
@@ -579,7 +647,8 @@ export default function App() {
   const holidayRefreshDayRef = useRef(format(new Date(), 'yyyy-MM-dd'));
   const notificationPreferenceHydratedRef = useRef(false);
   const notificationsOverrideRef = useRef<boolean | null>(null);
-  const dueNotificationFallbackInFlightRef = useRef(false);
+  const clientSyncTabIdRef = useRef(createClientSyncId());
+  const clientSyncInFlightRef = useRef(false);
   const previousPendingOfflineTaskCountRef = useRef(0);
   const seenPushKeysRef = useRef<Set<string>>(new Set());
   const localNotificationDedupeRef = useRef<Set<string>>(new Set());
@@ -769,70 +838,160 @@ export default function App() {
   useEffect(() => {
     if (!auth.token) return undefined;
 
-    const intervalId = window.setInterval(() => {
-      void refreshNotifications().catch(() => {
-        // keep local state as-is when polling fails
+    const token = auth.token;
+    const syncUserId = auth.currentUser?.id ?? token.slice(-16);
+    const tabId = clientSyncTabIdRef.current;
+    const lockKey = `${CLIENT_SYNC_LOCK_STORAGE_KEY}:${syncUserId}`;
+    const eventKey = `${CLIENT_SYNC_EVENT_STORAGE_KEY}:${syncUserId}`;
+    let stopped = false;
+    let lastDueProcessAt = 0;
+    let lastNotesRefreshAt = Date.now();
+    let lastNotificationRefreshAt = Date.now();
+    let channel: BroadcastChannel | null = null;
+
+    const applyMessage = (message: unknown) => {
+      if (!isClientSyncMessage(message)) return;
+      if (message.senderId === tabId || message.userId !== syncUserId) return;
+      applyNotificationsSnapshot(message.snapshot);
+    };
+
+    const publishNotificationsSnapshot = (snapshot: NotificationsSnapshot) => {
+      const message: ClientSyncMessage = {
+        type: 'notifications-snapshot',
+        senderId: tabId,
+        userId: syncUserId,
+        snapshot,
+      };
+
+      channel?.postMessage(message);
+      try {
+        window.localStorage.setItem(eventKey, JSON.stringify({ ...message, publishedAt: Date.now() }));
+      } catch {
+        // BroadcastChannel/localStorage sync is best effort; the leader tab still has fresh state.
+      }
+    };
+
+    const acquireLeadership = () => {
+      const now = Date.now();
+      const current = readClientSyncLock(lockKey);
+      if (current && current.ownerId !== tabId && current.userId === syncUserId && current.expiresAt > now) {
+        return false;
+      }
+
+      try {
+        window.localStorage.setItem(
+          lockKey,
+          JSON.stringify({
+            ownerId: tabId,
+            userId: syncUserId,
+            expiresAt: now + CLIENT_SYNC_LOCK_TTL_MS,
+          } satisfies ClientSyncLock),
+        );
+        return readClientSyncLock(lockKey)?.ownerId === tabId;
+      } catch {
+        return document.visibilityState === 'visible';
+      }
+    };
+
+    const releaseLeadership = () => {
+      if (readClientSyncLock(lockKey)?.ownerId !== tabId) return;
+      try {
+        window.localStorage.removeItem(lockKey);
+      } catch {
+        // Nothing to release if storage is unavailable.
+      }
+    };
+
+    const runClientSync = (reason: 'startup' | 'interval' | 'visible') => {
+      if (clientSyncInFlightRef.current) return;
+      if (!acquireLeadership()) return;
+
+      const now = Date.now();
+      const isVisibilityRefresh = reason === 'visible';
+      const shouldProcessDue = notificationsEnabled && (
+        reason !== 'interval' || now - lastDueProcessAt >= CLIENT_SYNC_DUE_INTERVAL_MS
+      );
+      const shouldRefreshNotes = (
+        (isVisibilityRefresh && now - lastNotesRefreshAt >= 15000) ||
+        now - lastNotesRefreshAt >= CLIENT_SYNC_NOTES_INTERVAL_MS
+      );
+      const shouldRefreshNotifications = !shouldProcessDue && (
+        (isVisibilityRefresh && now - lastNotificationRefreshAt >= 15000) ||
+        now - lastNotificationRefreshAt >= CLIENT_SYNC_NOTIFICATIONS_INTERVAL_MS
+      );
+
+      if (!shouldProcessDue && !shouldRefreshNotes && !shouldRefreshNotifications) return;
+
+      clientSyncInFlightRef.current = true;
+
+      void (async () => {
+        const sideTasks: Array<Promise<unknown>> = [];
+        let snapshot: NotificationsSnapshot | null = null;
+
+        if (shouldRefreshNotes) {
+          lastNotesRefreshAt = now;
+          sideTasks.push(refreshNotes(token).catch(() => {
+            // keep current notes when the leader background sync fails
+          }));
+        }
+
+        if (shouldProcessDue) {
+          lastDueProcessAt = now;
+          lastNotificationRefreshAt = now;
+          snapshot = await processDueNotifications(token).catch(() => null);
+        } else if (shouldRefreshNotifications) {
+          lastNotificationRefreshAt = now;
+          snapshot = await refreshNotifications(token).catch(() => null);
+        }
+
+        await Promise.all(sideTasks);
+        if (snapshot && !stopped) publishNotificationsSnapshot(snapshot);
+      })().finally(() => {
+        clientSyncInFlightRef.current = false;
       });
-    }, 60000);
+    };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      void refreshNotifications().catch(() => {
-        // best effort refresh on return
-      });
+      if (document.visibilityState === 'visible') runClientSync('visible');
     };
 
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== eventKey || !event.newValue) return;
+      try {
+        applyMessage(JSON.parse(event.newValue));
+      } catch {
+        // Ignore malformed cross-tab sync payloads.
+      }
+    };
+
+    if ('BroadcastChannel' in window) {
+      channel = new BroadcastChannel(CLIENT_SYNC_CHANNEL_NAME);
+      channel.onmessage = (event) => applyMessage(event.data);
+    }
+
+    window.addEventListener('storage', handleStorage);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [auth.token, refreshNotifications]);
-
-  useEffect(() => {
-    if (!auth.token) return undefined;
-
-    const intervalId = window.setInterval(() => {
-      void refreshNotes(auth.token)
-        .then(() => refreshNotifications(auth.token))
-        .catch(() => {
-          // keep current notes/notifications when the background sync fails
-        });
-    }, 60000);
-
-    return () => window.clearInterval(intervalId);
-  }, [auth.token, refreshNotes, refreshNotifications]);
-
-  useEffect(() => {
-    if (!auth.token || !notificationsEnabled) return undefined;
-
-    const runFallback = () => {
-      if (dueNotificationFallbackInFlightRef.current) return;
-      dueNotificationFallbackInFlightRef.current = true;
-
-      void processDueNotifications(auth.token)
-        .catch(() => {
-          // keep local state as-is when the authenticated due-notification fallback fails
-        })
-        .finally(() => {
-          dueNotificationFallbackInFlightRef.current = false;
-        });
-    };
-
-    runFallback();
-    const intervalId = window.setInterval(runFallback, 30000);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') runFallback();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    runClientSync('startup');
+    const intervalId = window.setInterval(() => runClientSync('interval'), CLIENT_SYNC_TICK_MS);
 
     return () => {
+      stopped = true;
       window.clearInterval(intervalId);
+      window.removeEventListener('storage', handleStorage);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      channel?.close();
+      releaseLeadership();
     };
-  }, [auth.token, notificationsEnabled, processDueNotifications]);
+  }, [
+    applyNotificationsSnapshot,
+    auth.currentUser?.id,
+    auth.token,
+    notificationsEnabled,
+    processDueNotifications,
+    refreshNotes,
+    refreshNotifications,
+  ]);
 
   useEffect(() => () => {
     if (profileCloseTimerRef.current) {
@@ -1763,8 +1922,24 @@ export default function App() {
     });
   }, [markAllRead, triggerToastOnly]);
 
-  const clearNotifications = useCallback(() => {
-    void clearAll().catch(() => {
+  const handleNotificationFiltersChange = useCallback((query: NotificationListQuery) => {
+    if (!auth.token) return;
+
+    void refreshNotifications(auth.token, query).catch(() => {
+      triggerToastOnly('Não foi possível filtrar', 'Tente buscar as notificações novamente.');
+    });
+  }, [auth.token, refreshNotifications, triggerToastOnly]);
+
+  const loadMoreNotificationPage = useCallback(() => {
+    if (!auth.token) return;
+
+    void loadMoreNotifications(auth.token).catch(() => {
+      triggerToastOnly('Não foi possível carregar mais', 'Tente avançar a página novamente.');
+    });
+  }, [auth.token, loadMoreNotifications, triggerToastOnly]);
+
+  const clearNotifications = useCallback((filters?: NotificationListQuery) => {
+    void clearAll(filters).catch(() => {
       triggerToastOnly('Não foi possível limpar', 'Tente limpar o histórico novamente.');
     });
   }, [clearAll, triggerToastOnly]);
@@ -3762,8 +3937,12 @@ export default function App() {
                 {activeTab === 'notifications' && (
                   <NotificationsPage
                     notifications={notifications}
+                    pageInfo={notificationPageInfo}
+                    isLoadingMore={isLoadingMoreNotifications}
                     onMarkAllRead={markAllNotificationsRead}
                     onClearAll={clearNotifications}
+                    onFiltersChange={handleNotificationFiltersChange}
+                    onLoadMore={loadMoreNotificationPage}
                     onOpenNotification={handleOpenNotification}
                     onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
                     isNotificationActionBusy={isNotificationActionBusy}
