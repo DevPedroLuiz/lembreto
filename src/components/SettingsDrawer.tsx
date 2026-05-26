@@ -314,12 +314,8 @@ export function SettingsDrawer({
   onToggleDarkMode,
   notificationsEnabled,
   onToggleNotifications,
-  desktopNotificationsSupported,
   desktopNotificationsEnabled,
   desktopNotificationsReady,
-  desktopNotificationsPermission,
-  desktopNotificationsConfigured,
-  desktopNotificationsError,
   isSyncingDesktopNotifications,
   onToggleDesktopNotifications,
   onOpenNotificationsCenter,
@@ -1107,76 +1103,6 @@ export function SettingsDrawer({
         );
 
       case 'notifications': {
-        const desktopNotificationsStatus = (() => {
-          if (!desktopNotificationsSupported) {
-            return {
-              badge: 'Indisponíveis',
-              title: 'Notificações do Windows não compatíveis',
-              description:
-                'Este navegador ou dispositivo não oferece suporte a notificações push em segundo plano.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          if (!desktopNotificationsConfigured) {
-            return {
-              badge: 'Pendente',
-              title: 'Push ainda não configurado',
-              description:
-                'As chaves do ambiente ainda não foram carregadas; portanto, este navegador não pode se conectar ao Windows.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          if (desktopNotificationsReady) {
-            return {
-              badge: 'Ativas',
-              title: 'Notificações do Windows ativas',
-              description:
-                'Este navegador já está conectado e receberá avisos mesmo fora da aba do sistema.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          if (desktopNotificationsPermission === 'denied') {
-            return {
-              badge: 'Bloqueadas',
-              title: 'Permissão bloqueada no navegador',
-              description:
-                'Libere a permissão do site nas configurações do navegador para voltar a receber avisos do Windows.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          if (isSyncingDesktopNotifications) {
-            return {
-              badge: 'Conectando',
-              title: 'Conectando este navegador',
-              description:
-                'Estamos registrando o dispositivo para que os avisos cheguem fora da aba.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          if (desktopNotificationsEnabled) {
-            return {
-              badge: 'Pendente',
-              title: 'Conexão pendente',
-              description:
-                'A preferência está ativa, mas este navegador ainda não confirmou a assinatura push.',
-              buttonLabel: null as string | null,
-            };
-          }
-
-          return {
-            badge: 'Pendente',
-            title: 'Ative as notificações do Windows',
-            description:
-              'Use o toggle acima para pedir permissão ao navegador e conectar este dispositivo.',
-            buttonLabel: null as string | null,
-          };
-        })();
-
         return (
           <section className="space-y-4">
             <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
@@ -1186,54 +1112,6 @@ export function SettingsDrawer({
                 description="Defina como o Lembreto chama sua atenção."
               />
               {renderToggleCards(notificationCards)}
-            </section>
-
-            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
-              <SectionHeader
-                eyebrow="Windows"
-                title="Estado do push desktop"
-                description="Acompanhe a conexão deste navegador com os avisos do Windows."
-              />
-
-              <div className="rounded-[26px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="space-y-3">
-                    <span className="inline-flex rounded-full border border-slate-200/80 bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-400">
-                      {desktopNotificationsStatus.badge}
-                    </span>
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-                        {desktopNotificationsStatus.title}
-                      </h3>
-                      <p className="mt-2 max-w-xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-                        {desktopNotificationsStatus.description}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200">
-                    {isSyncingDesktopNotifications ? <Loader2 size={18} className="animate-spin" /> : <BellRing size={18} />}
-                  </div>
-                </div>
-
-                {desktopNotificationsError ? (
-                  <p className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-100">
-                    {desktopNotificationsError}
-                  </p>
-                ) : null}
-
-                {desktopNotificationsStatus.buttonLabel ? (
-                  <button
-                    type="button"
-                    onClick={onToggleDesktopNotifications}
-                    disabled={isSyncingDesktopNotifications}
-                    className="action-primary mt-5 w-full justify-between disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {desktopNotificationsStatus.buttonLabel}
-                    {isSyncingDesktopNotifications ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-                  </button>
-                ) : null}
-              </div>
             </section>
 
             <ActionPanel

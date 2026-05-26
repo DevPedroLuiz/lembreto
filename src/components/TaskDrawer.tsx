@@ -64,6 +64,32 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   high: 'Alta',
 };
 
+const PRIORITY_OPTIONS: Array<{
+  value: Priority;
+  label: string;
+  description: string;
+  tone: string;
+}> = [
+  {
+    value: 'high',
+    label: 'Alta',
+    description: 'Precisa de decisão rápida.',
+    tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
+  },
+  {
+    value: 'medium',
+    label: 'Média',
+    description: 'Importante para manter o ritmo.',
+    tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+  },
+  {
+    value: 'low',
+    label: 'Baixa',
+    description: 'Pode esperar sem travar o dia.',
+    tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+  },
+];
+
 const OVERDUE_INTENSITY_OPTIONS: Array<{
   value: TaskOverdueReminderIntensity;
   label: string;
@@ -590,8 +616,8 @@ export function TaskDrawer({
 
                       <section className="surface-soft p-3.5 sm:p-5">
                         <SectionHeader
-                          title="Prazo e organização"
-                          description="Defina quando o lembrete acontece e como ele aparece."
+                          title="Prazo"
+                          description="Defina quando o lembrete começa, termina ou fica sem horário fixo."
                           icon={<CalendarDays size={18} />}
                         />
 
@@ -700,16 +726,49 @@ export function TaskDrawer({
                               {dueDateError || endTimeError || `Sem horário inicial, o lembrete fica sem início e usa o intervalo das configurações: ${noTimeReminderFallbackTime}.`}
                             </p>
                           </div>
+                        </div>
+                      </section>
 
+                      <section className="surface-soft p-3.5 sm:p-5">
+                        <SectionHeader
+                          title="Organização"
+                          description="Classifique o lembrete para encontrar e priorizar mais rápido."
+                          icon={<Flag size={18} />}
+                        />
+
+                        <div className="space-y-5">
                           <div className="grid gap-4 sm:grid-cols-2">
                             <div>
                               <FieldLabel>Prioridade</FieldLabel>
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                {PRIORITY_OPTIONS.map((option) => (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    disabled={isSubmitting}
+                                    onClick={() => setPriority(option.value)}
+                                    aria-pressed={priority === option.value}
+                                    className={cn(
+                                      'rounded-2xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                                      priority === option.value
+                                        ? 'border-blue-400 bg-blue-50 shadow-[0_14px_28px_-24px_rgba(37,99,235,0.7)] dark:border-blue-400/50 dark:bg-blue-500/10'
+                                        : 'border-slate-200 bg-slate-50/80 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]',
+                                    )}
+                                  >
+                                    <span className={`icon-slot mb-3 h-9 w-9 rounded-2xl ${option.tone}`}>
+                                      <Flag size={16} />
+                                    </span>
+                                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{option.label}</span>
+                                    <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{option.description}</span>
+                                  </button>
+                                ))}
+                              </div>
                               <select
                                 value={priority}
                                 disabled={isSubmitting}
                                 data-testid="task-priority-select"
                                 onChange={(event) => setPriority(event.target.value as Priority)}
-                                className="field-control cursor-pointer"
+                                className="field-control mt-3 cursor-pointer"
                               >
                                 <option value="low">Baixa</option>
                                 <option value="medium">Média</option>
@@ -856,70 +915,46 @@ export function TaskDrawer({
                   )}
 
                   {!isEditing && activeTab === 'recurrence' && (
-                    <section className="surface-soft p-3.5 sm:p-5">
-                      <SectionHeader
-                          title="Repetição"
-                          description="Repita o mesmo lembrete em vários dias."
-                        icon={<Repeat size={18} />}
-                      />
-
-                      <div className="space-y-4">
-                        <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:rounded-[24px]">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar repetição</p>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                              Gere vários lembretes em um único envio.
-                            </p>
-                          </div>
-
-                          <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
-                            <input
-                              type="checkbox"
-                              data-testid="task-recurrence-toggle"
-                              checked={recurrenceEnabled}
-                              disabled={isSubmitting}
-                              onChange={(event) => setRecurrenceEnabled(event.target.checked)}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            Repetir
-                          </label>
-                        </div>
-
-                        {recurrenceEnabled && (
-                          <div className="space-y-5">
-                            <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
-                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="min-w-0 sm:pr-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="icon-slot h-8 w-8 rounded-xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-                                      <BellOff size={15} />
-                                    </span>
-                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                      Silenciar notificações em feriados
-                                    </p>
-                                  </div>
-                                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                                    O lembrete continua na agenda, mas não envia alertas quando cair em feriado nacional, estadual ou municipal da sua região.
-                                  </p>
-                                </div>
-
-                                <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
-                                  <input
-                                    type="checkbox"
-                                    data-testid="task-holiday-notification-toggle"
-                                    checked={suppressHolidayNotifications}
-                                    disabled={isSubmitting}
-                                    onChange={(event) => setSuppressHolidayNotifications(event.target.checked)}
-                                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  Ignorar
-                                </label>
-                              </div>
+                    <section className="space-y-4">
+                      <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_50px_-34px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-white/[0.04]">
+                        <div className="bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 p-5 text-white sm:p-6">
+                          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="max-w-xl">
+                              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/12 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/80">
+                                <Repeat size={13} />
+                                Repetição
+                              </span>
+                              <h3 className="mt-4 text-2xl font-semibold tracking-tight">Crie uma sequência sem repetir trabalho.</h3>
+                              <p className="mt-2 text-sm leading-6 text-blue-50/90">
+                                Ative, escolha um modelo e ajuste a data final. O Lembreto mostra quantos itens serão criados antes do envio.
+                              </p>
                             </div>
 
+                            <label className="inline-flex min-h-[46px] w-full items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/12 px-3 py-2 text-sm font-semibold text-white backdrop-blur-sm sm:w-[170px]">
+                              <span>{recurrenceEnabled ? 'Ativada' : 'Desativada'}</span>
+                              <input
+                                type="checkbox"
+                                data-testid="task-recurrence-toggle"
+                                checked={recurrenceEnabled}
+                                disabled={isSubmitting}
+                                onChange={(event) => setRecurrenceEnabled(event.target.checked)}
+                                className="h-5 w-5 rounded border-white/40 bg-white/20 text-blue-600 focus:ring-white/40"
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        {!recurrenceEnabled ? (
+                          <div className="p-5 sm:p-6">
+                            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-5 text-sm leading-6 text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-400">
+                              A repetição está desligada. Ative para transformar este lembrete em uma rotina diária, semanal ou por período.
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-5 p-5 sm:p-6">
                             <div>
                               <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                                Sugestões de repetição
+                                Modelos inteligentes
                               </p>
                               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {RECURRENCE_SUGGESTIONS.map((suggestion) => (
@@ -935,80 +970,116 @@ export function TaskDrawer({
                               </div>
                             </div>
 
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              <div>
-                                <FieldLabel>Como repetir</FieldLabel>
-                                <select
-                                  value={recurrenceMode}
-                                  disabled={isSubmitting}
-                                  data-testid="task-recurrence-mode"
-                                  onChange={(event) => setRecurrenceMode(event.target.value as RecurrenceMode)}
-                                  className="field-control cursor-pointer"
-                                >
-                                  {RECURRENCE_MODE_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div>
-                                <FieldLabel>Repetir até</FieldLabel>
-                                <input
-                                  type="date"
-                                  min={date || minimumDate}
-                                  value={recurrenceUntil}
-                                  disabled={isSubmitting}
-                                  data-testid="task-recurrence-until"
-                                  onChange={(event) => setRecurrenceUntil(event.target.value)}
-                                  style={{ colorScheme: darkMode ? 'dark' : 'light' }}
-                                  className={cn(
-                                    'field-control',
-                                    recurrenceError &&
-                                      'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:focus:border-rose-400',
-                                  )}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
-                              <div className="flex items-start gap-3">
-                                <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
-                                  <Repeat size={18} />
-                                </span>
-                                <div>
-                                  <p
-                                    data-testid="task-recurrence-count"
-                                    className="text-sm font-semibold text-slate-900 dark:text-white"
-                                  >
-                                    {recurrencePreviewCount > 0
-                                      ? recurrencePreviewCount === 1
-                                        ? '1 lembrete será criado'
-                                        : `${recurrencePreviewCount} lembretes serão criados`
-                                      : 'Defina o intervalo para gerar seus lembretes'}
-                                  </p>
-                                  <p
-                                    data-testid="task-recurrence-help"
-                                    className={cn(
-                                      'mt-1 text-sm leading-6',
-                                      recurrenceError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
-                                    )}
-                                  >
-                                    {recurrenceError || 'Ajuste a repetição e a data final antes de criar tudo de uma vez.'}
-                                  </p>
-
-                                  {suppressHolidayNotifications && recurrencePreviewCount > 0 && (
-                                    <p
-                                      data-testid="task-holiday-suppression-preview"
-                                      className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400"
-                                    >
-                                      {holidaySuppressedCount > 0
-                                        ? `${holidaySuppressedCount} ocorrência${holidaySuppressedCount === 1 ? '' : 's'} cairá${holidaySuppressedCount === 1 ? '' : 'o'} em feriado e não enviará alertas.`
-                                        : 'Nenhuma ocorrência desta repetição cai em feriado na sua região atual.'}
-                                    </p>
-                                  )}
+                            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.9fr)]">
+                              <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                                <div className="mb-4 flex items-center gap-3">
+                                  <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                    <CalendarDays size={18} />
+                                  </span>
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">Regra da repetição</p>
+                                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ajuste manualmente quando precisar.</p>
+                                  </div>
                                 </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                  <div>
+                                    <FieldLabel>Como repetir</FieldLabel>
+                                    <select
+                                      value={recurrenceMode}
+                                      disabled={isSubmitting}
+                                      data-testid="task-recurrence-mode"
+                                      onChange={(event) => setRecurrenceMode(event.target.value as RecurrenceMode)}
+                                      className="field-control cursor-pointer"
+                                    >
+                                      {RECURRENCE_MODE_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <FieldLabel>Repetir até</FieldLabel>
+                                    <input
+                                      type="date"
+                                      min={date || minimumDate}
+                                      value={recurrenceUntil}
+                                      disabled={isSubmitting}
+                                      data-testid="task-recurrence-until"
+                                      onChange={(event) => setRecurrenceUntil(event.target.value)}
+                                      style={{ colorScheme: darkMode ? 'dark' : 'light' }}
+                                      className={cn(
+                                        'field-control',
+                                        recurrenceError &&
+                                          'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:focus:border-rose-400',
+                                      )}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                                <div className="flex items-start gap-3">
+                                  <span className="icon-slot h-10 w-10 rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                    <Repeat size={18} />
+                                  </span>
+                                  <div>
+                                    <p
+                                      data-testid="task-recurrence-count"
+                                      className="text-sm font-semibold text-slate-900 dark:text-white"
+                                    >
+                                      {recurrencePreviewCount > 0
+                                        ? recurrencePreviewCount === 1
+                                          ? '1 lembrete será criado'
+                                          : `${recurrencePreviewCount} lembretes serão criados`
+                                        : 'Defina o intervalo para gerar seus lembretes'}
+                                    </p>
+                                    <p
+                                      data-testid="task-recurrence-help"
+                                      className={cn(
+                                        'mt-1 text-sm leading-6',
+                                        recurrenceError ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400',
+                                      )}
+                                    >
+                                      {recurrenceError || 'A prévia muda automaticamente conforme a regra escolhida.'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+                                  <label className="flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      data-testid="task-holiday-notification-toggle"
+                                      checked={suppressHolidayNotifications}
+                                      disabled={isSubmitting}
+                                      onChange={(event) => setSuppressHolidayNotifications(event.target.checked)}
+                                      className="mt-0.5 h-5 w-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <span>
+                                      <span className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-100">
+                                        <BellOff size={15} />
+                                        Silenciar feriados
+                                      </span>
+                                      <span className="mt-1 block text-xs leading-5 text-amber-800/80 dark:text-amber-100/75">
+                                        Mantém o lembrete na agenda, mas evita alertas em feriados da sua região.
+                                      </span>
+                                    </span>
+                                  </label>
+                                </div>
+
+                                {suppressHolidayNotifications && recurrencePreviewCount > 0 && (
+                                  <p
+                                    data-testid="task-holiday-suppression-preview"
+                                    className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400"
+                                  >
+                                    {holidaySuppressedCount > 0
+                                      ? `${holidaySuppressedCount} ocorrência${holidaySuppressedCount === 1 ? '' : 's'} cairá${holidaySuppressedCount === 1 ? '' : 'o'} em feriado e não enviará alertas.`
+                                      : 'Nenhuma ocorrência desta repetição cai em feriado na sua região atual.'}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1018,61 +1089,127 @@ export function TaskDrawer({
                   )}
 
                   {activeTab === 'alarm' && (
-                    <section className="surface-soft p-3.5 sm:p-5">
-                      <SectionHeader
-                        title="Alarme"
-                        description="Toque um alarme sonoro no horário inicial do lembrete."
-                        icon={<BellRing size={18} />}
-                      />
+                    <section className="space-y-4">
+                      <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_50px_-34px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-white/[0.04]">
+                        <div className={cn(
+                          'p-5 text-white sm:p-6',
+                          alarmEnabled ? 'bg-gradient-to-br from-rose-600 via-orange-500 to-amber-400' : 'bg-gradient-to-br from-slate-800 via-slate-700 to-slate-600',
+                        )}>
+                          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="max-w-xl">
+                              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/12 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/80">
+                                <BellRing size={13} />
+                                Alarme sonoro
+                              </span>
+                              <h3 className="mt-4 text-2xl font-semibold tracking-tight">
+                                {alarmEnabled ? 'Alarme ligado para este lembrete.' : 'Somente notificação, sem toque.'}
+                              </h3>
+                              <p className="mt-2 text-sm leading-6 text-white/85">
+                                O alarme toca por 2 minutos no horário inicial e ajuda a destacar compromissos que não podem passar batido.
+                              </p>
+                            </div>
 
-                      <div className="space-y-4">
-                        <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-start sm:justify-between sm:rounded-[24px]">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ativar alarme sonoro</p>
-                            <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                              Quando ativo, você recebe um aviso 15 minutos antes e o alarme toca por 2 minutos no horário inicial.
+                            <label className="inline-flex min-h-[46px] w-full items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/12 px-3 py-2 text-sm font-semibold text-white backdrop-blur-sm sm:w-[170px]">
+                              <span>{alarmEnabled ? 'Ligado' : 'Desligado'}</span>
+                              <input
+                                type="checkbox"
+                                data-testid="task-alarm-toggle"
+                                checked={alarmEnabled}
+                                disabled={isSubmitting || !date || !time}
+                                onChange={(event) => setAlarmEnabled(event.target.checked)}
+                                className="h-5 w-5 rounded border-white/40 bg-white/20 text-rose-600 focus:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50"
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 p-5 sm:p-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+                          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white">Status do alarme</p>
+                            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                              {date && time
+                                ? alarmEnabled
+                                  ? `Pronto para tocar no horário inicial: ${time}.`
+                                  : 'Alarme desativado. O lembrete segue com notificação padrão.'
+                                : 'Defina prazo e horário inicial na aba Detalhes para liberar o alarme.'}
                             </p>
+
+                            <div className="mt-4 grid gap-2">
+                              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]">
+                                <span className="icon-slot h-9 w-9 rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                  <Clock3 size={16} />
+                                </span>
+                                <div>
+                                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Aviso</p>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">15 minutos antes</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]">
+                                <span className="icon-slot h-9 w-9 rounded-xl bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+                                  <BellRing size={16} />
+                                </span>
+                                <div>
+                                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Toque</p>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">2 minutos no início</p>
+                                </div>
+                              </div>
+                            </div>
                           </div>
 
-                          <label className="inline-flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 sm:w-auto">
-                            <input
-                              type="checkbox"
-                              data-testid="task-alarm-toggle"
-                              checked={alarmEnabled}
-                              disabled={isSubmitting || !date || !time}
-                              onChange={(event) => setAlarmEnabled(event.target.checked)}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            Alarme
-                          </label>
-                        </div>
+                          <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                            <div className="mb-4 flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">Avisos de atraso</p>
+                                <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                                  Escolha o tom dos lembretes quando o prazo passar.
+                                </p>
+                              </div>
+                              <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                <BellRing size={18} />
+                              </span>
+                            </div>
 
-                        <div className="rounded-[20px] border border-amber-200/80 bg-amber-50/70 p-4 text-sm leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100 sm:rounded-[24px]">
-                          {date && time
-                            ? alarmEnabled
-                              ? 'Alarme ativado para o horário inicial definido.'
-                              : 'Alarme desativado. O lembrete enviará apenas a notificação no horário inicial.'
-                            : 'Defina data e horário inicial para ativar o alarme sonoro.'}
-                        </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {OVERDUE_INTENSITY_OPTIONS.map((option) => (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  disabled={isSubmitting}
+                                  onClick={() => setOverdueReminderIntensity(option.value)}
+                                  aria-pressed={overdueReminderIntensity === option.value}
+                                  className={cn(
+                                    'rounded-2xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                                    overdueReminderIntensity === option.value
+                                      ? 'border-blue-400 bg-blue-50 dark:border-blue-400/50 dark:bg-blue-500/10'
+                                      : 'border-slate-200 bg-slate-50/80 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]',
+                                  )}
+                                >
+                                  <span className="text-sm font-semibold text-slate-900 dark:text-white">{option.label}</span>
+                                  <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{option.description}</span>
+                                </button>
+                              ))}
+                            </div>
 
-                        <div className="rounded-[20px] border border-slate-200/80 bg-slate-50/75 p-4 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[24px]">
-                          <FieldLabel>Intensidade dos avisos de atraso</FieldLabel>
-                          <select
-                            value={overdueReminderIntensity}
-                            disabled={isSubmitting}
-                            data-testid="task-overdue-intensity"
-                            onChange={(event) => setOverdueReminderIntensity(event.target.value as TaskOverdueReminderIntensity)}
-                            className="field-control cursor-pointer"
-                          >
-                            {OVERDUE_INTENSITY_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="mt-3 border-l-2 border-blue-300 pl-3 text-sm leading-6 dark:border-blue-400/60">
-                            <p className="font-semibold text-slate-800 dark:text-slate-100">{selectedOverdueIntensityOption.policy}</p>
-                            <p className="mt-1 text-slate-500 dark:text-slate-400">{selectedOverdueIntensityOption.description}</p>
+                            <div className="mt-4">
+                              <FieldLabel>Intensidade dos avisos de atraso</FieldLabel>
+                              <select
+                                value={overdueReminderIntensity}
+                                disabled={isSubmitting}
+                                data-testid="task-overdue-intensity"
+                                onChange={(event) => setOverdueReminderIntensity(event.target.value as TaskOverdueReminderIntensity)}
+                                className="field-control cursor-pointer"
+                              >
+                                {OVERDUE_INTENSITY_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm leading-6 dark:border-blue-500/20 dark:bg-blue-500/10">
+                                <p className="font-semibold text-blue-900 dark:text-blue-100">{selectedOverdueIntensityOption.policy}</p>
+                                <p className="mt-1 text-blue-800/80 dark:text-blue-100/75">{selectedOverdueIntensityOption.description}</p>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>

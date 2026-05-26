@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, BellRing, X } from 'lucide-react';
+import { ArrowRight, BellRing, Trash2, X } from 'lucide-react';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { NotificationFeed } from './NotificationFeed';
 import type { AppNotification, OverdueNotificationSnoozePreset } from '../types';
@@ -17,6 +17,7 @@ interface NotificationsInboxDrawerProps {
     preset: OverdueNotificationSnoozePreset,
   ) => void;
   isNotificationActionBusy: (notification: AppNotification) => boolean;
+  onClearRecentNotifications: (notifications: AppNotification[]) => void;
   onOpenCenter: () => void;
 }
 
@@ -29,6 +30,7 @@ export function NotificationsInboxDrawer({
   onPreviewNotification,
   onSnoozeOverdueNotification,
   isNotificationActionBusy,
+  onClearRecentNotifications,
   onOpenCenter,
 }: NotificationsInboxDrawerProps) {
   const recentNotifications = notifications.slice(0, 6);
@@ -71,8 +73,8 @@ export function NotificationsInboxDrawer({
             )}
 
             <div className="border-b border-slate-200/80 px-6 py-5 dark:border-white/10 md:px-7">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <span className="section-eyebrow">
                     <BellRing size={14} />
                     Atualizações recentes
@@ -88,14 +90,28 @@ export function NotificationsInboxDrawer({
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Fechar notificações"
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
-                >
-                  <X size={20} />
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onClearRecentNotifications(recentNotifications)}
+                    disabled={recentNotifications.length === 0}
+                    aria-label="Limpar aba de notificações recentes"
+                    data-testid="notifications-clear-inbox"
+                    className="inline-flex h-11 w-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08] sm:w-auto sm:px-4"
+                  >
+                    <Trash2 size={17} />
+                    <span className="hidden sm:inline">Limpar aba</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Fechar notificações"
+                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-3">

@@ -6,12 +6,13 @@ import {
   CheckCircle2,
   Clock3,
   Flag,
+  Folder,
   ListTodo,
   Plus,
   Sparkles,
   Target,
 } from 'lucide-react';
-import { compareAsc, format, isPast, isToday, parseISO } from 'date-fns';
+import { addDays, compareAsc, format, isSameDay, isPast, isToday, parseISO, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { MetricCard } from '../components/MetricCard';
@@ -127,6 +128,7 @@ function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
 
 interface DashboardPageProps {
   tasks: Task[];
+  categories: string[];
   pendingTasks: Task[];
   overdueTasks: Task[];
   completedTasks: Task[];
@@ -136,6 +138,7 @@ interface DashboardPageProps {
   onOpenCompleted: () => void;
   onOpenToday: () => void;
   onOpenOverdue: () => void;
+  onOpenCalendar: () => void;
   onNewTask: () => void;
   onApplyTemplate: (template: QuickStartTemplate) => void;
   onToggle: (task: Task) => void;
@@ -147,6 +150,7 @@ interface DashboardPageProps {
 
 export function DashboardPage({
   tasks,
+  categories,
   pendingTasks,
   overdueTasks,
   completedTasks,
@@ -156,6 +160,7 @@ export function DashboardPage({
   onOpenCompleted,
   onOpenToday,
   onOpenOverdue,
+  onOpenCalendar,
   onNewTask,
   onApplyTemplate,
   onToggle,
@@ -169,22 +174,40 @@ export function DashboardPage({
     : Math.round((completedTasks.length / tasks.length) * 100);
 
   const activeTasks = React.useMemo(() => [...overdueTasks, ...pendingTasks], [overdueTasks, pendingTasks]);
+  const weeklyProgress = React.useMemo(() => {
+    const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(weekStart, index);
+      const dayTasks = tasks.filter((task) => {
+        if (!task.dueDate) return false;
+
+        try {
+          return isSameDay(parseISO(task.dueDate), date);
+        } catch {
+          return false;
+        }
+      });
+      const dayCompletedTasks = dayTasks.filter((task) => getDerivedTaskStatus(task) === 'completed');
+
+      return {
+        date,
+        label: format(date, 'EEE', { locale: ptBR }).replace('.', ''),
+        total: dayTasks.length,
+        completed: dayCompletedTasks.length,
+      };
+    });
+  }, [tasks]);
+  const weeklyProgressMax = Math.max(1, ...weeklyProgress.map((day) => day.total));
   const sortedPendingTasks = [...activeTasks].sort(compareDashboardTasks);
   const nextTasks = sortedPendingTasks.slice(0, 5);
-  const now = React.useMemo(() => new Date(), []);
-  const next24Hours = React.useMemo(() => new Date(now.getTime() + 24 * 60 * 60 * 1000), [now]);
-  const next24HourCount = pendingTasks.filter((task) => {
-    if (!task.dueDate) return false;
-
-    try {
-      const dueDate = parseISO(task.dueDate);
-      return dueDate >= now && dueDate <= next24Hours;
-    } catch {
-      return false;
-    }
-  }).length;
   const highPriorityOpenCount = activeTasks.filter((task) => task.priority === 'high').length;
+  const mediumPriorityOpenCount = activeTasks.filter((task) => task.priority === 'medium').length;
+  const lowPriorityOpenCount = activeTasks.filter((task) => task.priority === 'low').length;
   const unscheduledOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
+  const activeCategoryCount = categories.filter((category) =>
+    activeTasks.some((task) => task.category === category),
+  ).length;
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -213,6 +236,43 @@ export function DashboardPage({
     : assistantContext === 'today'
       ? 'Ver agenda de hoje'
       : 'Ver agenda completa';
+  const systemShortcuts = [
+    {
+      label: 'Novo lembrete',
+      description: 'Crie uma tarefa com data, prioridade, categoria e alarme.',
+      icon: <Plus size={17} />,
+      onClick: onNewTask,
+      tone: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
+    },
+    {
+      label: 'Agenda',
+      description: 'Abra todos os lembretes em lista para filtrar e organizar.',
+      icon: <ListTodo size={17} />,
+      onClick: onViewAll,
+      tone: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300',
+    },
+    {
+      label: 'Calendário',
+      description: 'Visualize a rotina por dia, semana e mês.',
+      icon: <CalendarDays size={17} />,
+      onClick: onOpenCalendar,
+      tone: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
+    },
+    {
+      label: 'Hoje',
+      description: 'Veja só o que precisa de atenção imediata.',
+      icon: <Clock3 size={17} />,
+      onClick: onOpenToday,
+      tone: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300',
+    },
+    {
+      label: 'Atrasados',
+      description: 'Recupere prazos vencidos sem procurar pela lista inteira.',
+      icon: <Bell size={17} />,
+      onClick: onOpenOverdue,
+      tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
+    },
+  ];
 
   return (
     <motion.div
@@ -345,33 +405,77 @@ export function DashboardPage({
 
           <button
             type="button"
-            onClick={onNewTask}
-            className="group mt-auto flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-blue-300 hover:bg-white sm:min-h-[60px] sm:px-5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
+            onClick={onOpenCalendar}
+            aria-label="Abrir calendário semanal"
+            className="group relative mt-auto w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
           >
-            <div>
-              <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                Novo lembrete
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Gráfico da semana
+                </span>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Lembretes por dia
+                </p>
+              </div>
+              <span className="icon-slot h-9 w-9 rounded-2xl border border-slate-200 bg-white text-slate-600 transition group-hover:border-blue-300 group-hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-300 dark:group-hover:border-blue-500/40 dark:group-hover:text-blue-300">
+                <CalendarDays size={17} />
               </span>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Registre rapidamente o próximo passo.
-              </p>
             </div>
-            <span className="icon-slot flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition group-hover:border-blue-300 group-hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-200 dark:group-hover:border-blue-500/40 dark:group-hover:text-blue-300">
-              <Plus size={18} />
-            </span>
+
+            <div className="grid h-32 grid-cols-7 items-end gap-2">
+              {weeklyProgress.map((day) => {
+                const totalHeight = day.total === 0
+                  ? 0
+                  : Math.max(8, Math.round((day.total / weeklyProgressMax) * 100));
+                const completedHeight = day.total === 0
+                  ? 0
+                  : Math.round((day.completed / day.total) * 100);
+
+                return (
+                  <div key={day.date.toISOString()} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
+                    <div className="relative flex h-24 w-full max-w-[28px] items-end overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/[0.08]">
+                      <div
+                        className="flex w-full items-end rounded-full bg-sky-200 transition-all dark:bg-sky-500/20"
+                        style={{ height: `${totalHeight}%` }}
+                      >
+                        <div
+                          className="w-full rounded-full bg-gradient-to-t from-blue-600 to-cyan-400"
+                          style={{ height: `${completedHeight}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="truncate text-[10px] font-bold uppercase leading-none text-slate-400 dark:text-slate-500">
+                      {day.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-blue-500" />
+                Concluídos
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-sky-200 dark:bg-sky-500/30" />
+                Agendados
+              </span>
+            </div>
           </button>
         </aside>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {[
           {
-            label: 'Próximas 24h',
-            value: next24HourCount,
-            helper: 'Itens com prazo logo à frente',
-            icon: <Clock3 size={18} />,
-            tone: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
-            onClick: onOpenToday,
+            label: 'Categoria',
+            value: activeCategoryCount,
+            helper: 'Categorias com pendências',
+            icon: <Folder size={18} />,
+            tone: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
+            onClick: onViewAll,
           },
           {
             label: 'Alta prioridade',
@@ -382,21 +486,28 @@ export function DashboardPage({
             onClick: onViewAll,
           },
           {
-            label: 'Sem prazo',
-            value: unscheduledOpenCount,
-            helper: 'Bom para revisar e datar',
-            icon: <ListTodo size={18} />,
+            label: 'Média prioridade',
+            value: mediumPriorityOpenCount,
+            helper: 'Itens para manter em ritmo',
+            icon: <Flag size={18} />,
             tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
             onClick: onViewAll,
           },
           {
-            label: 'Ritmo',
-            value: completedPercentage,
-            helper: 'Progresso geral concluído',
-            icon: <CheckCircle2 size={18} />,
+            label: 'Baixa prioridade',
+            value: lowPriorityOpenCount,
+            helper: 'Pode esperar um pouco',
+            icon: <Flag size={18} />,
             tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
-            onClick: onOpenCompleted,
-            suffix: '%',
+            onClick: onViewAll,
+          },
+          {
+            label: 'Sem prazo',
+            value: unscheduledOpenCount,
+            helper: 'Bom para revisar e datar',
+            icon: <ListTodo size={18} />,
+            tone: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300',
+            onClick: onViewAll,
           },
         ].map((item) => (
           <button
@@ -410,7 +521,7 @@ export function DashboardPage({
                 {item.label}
               </p>
               <p className="mt-2 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                {item.value}{item.suffix ?? ''}
+                {item.value}
               </p>
               <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">
                 {item.helper}
@@ -662,26 +773,68 @@ export function DashboardPage({
           </div>
         </div>
 
-        <aside className="surface-panel p-4 sm:p-5 md:p-6">
-          <div className="mb-4 sm:mb-5">
-            <h4 className="text-xl font-semibold text-slate-950 dark:text-white">Atalhos úteis</h4>
-            <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400 sm:text-sm">
-              Crie rapidamente uma base para o restante da semana.
-            </p>
+        <aside className="surface-panel overflow-hidden p-4 sm:p-5 md:p-6">
+          <div className="mb-5 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="section-eyebrow">Atalhos úteis</span>
+              <h4 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Ações rápidas do Lembreto</h4>
+              <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm">
+                Acesse os principais botões do sistema e entenda quando usar cada um.
+              </p>
+            </div>
+            <span className="icon-slot h-11 w-11 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+              <Sparkles size={19} />
+            </span>
           </div>
 
-          <div className="space-y-3">
+          <div className="grid gap-2">
+            {systemShortcuts.map((shortcut) => (
+              <button
+                key={shortcut.label}
+                type="button"
+                onClick={shortcut.onClick}
+                className="group flex w-full items-center gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30 dark:hover:bg-white/[0.06]"
+              >
+                <span className={`icon-slot h-10 w-10 rounded-2xl ${shortcut.tone}`}>
+                  {shortcut.icon}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-white">
+                    {shortcut.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    {shortcut.description}
+                  </span>
+                </span>
+                <span className="icon-slot h-8 w-8 rounded-full text-slate-400 transition group-hover:bg-blue-50 group-hover:text-blue-600 dark:group-hover:bg-blue-500/10 dark:group-hover:text-blue-300">
+                  <ArrowRight size={15} />
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-5 border-t border-slate-200/80 pt-5 dark:border-white/10">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">Modelos rápidos</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Comece com um lembrete pré-preenchido.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
             {QUICK_START_TEMPLATES.map((template) => (
               <button
                 key={template.title}
                 type="button"
                 onClick={() => onApplyTemplate(template)}
-                className="flex w-full items-start justify-between overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50/80 px-3.5 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white sm:px-4 sm:py-4 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
+                className="flex w-full items-center justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white/80 px-3.5 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]"
               >
                 <div className="min-w-0 flex-1 pr-3 sm:pr-4">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">{template.title}</p>
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500 dark:text-slate-400 sm:line-clamp-3 sm:text-sm sm:leading-6">
-                    {template.description}
+                  <p className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-slate-400">
+                    {template.category} · {template.priority === 'high' ? 'Alta prioridade' : template.priority === 'medium' ? 'Média prioridade' : 'Baixa prioridade'}
                   </p>
                 </div>
                 <span className="icon-slot mt-1 h-4 w-4 shrink-0 text-slate-400">
@@ -689,6 +842,7 @@ export function DashboardPage({
                 </span>
               </button>
             ))}
+            </div>
           </div>
         </aside>
       </section>

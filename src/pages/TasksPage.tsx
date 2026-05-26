@@ -414,31 +414,41 @@ function PaginationControls({
 
   const startItem = (currentPage - 1) * PAGE_SIZE + 1;
   const endItem = Math.min(currentPage * PAGE_SIZE, totalItems);
+  const progress = Math.min(100, Math.max(0, (currentPage / totalPages) * 100));
 
   return (
-    <div className="surface-soft flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <p
-        data-testid={`${testIdPrefix}-summary`}
-        className="text-sm font-medium text-slate-500 dark:text-slate-400"
-      >
-        Mostrando {startItem}-{endItem} de {totalItems}
-      </p>
+    <div className="rounded-[24px] border border-slate-200 bg-white/82 p-3 shadow-[0_14px_42px_-34px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p
+            data-testid={`${testIdPrefix}-summary`}
+            className="text-sm font-semibold text-slate-800 dark:text-slate-100"
+          >
+            {startItem}-{endItem} de {totalItems}
+          </p>
+          <p
+            data-testid={`${testIdPrefix}-page`}
+            className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400"
+          >
+            Página {currentPage} de {totalPages}
+          </p>
+        </div>
 
-      <div className="flex items-center justify-between gap-2 sm:justify-end">
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
         <button
           type="button"
           data-testid={`${testIdPrefix}-prev`}
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
-          className="action-secondary h-10 rounded-xl px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600 transition-all hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.07]"
         >
           <ChevronLeft size={16} />
           Anterior
         </button>
 
         <span
-          data-testid={`${testIdPrefix}-page`}
-          className="min-w-[106px] text-center text-sm font-semibold text-slate-600 dark:text-slate-300"
+          aria-hidden="true"
+          className="hidden"
         >
           Página {currentPage} de {totalPages}
         </span>
@@ -448,11 +458,19 @@ function PaginationControls({
           data-testid={`${testIdPrefix}-next`}
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}
-          className="action-secondary h-10 rounded-xl px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600 transition-all hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.07]"
         >
           Próxima
           <ChevronRight size={16} />
         </button>
+        </div>
+      </div>
+
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06]">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all"
+          style={{ width: `${progress}%` }}
+        />
       </div>
     </div>
   );
@@ -994,6 +1012,7 @@ export function TasksPage({
     ],
     [drafts.length, showCompleted, sortedCompletedTasks.length, sortedPendingTasks.length],
   );
+  const activePageTab = pageTabs.find((tab) => tab.value === activeView) ?? pageTabs[0];
 
   const handleResetFilters = React.useCallback(() => {
     setSearchInput('');
@@ -1383,20 +1402,29 @@ export function TasksPage({
     >
       <section className="surface-panel p-4 md:p-6">
         <div className="space-y-4 md:space-y-5">
-          <div className="hidden sm:block">
+          <div className="space-y-4">
             <span className="section-eyebrow">
               <ArrowUpDown size={14} />
               Organização da agenda
             </span>
             <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
-              Filtre, ordene e acompanhe cada entrega com clareza.
+              Escolha uma visão e siga para a ação.
             </h3>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-              Use pesquisa, categorias, prioridade e status para localizar rapidamente o que precisa ser feito agora.
+              Alterne a visão, use atalhos rápidos e abra filtros só quando precisar.
             </p>
+            <button
+              type="button"
+              onClick={onNewTask}
+              className="action-primary mt-4 min-h-[50px] justify-center px-5 lg:mt-0"
+            >
+              <Plus size={18} />
+              Novo lembrete
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-[26px] border border-slate-200 bg-slate-50/75 p-2 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {pageTabs.map((tab) => {
               const isActive = activeView === tab.value;
 
@@ -1408,16 +1436,16 @@ export function TasksPage({
                   onClick={() => onActiveViewChange(tab.value)}
                   aria-pressed={isActive}
                   className={[
-                    'group min-h-[78px] rounded-2xl border p-3 text-left transition-all sm:min-h-[128px] sm:rounded-[24px] sm:p-4',
+                    'group min-h-[88px] rounded-[20px] border p-3 text-left transition-all',
                     isActive
-                      ? 'border-blue-200 bg-blue-50 text-blue-950 shadow-[0_18px_42px_-32px_rgba(37,99,235,0.75)] dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-white'
-                      : 'border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.07]',
+                      ? 'border-blue-300 bg-white text-blue-950 shadow-[0_18px_40px_-30px_rgba(37,99,235,0.65)] dark:border-blue-400/40 dark:bg-blue-500/10 dark:text-white'
+                      : 'border-transparent bg-transparent text-slate-600 hover:bg-white/80 dark:text-slate-300 dark:hover:bg-white/[0.06]',
                   ].join(' ')}
                 >
                   <span className="flex items-start justify-between gap-3">
                     <span
                       className={[
-                        'icon-slot h-8 w-8 rounded-xl sm:h-10 sm:w-10 sm:rounded-2xl',
+                        'icon-slot h-9 w-9 rounded-2xl',
                         isActive
                           ? 'bg-blue-600 text-white dark:bg-blue-400 dark:text-slate-950'
                           : 'bg-slate-100 text-slate-500 group-hover:bg-white dark:bg-white/[0.06] dark:text-slate-300',
@@ -1427,7 +1455,7 @@ export function TasksPage({
                     </span>
                     <span
                       className={[
-                        'hidden rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] sm:inline-flex',
+                        'hidden rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]',
                         isActive
                           ? 'bg-white/80 text-blue-700 dark:bg-white/10 dark:text-blue-100'
                           : 'bg-slate-100 text-slate-500 dark:bg-white/[0.06] dark:text-slate-400',
@@ -1436,15 +1464,15 @@ export function TasksPage({
                       Página
                     </span>
                   </span>
-                  <span className="mt-3 block text-sm font-semibold text-slate-950 dark:text-white sm:mt-4 sm:text-base">
+                  <span className="mt-3 block text-sm font-semibold text-slate-950 dark:text-white">
                     {tab.label}
                   </span>
-                  <span className="mt-1 hidden text-sm leading-6 text-slate-500 dark:text-slate-400 sm:block">
+                  <span className="sr-only">
                     {tab.description}
                   </span>
                   <span
                     className={[
-                      'mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold sm:mt-4 sm:px-3 sm:text-xs',
+                      'mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold',
                       isActive
                         ? 'bg-blue-600 text-white dark:bg-blue-300 dark:text-slate-950'
                         : 'bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300',
@@ -1455,6 +1483,21 @@ export function TasksPage({
                 </button>
               );
             })}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+            <div className="flex items-start gap-3">
+              <span className="icon-slot h-10 w-10 rounded-2xl bg-white text-blue-700 dark:bg-white/[0.08] dark:text-blue-300">
+                {activePageTab.icon}
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">{activePageTab.label}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {activePageTab.description}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">

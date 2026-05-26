@@ -557,6 +557,7 @@ export default function App() {
   const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotificationsInbox, setShowNotificationsInbox] = useState(false);
+  const [hiddenInboxNotificationIds, setHiddenInboxNotificationIds] = useState<Set<string>>(() => new Set());
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [settingsInitialView, setSettingsInitialView] = useState<SettingsView>('appearance');
   const shouldRenderTaskDrawer = useHasBeenOpened(showTaskDrawer);
@@ -1916,6 +1917,33 @@ export default function App() {
     [notifications],
   );
 
+  const visibleInboxNotifications = useMemo(
+    () => notifications.filter((notification) => !hiddenInboxNotificationIds.has(notification.id)),
+    [hiddenInboxNotificationIds, notifications],
+  );
+
+  const visibleInboxUnreadNotifications = useMemo(
+    () => visibleInboxNotifications.filter((notification) => !notification.read).length,
+    [visibleInboxNotifications],
+  );
+
+  useEffect(() => {
+    if (hiddenInboxNotificationIds.size === 0) return;
+
+    const currentNotificationIds = new Set(notifications.map((notification) => notification.id));
+    setHiddenInboxNotificationIds((current) => {
+      const next = new Set<string>();
+      current.forEach((id) => {
+        if (currentNotificationIds.has(id)) next.add(id);
+      });
+      return next.size === current.size ? current : next;
+    });
+  }, [hiddenInboxNotificationIds.size, notifications]);
+
+  useEffect(() => {
+    setHiddenInboxNotificationIds(new Set());
+  }, [auth.currentUser?.id]);
+
   const markAllNotificationsRead = useCallback(() => {
     void markAllRead().catch(() => {
       triggerToastOnly('Não foi possível atualizar', 'Tente marcar as notificações como lidas novamente.');
@@ -3224,6 +3252,19 @@ export default function App() {
     setShowNotificationsInbox(false);
   }, []);
 
+  const clearNotificationsInbox = useCallback((recentNotifications: AppNotification[]) => {
+    if (recentNotifications.length === 0) return;
+
+    setHiddenInboxNotificationIds((current) => {
+      const next = new Set(current);
+      recentNotifications.forEach((notification) => {
+        next.add(notification.id);
+      });
+      return next;
+    });
+    triggerToastOnly('Atualizações limpas', 'Os registros continuam disponíveis na central de notificações.');
+  }, [triggerToastOnly]);
+
   useEffect(() => {
     if (!locationSearch) return;
     if (auth.restoring) return;
@@ -3666,16 +3707,10 @@ export default function App() {
             if (tab === 'tasks') setTasksPageView('agenda');
             setActiveTab(tab);
           }}
-          filterCategory={filterCategory}
-          setFilterCategory={setFilterCategory}
-          categories={categoryOptions}
-          pendingTasks={pendingTasks}
           todayCount={pendingSummary.todayCount}
           overdueCount={pendingSummary.overdueCount}
           onOpenProfile={openProfile}
           onOpenSettings={openSettings}
-          onCreateCategory={createCategory}
-          onDeleteCategory={handleDeleteCategory}
           onToggleVisibility={() => setIsSidebarHidden(true)}
           onLogout={auth.logout}
         />
@@ -3853,6 +3888,7 @@ export default function App() {
                 {activeTab === 'dashboard' && (
                   <DashboardPage
                     tasks={dashboardTasks}
+                    categories={categoryOptions}
                     pendingTasks={pendingTasks}
                     overdueTasks={overdueTasks}
                     completedTasks={completedTasks}
@@ -3862,6 +3898,7 @@ export default function App() {
                     onOpenCompleted={() => openDashboardMetric('completed')}
                     onOpenToday={() => openDashboardMetric('today')}
                     onOpenOverdue={() => openDashboardMetric('overdue')}
+                    onOpenCalendar={openCalendarTab}
                     onNewTask={openNewTask}
                     onApplyTemplate={openTaskFromTemplate}
                     onToggle={handleToggle}
@@ -4226,6 +4263,10 @@ export default function App() {
             setPassword={setProfPassword}
             avatar={profAvatar}
             setAvatar={setProfAvatar}
+            onOpenSettings={() => {
+              closeProfileDrawer();
+              openSettings('account');
+            }}
           />
         )}
 
@@ -4290,13 +4331,14 @@ export default function App() {
         {shouldRenderNotificationsInbox && (
           <NotificationsInboxDrawer
             open={showNotificationsInbox}
-            notifications={notifications}
-            unreadCount={unreadNotifications}
+            notifications={visibleInboxNotifications}
+            unreadCount={visibleInboxUnreadNotifications}
             onClose={closeNotificationsInbox}
             onOpenNotification={handleOpenNotification}
             onPreviewNotification={handlePreviewNotification}
             onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
             isNotificationActionBusy={isNotificationActionBusy}
+            onClearRecentNotifications={clearNotificationsInbox}
             onOpenCenter={openNotificationsCenter}
           />
         )}
