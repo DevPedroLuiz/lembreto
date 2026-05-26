@@ -424,7 +424,7 @@ function PaginationControls({
             data-testid={`${testIdPrefix}-summary`}
             className="text-sm font-semibold text-slate-800 dark:text-slate-100"
           >
-            {startItem}-{endItem} de {totalItems}
+            Mostrando {startItem}-{endItem} de {totalItems}
           </p>
           <p
             data-testid={`${testIdPrefix}-page`}
