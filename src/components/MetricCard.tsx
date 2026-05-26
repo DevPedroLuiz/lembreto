@@ -33,14 +33,14 @@ export function MetricCard({
       aria-label={ariaLabel}
       data-testid={testId}
       className={cn(
-        'surface-panel flex min-h-[122px] w-full flex-col justify-between p-3.5 text-left sm:min-h-[148px] sm:p-5 md:min-h-[152px] md:p-6',
+        'surface-panel flex min-h-[106px] w-full flex-col justify-between p-3.5 text-left sm:min-h-[128px] sm:p-4 md:min-h-[134px] md:p-5',
         isInteractive && 'transition-all hover:-translate-y-1 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]',
         isInteractive && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
         error && 'border-rose-200/80 dark:border-rose-500/20',
       )}
       disabled={!isInteractive}
     >
-      <div className="space-y-2.5 sm:space-y-4">
+      <div className="space-y-2.5 sm:space-y-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:text-[13px]">{title}</p>
         </div>
@@ -69,7 +69,7 @@ export function MetricCard({
         </div>
       </div>
 
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06] sm:mt-7">
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/[0.06] sm:mt-5">
         <div
           className={cn(
             'h-full rounded-full transition-all',

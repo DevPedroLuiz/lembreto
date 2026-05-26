@@ -154,7 +154,7 @@ export function NoteDrawer({
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex max-h-[96dvh] w-full max-w-3xl flex-col overflow-hidden rounded-b-none rounded-t-[26px] border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
+              className="flex h-[100dvh] max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px] sm:border"
               role="dialog"
               aria-modal="true"
               aria-labelledby="note-drawer-title"

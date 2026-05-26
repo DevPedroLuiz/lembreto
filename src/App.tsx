@@ -14,6 +14,7 @@ import {
   NotebookPen,
   PanelLeftOpen,
   Plus,
+  RefreshCw,
   Settings,
   Sparkles,
   User as UserIcon,
@@ -3749,10 +3750,10 @@ export default function App() {
                         ? 'Notas'
                         : 'Avisos'}
               </p>
-              <h1 className="text-lg font-semibold">Lembreto</h1>
+              <h1 className="truncate text-lg font-semibold">Lembreto</h1>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {pendingOfflineTaskCount > 0 && (
               <span
                 data-testid="offline-sync-badge-mobile"
@@ -3761,6 +3762,17 @@ export default function App() {
                 {isSyncingOfflineTasks ? 'Sync' : pendingOfflineTaskCount}
               </span>
             )}
+
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              aria-label="Atualizar página"
+              title="Atualizar página"
+              data-testid="mobile-refresh-button"
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+            >
+              <RefreshCw size={19} />
+            </button>
 
             <motion.button
               onClick={showNotificationsInbox ? closeNotificationsInbox : openNotificationsInbox}
@@ -3888,7 +3900,6 @@ export default function App() {
                 {activeTab === 'dashboard' && (
                   <DashboardPage
                     tasks={dashboardTasks}
-                    categories={categoryOptions}
                     pendingTasks={pendingTasks}
                     overdueTasks={overdueTasks}
                     completedTasks={completedTasks}

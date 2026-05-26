@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Clock3,
   Flag,
-  Folder,
   ListTodo,
   Plus,
   Sparkles,
@@ -64,6 +63,8 @@ const QUICK_START_TEMPLATES: QuickStartTemplate[] = [
     time: '19:00',
   },
 ];
+
+const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
 
 const PRIORITY_WEIGHT: Record<Priority, number> = {
   high: 0,
@@ -128,7 +129,6 @@ function getAssistantContext(task: Task): 'overdue' | 'today' | 'upcoming' {
 
 interface DashboardPageProps {
   tasks: Task[];
-  categories: string[];
   pendingTasks: Task[];
   overdueTasks: Task[];
   completedTasks: Task[];
@@ -150,7 +150,6 @@ interface DashboardPageProps {
 
 export function DashboardPage({
   tasks,
-  categories,
   pendingTasks,
   overdueTasks,
   completedTasks,
@@ -192,7 +191,7 @@ export function DashboardPage({
 
       return {
         date,
-        label: format(date, 'EEE', { locale: ptBR }).replace('.', ''),
+        label: WEEKDAY_LABELS[index] ?? format(date, 'EEE', { locale: ptBR }).replace('.', ''),
         total: dayTasks.length,
         completed: dayCompletedTasks.length,
       };
@@ -205,9 +204,8 @@ export function DashboardPage({
   const mediumPriorityOpenCount = activeTasks.filter((task) => task.priority === 'medium').length;
   const lowPriorityOpenCount = activeTasks.filter((task) => task.priority === 'low').length;
   const unscheduledOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
-  const activeCategoryCount = categories.filter((category) =>
-    activeTasks.some((task) => task.category === category),
-  ).length;
+  const weeklyScheduledCount = weeklyProgress.reduce((total, day) => total + day.total, 0);
+  const weeklyCompletedCount = weeklyProgress.reduce((total, day) => total + day.completed, 0);
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -236,41 +234,27 @@ export function DashboardPage({
     : assistantContext === 'today'
       ? 'Ver agenda de hoje'
       : 'Ver agenda completa';
-  const systemShortcuts = [
+  const routineSummary = [
     {
-      label: 'Novo lembrete',
-      description: 'Crie uma tarefa com data, prioridade, categoria e alarme.',
-      icon: <Plus size={17} />,
-      onClick: onNewTask,
+      label: 'Em aberto',
+      value: activeTasks.length,
+      description: activeTasks.length === 0 ? 'Nenhuma pendência agora.' : 'Lembretes aguardando ação.',
+      icon: <ListTodo size={17} />,
       tone: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
     },
     {
-      label: 'Agenda',
-      description: 'Abra todos os lembretes em lista para filtrar e organizar.',
-      icon: <ListTodo size={17} />,
-      onClick: onViewAll,
-      tone: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300',
-    },
-    {
-      label: 'Calendário',
-      description: 'Visualize a rotina por dia, semana e mês.',
+      label: 'Semana',
+      value: weeklyScheduledCount,
+      description: `${weeklyCompletedCount} concluído${weeklyCompletedCount === 1 ? '' : 's'} no período.`,
       icon: <CalendarDays size={17} />,
-      onClick: onOpenCalendar,
       tone: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
     },
     {
-      label: 'Hoje',
-      description: 'Veja só o que precisa de atenção imediata.',
+      label: 'Sem prazo',
+      value: unscheduledOpenCount,
+      description: 'Itens para datar quando fizer sentido.',
       icon: <Clock3 size={17} />,
-      onClick: onOpenToday,
-      tone: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300',
-    },
-    {
-      label: 'Atrasados',
-      description: 'Recupere prazos vencidos sem procurar pela lista inteira.',
-      icon: <Bell size={17} />,
-      onClick: onOpenOverdue,
-      tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
+      tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
     },
   ];
 
@@ -282,7 +266,7 @@ export function DashboardPage({
       exit={{ opacity: 0, y: -10 }}
       className="space-y-6 sm:space-y-8"
     >
-      <section className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
+      <section className="grid items-start gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
         <div className="surface-panel overflow-hidden p-5 sm:p-6 md:p-8">
           <div className="flex flex-col gap-5 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
@@ -357,10 +341,10 @@ export function DashboardPage({
           </div>
         </div>
 
-        <aside className="surface-panel relative flex min-h-[260px] flex-col overflow-hidden p-5 sm:p-6 md:min-h-[280px] md:p-8">
-          <div className="pointer-events-none absolute inset-x-10 top-0 h-24 rounded-full bg-blue-500/8 blur-3xl dark:bg-blue-400/10" />
+        <aside className="surface-panel relative flex flex-col overflow-hidden p-5 sm:p-6 md:p-7">
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-24 rounded-full bg-blue-500/8 blur-3xl dark:bg-blue-400/10" />
           <span className="section-eyebrow w-fit">Progresso</span>
-          <div className="relative mt-6 sm:mt-8">
+          <div className="relative mt-5 sm:mt-6">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Desempenho da sua lista</p>
             <div className="mt-3 flex items-end gap-2">
               <span className="font-display text-5xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -372,7 +356,7 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="relative mt-6 sm:mt-8">
+          <div className="relative mt-5 sm:mt-6">
             <div className="h-3 overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 shadow-[inset_0_1px_1px_rgba(255,255,255,0.7)] dark:border-white/10 dark:bg-white/[0.06] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.04)]">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-400 shadow-[0_0_18px_rgba(59,130,246,0.25)] transition-all"
@@ -407,7 +391,7 @@ export function DashboardPage({
             type="button"
             onClick={onOpenCalendar}
             aria-label="Abrir calendário semanal"
-            className="group relative mt-auto w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
+            className="group relative mt-5 w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
@@ -415,7 +399,7 @@ export function DashboardPage({
                   Gráfico da semana
                 </span>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Lembretes por dia
+                  {weeklyScheduledCount} agendado{weeklyScheduledCount === 1 ? '' : 's'} nos próximos dias
                 </p>
               </div>
               <span className="icon-slot h-9 w-9 rounded-2xl border border-slate-200 bg-white text-slate-600 transition group-hover:border-blue-300 group-hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-300 dark:group-hover:border-blue-500/40 dark:group-hover:text-blue-300">
@@ -423,34 +407,38 @@ export function DashboardPage({
               </span>
             </div>
 
-            <div className="grid h-32 grid-cols-7 items-end gap-2">
-              {weeklyProgress.map((day) => {
-                const totalHeight = day.total === 0
-                  ? 0
-                  : Math.max(8, Math.round((day.total / weeklyProgressMax) * 100));
-                const completedHeight = day.total === 0
-                  ? 0
-                  : Math.round((day.completed / day.total) * 100);
+            <div className="relative rounded-2xl bg-slate-950/[0.025] px-2 pb-2 pt-7 dark:bg-white/[0.035]">
+              <div className="pointer-events-none absolute inset-x-3 top-10 h-px bg-slate-200/70 dark:bg-white/10" />
+              <div className="pointer-events-none absolute inset-x-3 top-[4.55rem] h-px bg-slate-200/50 dark:bg-white/[0.07]" />
+              <div className="pointer-events-none absolute inset-x-3 top-[6.9rem] h-px bg-slate-200/40 dark:bg-white/[0.055]" />
+              <div className="grid h-32 grid-cols-7 items-end gap-2">
+                {weeklyProgress.map((day) => {
+                  const totalHeight = day.total === 0
+                    ? 0
+                    : Math.max(16, Math.round((day.total / weeklyProgressMax) * 100));
+                  const completedHeight = day.completed === 0
+                    ? 0
+                    : Math.max(12, Math.round((day.completed / weeklyProgressMax) * 100));
 
-                return (
-                  <div key={day.date.toISOString()} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
-                    <div className="relative flex h-24 w-full max-w-[28px] items-end overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/[0.08]">
-                      <div
-                        className="flex w-full items-end rounded-full bg-sky-200 transition-all dark:bg-sky-500/20"
-                        style={{ height: `${totalHeight}%` }}
-                      >
+                  return (
+                    <div key={day.date.toISOString()} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
+                      <div className="relative flex h-24 w-full max-w-[34px] items-end overflow-hidden rounded-full bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.2),inset_0_10px_22px_rgba(148,163,184,0.12)] dark:bg-white/[0.07] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
                         <div
-                          className="w-full rounded-full bg-gradient-to-t from-blue-600 to-cyan-400"
+                          className="absolute inset-x-0 bottom-0 rounded-full bg-sky-200/85 transition-all dark:bg-sky-500/25"
+                          style={{ height: `${totalHeight}%` }}
+                        />
+                        <div
+                          className="absolute inset-x-0 bottom-0 rounded-full bg-gradient-to-t from-blue-600 via-sky-500 to-cyan-300 shadow-[0_0_18px_rgba(56,189,248,0.38)] transition-all"
                           style={{ height: `${completedHeight}%` }}
                         />
                       </div>
+                      <span className="text-[10px] font-bold uppercase leading-none text-slate-400 dark:text-slate-500">
+                        {day.label}
+                      </span>
                     </div>
-                    <span className="truncate text-[10px] font-bold uppercase leading-none text-slate-400 dark:text-slate-500">
-                      {day.label}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -467,16 +455,8 @@ export function DashboardPage({
         </aside>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          {
-            label: 'Categoria',
-            value: activeCategoryCount,
-            helper: 'Categorias com pendências',
-            icon: <Folder size={18} />,
-            tone: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
-            onClick: onViewAll,
-          },
           {
             label: 'Alta prioridade',
             value: highPriorityOpenCount,
@@ -776,10 +756,10 @@ export function DashboardPage({
         <aside className="surface-panel overflow-hidden p-4 sm:p-5 md:p-6">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <span className="section-eyebrow">Atalhos úteis</span>
-              <h4 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Ações rápidas do Lembreto</h4>
+              <span className="section-eyebrow">Resumo útil</span>
+              <h4 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Panorama do Lembreto</h4>
               <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm">
-                Acesse os principais botões do sistema e entenda quando usar cada um.
+                Um recorte rápido do que ainda precisa de atenção.
               </p>
             </div>
             <span className="icon-slot h-11 w-11 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
@@ -788,28 +768,28 @@ export function DashboardPage({
           </div>
 
           <div className="grid gap-2">
-            {systemShortcuts.map((shortcut) => (
-              <button
-                key={shortcut.label}
-                type="button"
-                onClick={shortcut.onClick}
-                className="group flex w-full items-center gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30 dark:hover:bg-white/[0.06]"
+            {routineSummary.map((item) => (
+              <div
+                key={item.label}
+                className="flex w-full items-center gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]"
               >
-                <span className={`icon-slot h-10 w-10 rounded-2xl ${shortcut.tone}`}>
-                  {shortcut.icon}
+                <span className={`icon-slot h-10 w-10 rounded-2xl ${item.tone}`}>
+                  {item.icon}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-slate-900 dark:text-white">
-                    {shortcut.label}
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {item.label}
+                    </span>
+                    <span className="font-display text-xl font-semibold text-slate-950 dark:text-white">
+                      {item.value}
+                    </span>
                   </span>
                   <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    {shortcut.description}
+                    {item.description}
                   </span>
                 </span>
-                <span className="icon-slot h-8 w-8 rounded-full text-slate-400 transition group-hover:bg-blue-50 group-hover:text-blue-600 dark:group-hover:bg-blue-500/10 dark:group-hover:text-blue-300">
-                  <ArrowRight size={15} />
-                </span>
-              </button>
+              </div>
             ))}
           </div>
 

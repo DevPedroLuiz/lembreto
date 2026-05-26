@@ -1428,11 +1428,11 @@ export function SettingsDrawer({
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-drawer-title"
-            className="fixed inset-x-0 bottom-0 top-auto z-[101] mx-auto flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-b-none rounded-t-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:max-w-6xl sm:-translate-y-1/2 sm:rounded-[32px]"
+            className="fixed inset-0 z-[101] mx-auto flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:bottom-auto sm:top-1/2 sm:h-auto sm:max-h-[88vh] sm:max-w-6xl sm:-translate-y-1/2 sm:rounded-[32px] sm:border"
           >
             {swipe.mobileEnabled && (
               <div
-                className="flex justify-center border-b border-slate-200/70 px-4 py-3 dark:border-white/10"
+                className="flex justify-center border-b border-slate-200/70 px-4 py-2.5 dark:border-white/10"
                 aria-hidden="true"
                 {...swipe.bind}
               >
@@ -1440,17 +1440,17 @@ export function SettingsDrawer({
               </div>
             )}
 
-            <div className="border-b border-slate-200/80 bg-slate-50/80 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03] sm:px-6 sm:py-5 md:px-7">
+            <div className="border-b border-slate-200/80 bg-slate-50/80 px-4 py-3.5 dark:border-white/10 dark:bg-white/[0.03] sm:px-6 sm:py-5 md:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <span className="section-eyebrow">
                     <Settings size={14} />
                     Preferências
                   </span>
-                  <h2 id="settings-drawer-title" className="mt-3 text-xl font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-4 sm:text-2xl md:text-3xl">
+                  <h2 id="settings-drawer-title" className="mt-2.5 text-xl font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-4 sm:text-2xl md:text-3xl">
                     Configurações
                   </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400 sm:leading-7">
+                  <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400 sm:mt-2 sm:leading-7">
                     Ajuste notificações, organização, integrações e comportamento do aplicativo.
                   </p>
                 </div>
@@ -1466,10 +1466,10 @@ export function SettingsDrawer({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 md:px-7">
+            <div className="flex-1 overflow-y-auto px-4 py-3.5 sm:px-6 sm:py-6 md:px-7">
               <div className="flex min-w-0 flex-col gap-4 sm:gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]">
-                <aside className="h-fit rounded-[24px] border border-slate-200/80 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-white/[0.03] sm:rounded-[28px] sm:p-3">
-                  <nav className="no-scrollbar flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0" aria-label="Seções de configurações">
+                <aside className="sticky top-0 z-10 h-fit rounded-[22px] border border-slate-200/80 bg-slate-50/95 p-2 backdrop-blur dark:border-white/10 dark:bg-slate-950/95 sm:rounded-[28px] sm:p-3 lg:static lg:bg-slate-50/80 lg:backdrop-blur-none lg:dark:bg-white/[0.03]">
+                  <nav className="grid grid-cols-2 gap-2 lg:block lg:space-y-2" aria-label="Seções de configurações">
                     {settingsViews.map((view) => {
                       const Icon = view.icon;
                       const isActive = activeView === view.key;
@@ -1481,7 +1481,7 @@ export function SettingsDrawer({
                           onClick={() => setActiveView(view.key)}
                           data-testid={view.key === 'notifications' ? 'settings-nav-center' : `settings-nav-${view.key}`}
                           className={[
-                            'flex min-w-[150px] items-center gap-3 rounded-[18px] border px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 sm:min-w-[200px] sm:items-start sm:rounded-[22px] sm:px-4 sm:py-3 lg:w-full lg:min-w-0',
+                            'flex min-w-0 items-center gap-2 rounded-[18px] border px-2.5 py-2.5 text-left transition-all hover:-translate-y-0.5 sm:gap-3 sm:items-start sm:rounded-[22px] sm:px-4 sm:py-3 lg:w-full',
                             isActive
                               ? 'border-blue-500/30 bg-blue-50 text-blue-700 shadow-[0_20px_40px_-28px_rgba(37,99,235,0.8)] dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300'
                               : 'border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300 dark:hover:border-white/15 dark:hover:bg-white/[0.06]',
@@ -1494,16 +1494,16 @@ export function SettingsDrawer({
                             </span>
                           )}
                           <span className={[
-                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border sm:mt-0.5 sm:h-10 sm:w-10',
+                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border sm:mt-0.5 sm:h-10 sm:w-10',
                             isActive
                               ? 'border-blue-500/20 bg-white text-blue-600 dark:border-blue-500/20 dark:bg-slate-950/60 dark:text-blue-300'
                               : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300',
                           ].join(' ')}>
-                            <Icon size={18} />
+                            <Icon size={17} />
                           </span>
 
                           <span className="min-w-0">
-                            <span className="block text-sm font-semibold">{view.title}</span>
+                            <span className="block truncate text-[13px] font-semibold sm:text-sm">{view.title}</span>
                             <span className="mt-1 hidden text-xs leading-5 text-current/75 sm:block">
                               {view.description}
                             </span>

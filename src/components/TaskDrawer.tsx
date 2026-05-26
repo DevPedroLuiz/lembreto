@@ -64,32 +64,6 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   high: 'Alta',
 };
 
-const PRIORITY_OPTIONS: Array<{
-  value: Priority;
-  label: string;
-  description: string;
-  tone: string;
-}> = [
-  {
-    value: 'high',
-    label: 'Alta',
-    description: 'Precisa de decisão rápida.',
-    tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
-  },
-  {
-    value: 'medium',
-    label: 'Média',
-    description: 'Importante para manter o ritmo.',
-    tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-  },
-  {
-    value: 'low',
-    label: 'Baixa',
-    description: 'Pode esperar sem travar o dia.',
-    tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
-  },
-];
-
 const OVERDUE_INTENSITY_OPTIONS: Array<{
   value: TaskOverdueReminderIntensity;
   label: string;
@@ -397,8 +371,6 @@ export function TaskDrawer({
     ? `${time} - ${endTime}`
     : hasStart ? time : 'Sem início';
   const summaryPriority = PRIORITY_LABELS[priority];
-  const selectedOverdueIntensityOption = OVERDUE_INTENSITY_OPTIONS.find((option) => option.value === overdueReminderIntensity)
-    ?? OVERDUE_INTENSITY_OPTIONS[1];
   const availableTagSuggestions = React.useMemo(
     () => tagOptions.filter((item) => (
       !tags.some((tag) => normalizeSearchValue(tag) === normalizeSearchValue(item))
@@ -493,7 +465,7 @@ export function TaskDrawer({
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px]"
+              className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px] sm:border"
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-drawer-title"
@@ -624,8 +596,8 @@ export function TaskDrawer({
                         <div className="space-y-4">
                           <div>
                             <FieldLabel>Prazo</FieldLabel>
-                            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
-                              <div className="relative">
+                            <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+                              <div className="relative self-start">
                                 <CalendarDays className="field-icon" size={18} />
                                 <input
                                   type="date"
@@ -740,35 +712,12 @@ export function TaskDrawer({
                           <div className="grid gap-4 sm:grid-cols-2">
                             <div>
                               <FieldLabel>Prioridade</FieldLabel>
-                              <div className="grid gap-2 sm:grid-cols-3">
-                                {PRIORITY_OPTIONS.map((option) => (
-                                  <button
-                                    key={option.value}
-                                    type="button"
-                                    disabled={isSubmitting}
-                                    onClick={() => setPriority(option.value)}
-                                    aria-pressed={priority === option.value}
-                                    className={cn(
-                                      'rounded-2xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
-                                      priority === option.value
-                                        ? 'border-blue-400 bg-blue-50 shadow-[0_14px_28px_-24px_rgba(37,99,235,0.7)] dark:border-blue-400/50 dark:bg-blue-500/10'
-                                        : 'border-slate-200 bg-slate-50/80 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]',
-                                    )}
-                                  >
-                                    <span className={`icon-slot mb-3 h-9 w-9 rounded-2xl ${option.tone}`}>
-                                      <Flag size={16} />
-                                    </span>
-                                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{option.label}</span>
-                                    <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{option.description}</span>
-                                  </button>
-                                ))}
-                              </div>
                               <select
                                 value={priority}
                                 disabled={isSubmitting}
                                 data-testid="task-priority-select"
                                 onChange={(event) => setPriority(event.target.value as Priority)}
-                                className="field-control mt-3 cursor-pointer"
+                                className="field-control cursor-pointer"
                               >
                                 <option value="low">Baixa</option>
                                 <option value="medium">Média</option>
@@ -917,20 +866,20 @@ export function TaskDrawer({
                   {!isEditing && activeTab === 'recurrence' && (
                     <section className="space-y-4">
                       <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_50px_-34px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-white/[0.04]">
-                        <div className="bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 p-5 text-white sm:p-6">
+                        <div className="border-b border-slate-200/80 bg-slate-50/80 p-5 text-slate-950 dark:border-white/10 dark:bg-white/[0.03] dark:text-white sm:p-6">
                           <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                             <div className="max-w-xl">
-                              <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/12 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/80">
+                              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
                                 <Repeat size={13} />
                                 Repetição
                               </span>
                               <h3 className="mt-4 text-2xl font-semibold tracking-tight">Crie uma sequência sem repetir trabalho.</h3>
-                              <p className="mt-2 text-sm leading-6 text-blue-50/90">
+                              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                                 Ative, escolha um modelo e ajuste a data final. O Lembreto mostra quantos itens serão criados antes do envio.
                               </p>
                             </div>
 
-                            <label className="inline-flex min-h-[46px] w-full items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/12 px-3 py-2 text-sm font-semibold text-white backdrop-blur-sm sm:w-[170px]">
+                            <label className="inline-flex min-h-[46px] w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-100 sm:w-[170px]">
                               <span>{recurrenceEnabled ? 'Ativada' : 'Desativada'}</span>
                               <input
                                 type="checkbox"
@@ -938,7 +887,7 @@ export function TaskDrawer({
                                 checked={recurrenceEnabled}
                                 disabled={isSubmitting}
                                 onChange={(event) => setRecurrenceEnabled(event.target.checked)}
-                                className="h-5 w-5 rounded border-white/40 bg-white/20 text-blue-600 focus:ring-white/40"
+                                className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30 dark:border-white/30 dark:bg-white/10"
                               />
                             </label>
                           </div>
@@ -1190,26 +1139,20 @@ export function TaskDrawer({
                               ))}
                             </div>
 
-                            <div className="mt-4">
-                              <FieldLabel>Intensidade dos avisos de atraso</FieldLabel>
-                              <select
-                                value={overdueReminderIntensity}
-                                disabled={isSubmitting}
-                                data-testid="task-overdue-intensity"
-                                onChange={(event) => setOverdueReminderIntensity(event.target.value as TaskOverdueReminderIntensity)}
-                                className="field-control cursor-pointer"
-                              >
-                                {OVERDUE_INTENSITY_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm leading-6 dark:border-blue-500/20 dark:bg-blue-500/10">
-                                <p className="font-semibold text-blue-900 dark:text-blue-100">{selectedOverdueIntensityOption.policy}</p>
-                                <p className="mt-1 text-blue-800/80 dark:text-blue-100/75">{selectedOverdueIntensityOption.description}</p>
-                              </div>
-                            </div>
+                            <select
+                              value={overdueReminderIntensity}
+                              disabled={isSubmitting}
+                              data-testid="task-overdue-intensity"
+                              onChange={(event) => setOverdueReminderIntensity(event.target.value as TaskOverdueReminderIntensity)}
+                              className="sr-only"
+                              aria-label="Intensidade dos avisos de atraso"
+                            >
+                              {OVERDUE_INTENSITY_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                       </div>

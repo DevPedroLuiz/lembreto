@@ -53,7 +53,7 @@ export function DashboardMetricDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="dashboard-metric-dialog-title"
-            className="fixed inset-x-0 bottom-0 top-auto z-[131] mx-auto flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-b-none rounded-t-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[86vh] sm:max-w-4xl sm:-translate-y-1/2 sm:rounded-[32px]"
+            className="fixed inset-0 z-[131] mx-auto flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:bottom-auto sm:top-1/2 sm:h-auto sm:max-h-[86vh] sm:max-w-4xl sm:-translate-y-1/2 sm:rounded-[32px] sm:border"
             data-testid="dashboard-metric-dialog"
           >
             <div className="border-b border-slate-200/80 px-4 py-4 dark:border-white/10 sm:px-6 sm:py-5 md:px-7">

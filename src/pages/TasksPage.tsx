@@ -1666,7 +1666,7 @@ export function TasksPage({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 24 }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-              className="fixed inset-x-3 bottom-3 z-[131] max-h-[78vh] overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_30px_100px_-28px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96 lg:hidden"
+              className="fixed inset-0 z-[131] flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_30px_100px_-28px_rgba(15,23,42,0.5)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/96 lg:hidden"
               aria-modal="true"
               role="dialog"
               aria-labelledby="mobile-filters-title"
@@ -1689,7 +1689,7 @@ export function TasksPage({
                 </button>
               </div>
 
-              <div className="max-h-[calc(78vh-72px)] overflow-y-auto p-4">
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
                 {filtersPanel}
               </div>
             </motion.section>

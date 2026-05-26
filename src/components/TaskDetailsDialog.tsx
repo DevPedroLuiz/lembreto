@@ -242,7 +242,7 @@ export function TaskDetailsDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="task-details-title"
-            className="fixed inset-x-0 bottom-0 top-auto z-[111] mx-auto flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-b-none rounded-t-[28px] border border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:top-1/2 sm:bottom-auto sm:max-h-[88vh] sm:max-w-5xl sm:-translate-y-1/2 sm:rounded-[32px] lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
+            className="fixed inset-0 z-[111] mx-auto flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_36px_120px_-42px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:inset-x-4 sm:bottom-auto sm:top-1/2 sm:h-auto sm:max-h-[88vh] sm:max-w-5xl sm:-translate-y-1/2 sm:rounded-[32px] sm:border lg:left-[316px] lg:right-6 lg:mx-0 lg:w-auto lg:max-w-none xl:left-[344px]"
             data-testid="task-details-dialog"
           >
             <div className="relative overflow-hidden border-b border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-blue-50/70 px-4 pb-7 pt-4 dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-blue-950/20 sm:px-5 sm:pb-6 sm:pt-5 md:px-7 md:pb-7 md:pt-6">
@@ -319,13 +319,13 @@ export function TaskDetailsDialog({
                   </div>
                 </div>
 
-                  <div className="no-scrollbar -mx-1 flex max-w-full justify-start gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:max-w-[640px] sm:flex-wrap sm:overflow-visible sm:px-0 xl:justify-end">
+                  <div className="grid max-w-full grid-cols-2 gap-2 sm:flex sm:max-w-[640px] sm:flex-wrap sm:justify-start xl:justify-end">
                     <button
                       type="button"
                       data-testid="task-details-edit"
                       onClick={() => onEdit(task)}
                       disabled={isBusy}
-                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-sky-500 px-4 text-sm font-semibold text-white shadow-[0_16px_28px_-20px_rgba(37,99,235,0.72)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-sky-500 px-3 text-xs font-semibold text-white shadow-[0_16px_28px_-20px_rgba(37,99,235,0.72)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto sm:shrink-0 sm:px-4 sm:text-sm"
                     >
                       <PencilLine size={16} />
                       Editar
@@ -338,7 +338,7 @@ export function TaskDetailsDialog({
                         onClick={() => onToggle(task)}
                         disabled={isBusy}
                         className={[
-                          'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
+                          'inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm',
                           isCompleted
                             ? 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]'
                             : 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_16px_30px_-22px_rgba(16,185,129,0.75)] hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 hover:shadow-[0_20px_36px_-24px_rgba(16,185,129,0.9)] dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-200',
@@ -356,7 +356,7 @@ export function TaskDetailsDialog({
                         onClick={() => onToggleActive(task)}
                         disabled={isBusy}
                         className={[
-                          'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70',
+                          'inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm',
                           isInactive
                             ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-[0_16px_30px_-22px_rgba(37,99,235,0.7)] hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300'
                             : 'border-slate-200 bg-white/78 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]',
@@ -378,7 +378,7 @@ export function TaskDetailsDialog({
                       data-testid="task-details-share"
                       onClick={() => onShare(task)}
                       disabled={isBusy}
-                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3 text-xs font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08] sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm"
                     >
                       <Share2 size={16} />
                       Compartilhar
@@ -390,7 +390,7 @@ export function TaskDetailsDialog({
                         data-testid="task-details-calendar-sync"
                         onClick={() => onSyncCalendar(task)}
                         disabled={isBusy}
-                        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                        className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3 text-xs font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08] sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm"
                       >
                         {isSyncingCalendar ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Sincronizar agora
@@ -402,7 +402,7 @@ export function TaskDetailsDialog({
                       data-testid="task-details-duplicate"
                       onClick={() => onDuplicate(task)}
                       disabled={isBusy}
-                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3.5 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                      className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/78 px-3 text-xs font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08] sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm"
                     >
                       <CopyPlus size={16} />
                       Duplicar
@@ -413,7 +413,7 @@ export function TaskDetailsDialog({
                       data-testid="task-details-delete"
                       onClick={() => onDelete(task)}
                       disabled={isBusy}
-                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 text-sm font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
+                      className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-all hover:-translate-y-0.5 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15 sm:w-auto sm:shrink-0 sm:px-3.5 sm:text-sm"
                     >
                       <Trash2 size={16} />
                       Excluir
