@@ -33,6 +33,7 @@
     { "source": "/api/notifications/alarms/:id/snooze", "destination": "/api/notifications?action=alarm-snooze&id=:id" },
     { "source": "/api/notifications/alarms/:id/dismiss", "destination": "/api/notifications?action=alarm-dismiss&id=:id" },
     { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
+    { "source": "/api/assistant/message", "destination": "/api/assistant?action=message" },
     { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }

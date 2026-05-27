@@ -27,6 +27,8 @@ Crie `.env.local` na raiz:
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 JWT_SECRET=uma_chave_longa_e_aleatoria_com_pelo_menos_32_caracteres
+GEMINI_API_KEY=sua_chave_do_google_gemini
+GEMINI_MODEL=gemini-1.5-flash
 RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
 GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
@@ -51,6 +53,8 @@ Notas:
 
 - `JWT_SECRET` é obrigatória em desenvolvimento e produção.
 - `DATABASE_URL` deve apontar para a connection string do Supabase/Postgres com SSL habilitado.
+- `GEMINI_API_KEY` habilita a Lumi, assistente inteligente do Lembreto. Sem ela, a rota do assistente retorna uma mensagem amigavel de indisponibilidade.
+- `GEMINI_MODEL` pode ficar como `gemini-1.5-flash` na primeira versao.
 - `RESEND_API_KEY` é necessária para envio real do e-mail de recuperação.
 - `APP_URL` deve apontar para a URL pública do app em produção.
 - `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` habilitam o botão "Entrar com Google".
@@ -164,6 +168,18 @@ Secrets necessários para deploy na Vercel:
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
+
+Variaveis necessarias no projeto da Vercel:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `APP_URL`
+- `CRON_SECRET`
+- `RESEND_API_KEY`, se o envio real de e-mail estiver habilitado
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT`, se push notification estiver habilitado
+- Variaveis de OAuth/Calendario/Recaptcha, se esses recursos estiverem ativos no ambiente de producao
 
 Se quiser uma camada extra de segurança, configure o ambiente `production` no GitHub com aprovação obrigatória antes do deploy.
 
