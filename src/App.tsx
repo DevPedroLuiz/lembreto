@@ -3439,6 +3439,28 @@ export default function App() {
     setPendingDeleteNote(null);
   }, [pendingDeleteNote]);
 
+  const refreshWorkspaceFromShortcut = useCallback(() => {
+    if (!auth.token) return;
+
+    void Promise.allSettled([
+      refreshTasks(auth.token),
+      refreshNotes(auth.token),
+      refreshNotifications(auth.token),
+      refreshCalendarIntegrations(auth.token),
+      refreshHolidays(auth.token),
+    ]).then(() => {
+      triggerToastOnly('Dados atualizados', 'As informações foram sincronizadas com o servidor.');
+    });
+  }, [
+    auth.token,
+    refreshCalendarIntegrations,
+    refreshHolidays,
+    refreshNotes,
+    refreshNotifications,
+    refreshTasks,
+    triggerToastOnly,
+  ]);
+
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false;
@@ -3520,22 +3542,74 @@ export default function App() {
         }
       }
 
-      if (event.key.toLowerCase() === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        const hasOverlayOpen =
-          showTaskDrawer ||
-          showNoteDrawer ||
-          showTaskDetails ||
-          showProfileDrawer ||
-          showSettings ||
-          showNotificationsInbox ||
-          Boolean(pendingDeleteTask) ||
-          Boolean(pendingDeleteTaskSelection) ||
-          Boolean(dashboardMetricDialog);
+      const hasOverlayOpen =
+        showTaskDrawer ||
+        showNoteDrawer ||
+        showTaskDetails ||
+        showProfileDrawer ||
+        showSettings ||
+        showNotificationsInbox ||
+        Boolean(pendingDeleteTask) ||
+        Boolean(pendingDeleteTaskSelection) ||
+        Boolean(pendingDeleteNote) ||
+        Boolean(dashboardMetricDialog);
+      const canUseGlobalShortcut = Boolean(auth.currentUser && auth.token)
+        && !hasOverlayOpen
+        && !isTypingTarget(event.target)
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.altKey;
 
-        if (!auth.currentUser || !auth.token || hasOverlayOpen || isTypingTarget(event.target)) return;
+      if (canUseGlobalShortcut) {
+        const shortcutKey = event.key.toLowerCase();
 
-        event.preventDefault();
-        openNewTask();
+        if (shortcutKey === 'n') {
+          event.preventDefault();
+          openNewTask();
+          return;
+        }
+
+        if (shortcutKey === 'd') {
+          event.preventDefault();
+          openDashboardTab();
+          return;
+        }
+
+        if (shortcutKey === 'c') {
+          event.preventDefault();
+          openCalendarTab();
+          return;
+        }
+
+        if (shortcutKey === 't') {
+          event.preventDefault();
+          openTasksTab();
+          return;
+        }
+
+        if (shortcutKey === 'm') {
+          event.preventDefault();
+          openNotesTab();
+          return;
+        }
+
+        if (shortcutKey === 'i') {
+          event.preventDefault();
+          openNotificationsCenter();
+          return;
+        }
+
+        if (shortcutKey === 's') {
+          event.preventDefault();
+          openSettings();
+          return;
+        }
+
+        if (shortcutKey === 'r') {
+          event.preventDefault();
+          refreshWorkspaceFromShortcut();
+          return;
+        }
       }
 
       if (event.key === 'Enter' && pendingDeleteTask && !isDeleteConfirming) {
@@ -3602,10 +3676,17 @@ export default function App() {
     handleConfirmDelete,
     handleConfirmDeleteSelection,
     handleConfirmDeleteNote,
+    openCalendarTab,
+    openDashboardTab,
     openNewTask,
+    openNotesTab,
+    openNotificationsCenter,
+    openSettings,
+    openTasksTab,
     pendingDeleteNote,
     pendingDeleteTask,
     pendingDeleteTaskSelection,
+    refreshWorkspaceFromShortcut,
     resetTaskForm,
     resetNoteForm,
     showNotificationsInbox,

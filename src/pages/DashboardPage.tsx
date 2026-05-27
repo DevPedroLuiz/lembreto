@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   Flag,
+  Keyboard,
   ListTodo,
   Plus,
   Sparkles,
@@ -205,7 +206,6 @@ export function DashboardPage({
   const lowPriorityOpenCount = activeTasks.filter((task) => task.priority === 'low').length;
   const unscheduledOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
   const weeklyScheduledCount = weeklyProgress.reduce((total, day) => total + day.total, 0);
-  const weeklyCompletedCount = weeklyProgress.reduce((total, day) => total + day.completed, 0);
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -234,28 +234,17 @@ export function DashboardPage({
     : assistantContext === 'today'
       ? 'Ver agenda de hoje'
       : 'Ver agenda completa';
-  const routineSummary = [
-    {
-      label: 'Em aberto',
-      value: activeTasks.length,
-      description: activeTasks.length === 0 ? 'Nenhuma pendência agora.' : 'Lembretes aguardando ação.',
-      icon: <ListTodo size={17} />,
-      tone: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
-    },
-    {
-      label: 'Semana',
-      value: weeklyScheduledCount,
-      description: `${weeklyCompletedCount} concluído${weeklyCompletedCount === 1 ? '' : 's'} no período.`,
-      icon: <CalendarDays size={17} />,
-      tone: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
-    },
-    {
-      label: 'Sem prazo',
-      value: unscheduledOpenCount,
-      description: 'Itens para datar quando fizer sentido.',
-      icon: <Clock3 size={17} />,
-      tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-    },
+  const keyboardShortcuts = [
+    { keys: ['N'], label: 'Novo lembrete' },
+    { keys: ['D'], label: 'Painel' },
+    { keys: ['C'], label: 'Calendário' },
+    { keys: ['T'], label: 'Meus lembretes' },
+    { keys: ['M'], label: 'Minhas notas' },
+    { keys: ['I'], label: 'Notificações' },
+    { keys: ['S'], label: 'Configurações' },
+    { keys: ['R'], label: 'Atualizar dados' },
+    { keys: ['Esc'], label: 'Fechar painéis' },
+    { keys: ['Enter'], label: 'Confirmar diálogo' },
   ];
 
   return (
@@ -759,9 +748,9 @@ export function DashboardPage({
           <div className="mb-5 flex items-start justify-between gap-4">
             <div className="min-w-0">
               <span className="section-eyebrow">Resumo útil</span>
-              <h4 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Panorama do Lembreto</h4>
+              <h4 className="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Modelos rápidos</h4>
               <p className="mt-1 text-[13px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm">
-                Um recorte rápido do que ainda precisa de atenção.
+                Comece com um lembrete pré-preenchido.
               </p>
             </div>
             <span className="icon-slot h-11 w-11 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
@@ -769,43 +758,7 @@ export function DashboardPage({
             </span>
           </div>
 
-          <div className="grid gap-2">
-            {routineSummary.map((item) => (
-              <div
-                key={item.label}
-                className="flex w-full items-center gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]"
-              >
-                <span className={`icon-slot h-10 w-10 rounded-2xl ${item.tone}`}>
-                  {item.icon}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-3">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                      {item.label}
-                    </span>
-                    <span className="font-display text-xl font-semibold text-slate-950 dark:text-white">
-                      {item.value}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    {item.description}
-                  </span>
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-5 border-t border-slate-200/80 pt-5 dark:border-white/10">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950 dark:text-white">Modelos rápidos</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Comece com um lembrete pré-preenchido.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
+          <div className="space-y-2">
             {QUICK_START_TEMPLATES.map((template) => (
               <button
                 key={template.title}
@@ -824,6 +777,42 @@ export function DashboardPage({
                 </span>
               </button>
             ))}
+          </div>
+
+          <div className="mt-5 border-t border-slate-200/80 pt-5 dark:border-white/10">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">Teclas de atalho</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  Comandos rápidos para navegar sem tirar a mão do teclado.
+                </p>
+              </div>
+              <span className="icon-slot h-9 w-9 rounded-2xl bg-slate-100 text-slate-600 dark:bg-white/[0.08] dark:text-slate-300">
+                <Keyboard size={17} />
+              </span>
+            </div>
+
+            <div className="grid gap-2">
+              {keyboardShortcuts.map((shortcut) => (
+                <div
+                  key={shortcut.label}
+                  className="flex min-h-[42px] items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]"
+                >
+                  <span className="min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {shortcut.label}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {shortcut.keys.map((key) => (
+                      <kbd
+                        key={key}
+                        className="inline-flex min-w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 shadow-sm dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-300"
+                      >
+                        {key}
+                      </kbd>
+                    ))}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </aside>
