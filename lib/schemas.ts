@@ -114,6 +114,7 @@ export const createTaskSchema = z.object({
   overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).default('normal'),
   alarmEnabled: z.boolean().default(false),
   mutedUntil: optionalDateSchema,
+  preNoticeMinutes: z.number().int().min(1).max(24 * 60).optional(),
   noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
   status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
@@ -146,6 +147,7 @@ export const updateTaskSchema = z.object({
   overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).optional(),
   alarmEnabled: z.boolean().optional(),
   mutedUntil: optionalDateSchema,
+  preNoticeMinutes: z.number().int().min(1).max(24 * 60).optional(),
   noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
   status: z.enum(TASK_STATUSES).optional(),
 }).strict().refine(

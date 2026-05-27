@@ -53,6 +53,7 @@ interface TaskForScheduling {
   status: string;
   createdAt: string;
   alarmEnabled: boolean;
+  preNoticeMinutes: number | null;
   reminderMode: 'timed' | 'floating';
   expiresAt: string | null;
   overdueSince: string | null;
@@ -90,6 +91,29 @@ interface DueScheduleSample {
   notifyAt: string;
   status: string;
   taskId: string;
+}
+
+export interface NotificationScheduleQueueItem {
+  id: string;
+  userId: string;
+  taskId: string;
+  taskTitle: string;
+  kind: NotificationScheduleKind;
+  notifyAt: string;
+  status: NotificationScheduleStatus;
+  title: string;
+  message: string;
+  tone: NotificationTone;
+  sequenceIndex: number | null;
+  intervalMinutes: number | null;
+  processingStartedAt: string | null;
+  sentAt: string | null;
+  failedAt: string | null;
+  cancelledAt: string | null;
+  dismissedAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ScheduleDiagnostics {
@@ -158,6 +182,7 @@ function mapTask(row: Record<string, unknown>): TaskForScheduling {
     status: String(row.status ?? 'pending'),
     createdAt: toIso(row.createdAt) ?? new Date().toISOString(),
     alarmEnabled: Boolean(row.alarmEnabled),
+    preNoticeMinutes: toNullableNumber(row.preNoticeMinutes),
     reminderMode: row.reminderMode === 'floating' ? 'floating' : 'timed',
     expiresAt: toIso(row.expiresAt),
     overdueSince: toIso(row.overdueSince),
@@ -198,11 +223,42 @@ function mapSchedule(row: Record<string, unknown>): ScheduleRow {
   };
 }
 
+function mapScheduleQueueItem(row: Record<string, unknown>): NotificationScheduleQueueItem {
+  return {
+    id: String(row.id),
+    userId: String(row.userId),
+    taskId: String(row.taskId),
+    taskTitle: String(row.taskTitle ?? 'Lembrete removido'),
+    kind: String(row.kind) as NotificationScheduleKind,
+    notifyAt: toIso(row.notifyAt) ?? String(row.notifyAt),
+    status: String(row.status) as NotificationScheduleStatus,
+    title: String(row.title ?? ''),
+    message: String(row.message ?? ''),
+    tone: String(row.tone ?? 'info') as NotificationTone,
+    sequenceIndex: toNullableNumber(row.sequenceIndex),
+    intervalMinutes: toNullableNumber(row.intervalMinutes),
+    processingStartedAt: toIso(row.processingStartedAt),
+    sentAt: toIso(row.sentAt),
+    failedAt: toIso(row.failedAt),
+    cancelledAt: toIso(row.cancelledAt),
+    dismissedAt: toIso(row.dismissedAt),
+    errorMessage: typeof row.errorMessage === 'string' ? row.errorMessage : null,
+    createdAt: toIso(row.createdAt) ?? new Date().toISOString(),
+    updatedAt: toIso(row.updatedAt) ?? new Date().toISOString(),
+  };
+}
+
 function toCount(value: unknown): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return Number(value);
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function mapCountByKind(rows: Array<Record<string, unknown>>): Record<string, number> {
@@ -355,6 +411,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
         { table: 'tasks', column: 'muted_until' },
         { table: 'tasks', column: 'suppress_holiday_notifications' },
         { table: 'tasks', column: 'floating_interval_minutes' },
+        { table: 'tasks', column: 'pre_notice_minutes' },
         { table: 'tasks', column: 'overdue_reminder_intensity' },
         { table: 'notification_schedules', column: 'user_id' },
         { table: 'notification_schedules', column: 'task_id' },
@@ -416,6 +473,7 @@ async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: st
       tasks.status,
       tasks.created_at AS "createdAt",
       tasks.alarm_enabled AS "alarmEnabled",
+      tasks.pre_notice_minutes AS "preNoticeMinutes",
       tasks.reminder_mode AS "reminderMode",
       tasks.expires_at AS "expiresAt",
       tasks.overdue_since AS "overdueSince",
@@ -567,7 +625,8 @@ async function scheduleTimedTask(
   if (Number.isNaN(dueDate.getTime())) return 0;
   let created = 0;
 
-  const preNoticeAt = addMinutes(dueDate, -PRE_NOTICE_MINUTES);
+  const preNoticeMinutes = task.preNoticeMinutes ?? PRE_NOTICE_MINUTES;
+  const preNoticeAt = addMinutes(dueDate, -preNoticeMinutes);
   const preNoticeNotifyAt = preNoticeAt > now ? preNoticeAt : now;
   if (dueDate > now) {
     const preNotice = applyScheduleSuppression(task, 'pre_notice', preNoticeNotifyAt);
@@ -575,7 +634,7 @@ async function scheduleTimedTask(
       const inserted = await insertSchedule(sql, task, {
         kind: 'pre_notice',
         notifyAt: preNotice.notifyAt,
-        title: 'Lembrete em 15 minutos',
+        title: `Lembrete em ${preNoticeMinutes} minuto${preNoticeMinutes === 1 ? '' : 's'}`,
         message: `"${task.title}" começa em breve.`,
         tone: 'info',
       });
@@ -862,6 +921,7 @@ async function detectAndScheduleOverdueTasks(
       tasks.status,
       tasks.created_at AS "createdAt",
       tasks.alarm_enabled AS "alarmEnabled",
+      tasks.pre_notice_minutes AS "preNoticeMinutes",
       tasks.reminder_mode AS "reminderMode",
       tasks.expires_at AS "expiresAt",
       tasks.overdue_since AS "overdueSince",
@@ -1070,7 +1130,65 @@ async function claimDueSchedules(sql: SqlClient, limit: number, options: { userI
   return rows.map(mapSchedule);
 }
 
-async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string } = {}): Promise<ScheduleDiagnostics> {
+export async function listNotificationSchedulesForUser(
+  sql: SqlClient,
+  userId: string,
+  options: {
+    taskId?: string | null;
+    status?: NotificationScheduleStatus | null;
+    limit?: number;
+    ensureInfrastructure?: boolean;
+  } = {},
+): Promise<NotificationScheduleQueueItem[]> {
+  if (options.ensureInfrastructure !== false) {
+    await ensureNotificationSchedulingInfrastructure(sql);
+  }
+  const taskId = options.taskId ?? null;
+  const status = options.status ?? null;
+  const limit = Math.min(Math.max(Math.floor(options.limit ?? 100), 1), 250);
+  const rows = await sql`
+    SELECT
+      ns.id,
+      ns.user_id AS "userId",
+      ns.task_id AS "taskId",
+      COALESCE(tasks.title, 'Lembrete removido') AS "taskTitle",
+      ns.kind,
+      ns.notify_at AS "notifyAt",
+      ns.status,
+      ns.title,
+      ns.message,
+      ns.tone,
+      ns.sequence_index AS "sequenceIndex",
+      ns.interval_minutes AS "intervalMinutes",
+      ns.processing_started_at AS "processingStartedAt",
+      ns.sent_at AS "sentAt",
+      ns.failed_at AS "failedAt",
+      ns.cancelled_at AS "cancelledAt",
+      ns.dismissed_at AS "dismissedAt",
+      ns.error_message AS "errorMessage",
+      ns.created_at AS "createdAt",
+      ns.updated_at AS "updatedAt"
+    FROM notification_schedules ns
+    LEFT JOIN tasks ON tasks.id = ns.task_id AND tasks.user_id = ns.user_id
+    WHERE ns.user_id = ${userId}
+      AND (${taskId}::uuid IS NULL OR ns.task_id = ${taskId}::uuid)
+      AND (${status}::text IS NULL OR ns.status = ${status})
+    ORDER BY
+      CASE ns.status
+        WHEN 'pending' THEN 0
+        WHEN 'processing' THEN 1
+        WHEN 'failed' THEN 2
+        WHEN 'sent' THEN 3
+        ELSE 4
+      END ASC,
+      ns.notify_at ASC,
+      ns.updated_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(mapScheduleQueueItem);
+}
+
+export async function getScheduleDiagnostics(sql: SqlClient, options: { userId?: string } = {}): Promise<ScheduleDiagnostics> {
   const userId = options.userId ?? null;
   const [
     nowRows,
@@ -1807,6 +1925,7 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
     status: 'pending',
     createdAt: new Date().toISOString(),
     alarmEnabled: true,
+    preNoticeMinutes: null,
     reminderMode: 'timed',
     expiresAt: null,
     overdueSince: null,

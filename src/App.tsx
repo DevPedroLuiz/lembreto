@@ -63,6 +63,9 @@ import {
   DEFAULT_CATEGORIES,
   type AppNotification,
   type HolidayLocationSuggestion,
+  type NotificationScheduleDiagnostics,
+  type NotificationScheduleQueueItem,
+  type NotificationSchedulesResponse,
   type Note,
   type NoteMode,
   type NotificationTarget,
@@ -586,6 +589,7 @@ export default function App() {
   const [formSuppressHolidayNotifications, setFormSuppressHolidayNotifications] = useState(false);
   const [formOverdueReminderIntensity, setFormOverdueReminderIntensity] = useState<TaskOverdueReminderIntensity>('normal');
   const [formAlarmEnabled, setFormAlarmEnabled] = useState(false);
+  const [formPreNoticeMinutes, setFormPreNoticeMinutes] = useState(UPCOMING_REMINDER_MINUTES);
   const [formRecurrenceEnabled, setFormRecurrenceEnabled] = useState(false);
   const [formRecurrenceMode, setFormRecurrenceMode] = useState<RecurrenceMode>('daily');
   const [formRecurrenceUntil, setFormRecurrenceUntil] = useState('');
@@ -596,6 +600,10 @@ export default function App() {
   const [isTaskSubmitting, setIsTaskSubmitting] = useState(false);
   const [isNoteSubmitting, setIsNoteSubmitting] = useState(false);
   const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const [notificationScheduleQueue, setNotificationScheduleQueue] = useState<NotificationScheduleQueueItem[]>([]);
+  const [selectedTaskNotificationSchedules, setSelectedTaskNotificationSchedules] = useState<NotificationScheduleQueueItem[]>([]);
+  const [notificationScheduleDiagnostics, setNotificationScheduleDiagnostics] = useState<NotificationScheduleDiagnostics | null>(null);
+  const [isLoadingNotificationSchedules, setIsLoadingNotificationSchedules] = useState(false);
   const [dashboardMetricDialog, setDashboardMetricDialog] = useState<DashboardMetricKey | null>(null);
   const shouldRenderTaskDetails = useHasBeenOpened(showTaskDetails);
   const shouldRenderDashboardMetric = useHasBeenOpened(Boolean(dashboardMetricDialog));
@@ -723,6 +731,44 @@ export default function App() {
     () => formatMinutesAsTimeInput(configNoTimeReminderMinutes),
     [configNoTimeReminderMinutes],
   );
+  const refreshNotificationScheduleQueue = useCallback(async () => {
+    if (!auth.token) {
+      setNotificationScheduleQueue([]);
+      setNotificationScheduleDiagnostics(null);
+      return;
+    }
+
+    setIsLoadingNotificationSchedules(true);
+    try {
+      const data = await apiGet<NotificationSchedulesResponse>('/api/notifications/schedules?limit=120', auth.token);
+      setNotificationScheduleQueue(data.schedules);
+      setNotificationScheduleDiagnostics(data.diagnostics);
+    } catch {
+      setNotificationScheduleQueue([]);
+    } finally {
+      setIsLoadingNotificationSchedules(false);
+    }
+  }, [auth.token]);
+  const refreshSelectedTaskNotificationSchedules = useCallback(async (taskId: string) => {
+    if (!auth.token) {
+      setSelectedTaskNotificationSchedules([]);
+      return;
+    }
+
+    setIsLoadingNotificationSchedules(true);
+    try {
+      const data = await apiGet<NotificationSchedulesResponse>(
+        `/api/notifications/schedules?taskId=${encodeURIComponent(taskId)}&limit=30`,
+        auth.token,
+      );
+      setSelectedTaskNotificationSchedules(data.schedules);
+      setNotificationScheduleDiagnostics(data.diagnostics);
+    } catch {
+      setSelectedTaskNotificationSchedules([]);
+    } finally {
+      setIsLoadingNotificationSchedules(false);
+    }
+  }, [auth.token]);
   const noteContextTask = useMemo(
     () => (noteContextTaskId ? tasks.find((task) => task.id === noteContextTaskId) ?? null : null),
     [noteContextTaskId, tasks],
@@ -1301,6 +1347,7 @@ export default function App() {
     setFormSuppressHolidayNotifications(false);
     setFormOverdueReminderIntensity('normal');
     setFormAlarmEnabled(false);
+    setFormPreNoticeMinutes(UPCOMING_REMINDER_MINUTES);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -1367,6 +1414,16 @@ export default function App() {
   }, [selectedTask, tasks]);
 
   useEffect(() => {
+    if (!showTaskDetails || !selectedTask) return;
+    void refreshSelectedTaskNotificationSchedules(selectedTask.id);
+  }, [refreshSelectedTaskNotificationSchedules, selectedTask, showTaskDetails]);
+
+  useEffect(() => {
+    if (activeTab !== 'notifications') return;
+    void refreshNotificationScheduleQueue();
+  }, [activeTab, refreshNotificationScheduleQueue]);
+
+  useEffect(() => {
     if (!pendingNotificationTaskId) return;
 
     const relatedTask = tasks.find((task) => task.id === pendingNotificationTaskId);
@@ -1423,6 +1480,7 @@ export default function App() {
     setFormSuppressHolidayNotifications(false);
     setFormOverdueReminderIntensity('normal');
     setFormAlarmEnabled(false);
+    setFormPreNoticeMinutes(UPCOMING_REMINDER_MINUTES);
     setShowTaskDrawer(true);
   }, [resetTaskForm]);
 
@@ -1441,6 +1499,7 @@ export default function App() {
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
     setFormOverdueReminderIntensity(task.overdueReminderIntensity ?? 'normal');
     setFormAlarmEnabled(task.alarmEnabled ?? false);
+    setFormPreNoticeMinutes(task.preNoticeMinutes ?? UPCOMING_REMINDER_MINUTES);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -1466,6 +1525,7 @@ export default function App() {
     setFormSuppressHolidayNotifications(task.suppressHolidayNotifications ?? false);
     setFormOverdueReminderIntensity(task.overdueReminderIntensity ?? 'normal');
     setFormAlarmEnabled(task.alarmEnabled ?? false);
+    setFormPreNoticeMinutes(task.preNoticeMinutes ?? UPCOMING_REMINDER_MINUTES);
     setFormRecurrenceEnabled(false);
     setFormRecurrenceMode('daily');
     setFormRecurrenceUntil('');
@@ -2119,6 +2179,7 @@ export default function App() {
       suppressHolidayNotifications: formSuppressHolidayNotifications,
       overdueReminderIntensity: formOverdueReminderIntensity,
       alarmEnabled: hasStart && formAlarmEnabled,
+      preNoticeMinutes: hasStart ? formPreNoticeMinutes : null,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       ...(editingTask?.status === 'draft' ? { status: 'pending' as const } : {}),
     };
@@ -2189,6 +2250,9 @@ export default function App() {
           }
         }
 
+      if (auth.token) {
+        void refreshNotificationScheduleQueue();
+      }
       resetTaskForm();
     } catch (err: unknown) {
       emitNotification('Erro', err instanceof Error ? err.message : 'Falha ao salvar o lembrete.', 'error');
@@ -2204,6 +2268,7 @@ export default function App() {
     formDesc,
     formEndTime,
     formAlarmEnabled,
+    formPreNoticeMinutes,
     configNoTimeReminderMinutes,
     formPriority,
     formTime,
@@ -2214,6 +2279,8 @@ export default function App() {
     formSuppressHolidayNotifications,
     isTaskSubmitting,
     resetTaskForm,
+    auth.token,
+    refreshNotificationScheduleQueue,
     recurringDates,
     recurrenceError,
     formRecurrenceEnabled,
@@ -2265,6 +2332,7 @@ export default function App() {
       suppressHolidayNotifications: formSuppressHolidayNotifications,
       overdueReminderIntensity: formOverdueReminderIntensity,
       alarmEnabled: hasStart && formAlarmEnabled,
+      preNoticeMinutes: hasStart ? formPreNoticeMinutes : null,
       noTimeReminderMinutes: configNoTimeReminderMinutes,
       status: 'draft' as const,
     };
@@ -2279,6 +2347,9 @@ export default function App() {
       emitNotification('Rascunho salvo', `"${saved.title}" ficou disponível em Meus lembretes > Rascunhos.`, 'success', {
         target: { type: 'task', taskId: saved.id },
       });
+      if (auth.token) {
+        void refreshNotificationScheduleQueue();
+      }
       resetTaskForm();
       setTasksPageView('drafts');
       setActiveTab('tasks');
@@ -2296,6 +2367,7 @@ export default function App() {
     formDesc,
     formEndTime,
     formAlarmEnabled,
+    formPreNoticeMinutes,
     configNoTimeReminderMinutes,
     formPriority,
     formOverdueReminderIntensity,
@@ -2306,6 +2378,8 @@ export default function App() {
     isTaskSubmitting,
     noTimeReminderFallbackTime,
     resetTaskForm,
+    auth.token,
+    refreshNotificationScheduleQueue,
     taskDueDateError,
     taskEndTimeError,
     updateTask,
@@ -3010,8 +3084,9 @@ export default function App() {
 
       const dueDate = parseISO(task.dueDate);
       const minutesUntil = getMinutesDifference(dueDate, now);
+      const preNoticeMinutes = task.preNoticeMinutes ?? UPCOMING_REMINDER_MINUTES;
 
-      if (minutesUntil <= 0 || minutesUntil > UPCOMING_REMINDER_MINUTES) return;
+      if (minutesUntil <= 0 || minutesUntil > preNoticeMinutes) return;
 
       emitLocalOfflineNotification(
         task.alarmEnabled
@@ -3023,7 +3098,7 @@ export default function App() {
         task.alarmEnabled || minutesUntil <= 5 ? 'warning' : 'info',
         {
           target: { type: 'task', taskId: task.id },
-          dedupeKey: `${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${UPCOMING_REMINDER_MINUTES}`,
+          dedupeKey: `${task.alarmEnabled ? 'alarm-warning' : 'upcoming'}:${task.id}:${format(dueDate, 'yyyy-MM-dd-HH-mm')}:${preNoticeMinutes}`,
           kind: 'pre_notice',
         },
       );
@@ -4180,6 +4255,16 @@ export default function App() {
                     onOpenNotification={handleOpenNotification}
                     onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
                     isNotificationActionBusy={isNotificationActionBusy}
+                    scheduleQueue={notificationScheduleQueue}
+                    scheduleDiagnostics={notificationScheduleDiagnostics}
+                    isLoadingScheduleQueue={isLoadingNotificationSchedules}
+                    onRefreshScheduleQueue={refreshNotificationScheduleQueue}
+                    onProcessDueNotifications={() => {
+                      if (!auth.token) return;
+                      void processDueNotifications(auth.token)
+                        .then(() => refreshNotificationScheduleQueue())
+                        .catch(() => undefined);
+                    }}
                   />
                 )}
               </Suspense>
@@ -4331,6 +4416,8 @@ export default function App() {
             isRescheduling={selectedTask ? reschedulingTaskIds.has(selectedTask.id) : false}
             isSyncingCalendar={selectedTask ? syncingCalendarTaskIds.has(selectedTask.id) : false}
             isTogglingActive={selectedTask ? togglingActiveTaskIds.has(selectedTask.id) : false}
+            notificationSchedules={selectedTaskNotificationSchedules}
+            isLoadingNotificationSchedules={isLoadingNotificationSchedules}
             backLabel={taskDetailsBackLabel || undefined}
             onClose={closeTaskDetails}
             onBack={taskDetailsReturnMetric ? returnToDashboardMetric : undefined}
@@ -4415,6 +4502,8 @@ export default function App() {
             setOverdueReminderIntensity={setFormOverdueReminderIntensity}
             alarmEnabled={formAlarmEnabled}
             setAlarmEnabled={setFormAlarmEnabled}
+            preNoticeMinutes={formPreNoticeMinutes}
+            setPreNoticeMinutes={setFormPreNoticeMinutes}
             recurrenceError={recurrenceError}
             recurrencePreviewCount={recurringDates.length}
             holidaySuppressedCount={recurringHolidaySuppressedCount}

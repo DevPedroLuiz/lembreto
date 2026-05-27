@@ -372,6 +372,7 @@ function buildCreatedHistoryEntry(input: {
   category: string;
   tags: string[];
   alarmEnabled: boolean;
+  preNoticeMinutes?: number | null;
   overdueReminderIntensity: OverdueReminderIntensity;
   status: string;
 }): TaskHistoryEntry {
@@ -387,6 +388,10 @@ function buildCreatedHistoryEntry(input: {
 
   if (input.alarmEnabled) {
     details.push('Alarme ativado.');
+  }
+
+  if (input.dueDate) {
+    details.push(`Pré-aviso: ${input.preNoticeMinutes ?? 15} min antes.`);
   }
 
   if (input.overdueReminderIntensity !== 'normal') {
@@ -422,6 +427,7 @@ function buildUpdateHistoryEntry(
     tags: string[];
     suppressHolidayNotifications: unknown;
     alarmEnabled: unknown;
+    preNoticeMinutes: unknown;
     overdueReminderIntensity: unknown;
     status: unknown;
   },
@@ -441,6 +447,9 @@ function buildUpdateHistoryEntry(
   }
   if (Boolean(current.alarm_enabled) !== Boolean(next.alarmEnabled)) {
     changedDetails.push('Configuração de alarme alterada.');
+  }
+  if (Number(current.pre_notice_minutes ?? 15) !== Number(next.preNoticeMinutes ?? 15)) {
+    changedDetails.push('Tempo de pré-aviso alterado.');
   }
   if (
     normalizeOverdueReminderIntensity(current.overdue_reminder_intensity) !==
@@ -573,6 +582,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
+          pre_notice_minutes AS "preNoticeMinutes",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
           overdue_since AS "overdueSince",
@@ -678,6 +688,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       alarmEnabled,
       overdueReminderIntensity,
       mutedUntil,
+      preNoticeMinutes,
       noTimeReminderMinutes,
     } = parsed.data;
     const tags = sanitizeTaskTags(parsed.data.tags);
@@ -692,6 +703,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         category,
         tags,
         alarmEnabled: effectiveAlarmEnabled,
+        preNoticeMinutes: effectiveDueDate ? preNoticeMinutes ?? 15 : null,
         overdueReminderIntensity,
         status,
       }),
@@ -718,6 +730,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           suppress_holiday_notifications,
           overdue_reminder_intensity,
           alarm_enabled,
+          pre_notice_minutes,
           reminder_mode,
           expires_at,
           muted_until,
@@ -738,6 +751,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${suppressHolidayNotifications},
           ${overdueReminderIntensity},
           ${effectiveAlarmEnabled},
+          ${effectiveDueDate ? preNoticeMinutes ?? 15 : null},
           ${effectiveDueDate ? 'timed' : 'floating'},
           ${effectiveDueDate ? null : new Date(Date.now() + 24 * 60 * 60 * 1000)},
           ${mutedUntil || null},
@@ -759,6 +773,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
+          pre_notice_minutes AS "preNoticeMinutes",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
           overdue_since AS "overdueSince",
@@ -837,6 +852,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         suppressHolidayNotifications,
         overdueReminderIntensity,
         mutedUntil,
+        preNoticeMinutes,
         noTimeReminderMinutes,
       } = parsed.data;
       const nextTags = parsed.data.tags ? sanitizeTaskTags(parsed.data.tags) : undefined;
@@ -854,6 +870,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           tags,
           status,
           alarm_enabled,
+          pre_notice_minutes,
           suppress_holiday_notifications,
           overdue_reminder_intensity,
           muted_until,
@@ -881,6 +898,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           ? suppressHolidayNotifications
           : cur.suppress_holiday_notifications,
         alarmEnabled: alarmEnabled !== undefined ? alarmEnabled : cur.alarm_enabled,
+        preNoticeMinutes: preNoticeMinutes !== undefined ? preNoticeMinutes : cur.pre_notice_minutes,
         overdueReminderIntensity: overdueReminderIntensity !== undefined
           ? overdueReminderIntensity
           : normalizeOverdueReminderIntensity(cur.overdue_reminder_intensity),
@@ -893,6 +911,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
       if (!nextValues.dueDate) {
         nextValues.endDate = null;
         nextValues.alarmEnabled = false;
+        nextValues.preNoticeMinutes = null;
       }
       if (
         isWorkCategory(String(nextValues.category)) &&
@@ -929,6 +948,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           suppress_holiday_notifications = ${nextValues.suppressHolidayNotifications},
           overdue_reminder_intensity = ${nextValues.overdueReminderIntensity},
           alarm_enabled = ${nextValues.alarmEnabled},
+          pre_notice_minutes = ${nextValues.dueDate ? nextValues.preNoticeMinutes ?? 15 : null},
           reminder_mode = ${nextValues.dueDate ? 'timed' : 'floating'},
           expires_at = CASE
             WHEN ${nextValues.dueDate}::timestamptz IS NULL THEN COALESCE(expires_at, NOW() + INTERVAL '24 hours')
@@ -986,6 +1006,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           suppress_holiday_notifications AS "suppressHolidayNotifications",
           overdue_reminder_intensity AS "overdueReminderIntensity",
           alarm_enabled AS "alarmEnabled",
+          pre_notice_minutes AS "preNoticeMinutes",
           reminder_mode AS "reminderMode",
           expires_at AS "expiresAt",
           overdue_since AS "overdueSince",

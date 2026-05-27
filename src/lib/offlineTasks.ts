@@ -11,6 +11,7 @@ export type TaskCreatePayload = {
   suppressHolidayNotifications: boolean;
   overdueReminderIntensity?: TaskOverdueReminderIntensity;
   alarmEnabled?: boolean;
+  preNoticeMinutes?: number | null;
   mutedUntil?: string | null;
   noTimeReminderMinutes?: number;
   status?: Status;
@@ -112,6 +113,7 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
     suppressHolidayNotifications: item.payload.suppressHolidayNotifications,
     overdueReminderIntensity: item.payload.overdueReminderIntensity ?? 'normal',
     alarmEnabled: item.payload.alarmEnabled ?? false,
+    preNoticeMinutes: item.payload.preNoticeMinutes ?? null,
     status: item.payload.status ?? 'pending',
     createdAt: item.createdAt,
     syncStatus: 'pending',

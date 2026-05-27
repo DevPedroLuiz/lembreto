@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowDownAZ,
   ArrowUpDown,
+  BellRing,
   CalendarDays,
   CalendarRange,
   CheckCheck,
@@ -12,6 +13,7 @@ import {
   ChevronUp,
   Circle,
   CircleDot,
+  Clock3,
   FileText,
   Flag,
   Hash,
@@ -39,6 +41,7 @@ type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | DerivedTaskStatus | 'inactive';
 type TagFilter = 'all' | string;
+type QuickTaskFilter = 'none' | 'alarm' | 'noTime';
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
 export type TasksPageView = 'agenda' | 'completed' | 'holidays' | 'drafts';
 
@@ -550,6 +553,7 @@ export function TasksPage({
   const [priorityFilter, setPriorityFilter] = React.useState<PriorityFilter>(initialPriorityFilter);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatusFilter);
   const [tagFilter, setTagFilter] = React.useState<TagFilter>(initialTagFilter);
+  const [quickTaskFilter, setQuickTaskFilter] = React.useState<QuickTaskFilter>('none');
   const [dateFilterMode, setDateFilterMode] = React.useState<DateFilterMode>(initialDateFilterMode);
   const [dateFilterStart, setDateFilterStart] = React.useState(initialDateFilterStart);
   const [dateFilterEnd, setDateFilterEnd] = React.useState(initialDateFilterEnd);
@@ -758,10 +762,15 @@ export function TasksPage({
   const visiblePendingTasks = React.useMemo(
     () => {
       if (statusFilter === 'completed') return [];
-      if (statusFilter === 'all') return locallyFilteredPendingTasks;
-      return locallyFilteredPendingTasks.filter((task) => matchesStatusFilter(task, statusFilter));
+      const quickFilteredTasks = locallyFilteredPendingTasks.filter((task) => {
+        if (quickTaskFilter === 'alarm') return task.alarmEnabled;
+        if (quickTaskFilter === 'noTime') return !task.dueDate;
+        return true;
+      });
+      if (statusFilter === 'all') return quickFilteredTasks;
+      return quickFilteredTasks.filter((task) => matchesStatusFilter(task, statusFilter));
     },
-    [locallyFilteredPendingTasks, statusFilter],
+    [locallyFilteredPendingTasks, quickTaskFilter, statusFilter],
   );
 
   const visibleCompletedTasks = React.useMemo(
@@ -905,6 +914,7 @@ export function TasksPage({
     priorityFilter !== 'all',
     statusFilter !== 'all',
     tagFilter !== 'all',
+    quickTaskFilter !== 'none',
     dateFilterMode !== 'all',
     search.trim().length > 0,
   ].filter(Boolean).length;
@@ -915,7 +925,16 @@ export function TasksPage({
     if (Number.isNaN(dueTimestamp)) return false;
     return formatDateKey(new Date(dueTimestamp)) === todayKey;
   }).length;
+  const tomorrowKey = formatDateKey(addCalendarDays(new Date(), 1));
+  const tomorrowOpenCount = pendingTasks.filter((task) => {
+    if (!task.dueDate) return false;
+    const dueTimestamp = Date.parse(task.dueDate);
+    if (Number.isNaN(dueTimestamp)) return false;
+    return formatDateKey(new Date(dueTimestamp)) === tomorrowKey;
+  }).length;
   const overdueOpenCount = pendingTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
+  const alarmOpenCount = pendingTasks.filter((task) => task.alarmEnabled).length;
+  const noTimeOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
   const highPriorityOpenCount = pendingTasks.filter((task) => task.priority === 'high').length;
   const quickTriageCards = [
     {
@@ -925,11 +944,28 @@ export function TasksPage({
       icon: <CalendarDays size={16} />,
       onClick: () => {
         onActiveViewChange('agenda');
+        setQuickTaskFilter('none');
         handleStatusFilterChange('all');
         handlePriorityFilterChange('all');
         handleTagFilterChange('all');
         setFilterCategory('Todas');
         updateDateFilter('day', todayKey, '');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Amanhã',
+      count: tomorrowOpenCount,
+      description: 'Planejar cedo',
+      icon: <CalendarRange size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        setQuickTaskFilter('none');
+        handleStatusFilterChange('all');
+        handlePriorityFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        updateDateFilter('day', tomorrowKey, '');
         setFiltersOpen(false);
       },
     },
@@ -940,7 +976,40 @@ export function TasksPage({
       icon: <AlertTriangle size={16} />,
       onClick: () => {
         onActiveViewChange('agenda');
+        setQuickTaskFilter('none');
         handleStatusFilterChange('overdue');
+        handlePriorityFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        updateDateFilter('all', todayKey, '');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Com alarme',
+      count: alarmOpenCount,
+      description: 'Têm toque ativo',
+      icon: <BellRing size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        setQuickTaskFilter('alarm');
+        handleStatusFilterChange('all');
+        handlePriorityFilterChange('all');
+        handleTagFilterChange('all');
+        setFilterCategory('Todas');
+        updateDateFilter('all', todayKey, '');
+        setFiltersOpen(false);
+      },
+    },
+    {
+      label: 'Sem horário',
+      count: noTimeOpenCount,
+      description: 'Sem início definido',
+      icon: <Clock3 size={16} />,
+      onClick: () => {
+        onActiveViewChange('agenda');
+        setQuickTaskFilter('noTime');
+        handleStatusFilterChange('all');
         handlePriorityFilterChange('all');
         handleTagFilterChange('all');
         setFilterCategory('Todas');
@@ -955,6 +1024,7 @@ export function TasksPage({
       icon: <Flag size={16} />,
       onClick: () => {
         onActiveViewChange('agenda');
+        setQuickTaskFilter('none');
         handlePriorityFilterChange('high');
         handleStatusFilterChange('all');
         handleTagFilterChange('all');
@@ -1022,6 +1092,7 @@ export function TasksPage({
     setPriorityFilter('all');
     setStatusFilter('all');
     setTagFilter('all');
+    setQuickTaskFilter('none');
     setDateFilterMode('all');
     setDateFilterStart(todayKey);
     setDateFilterEnd('');

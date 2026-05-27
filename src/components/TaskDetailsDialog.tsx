@@ -26,7 +26,7 @@ import { ptBR } from 'date-fns/locale';
 import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../lib/taskStatus';
 import { NoteCard } from './NoteCard';
-import type { Note, Priority, Task, TaskHistoryEvent } from '../types';
+import type { Note, NotificationScheduleQueueItem, Priority, Task, TaskHistoryEvent } from '../types';
 
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
@@ -49,6 +49,8 @@ interface TaskDetailsDialogProps {
   isRescheduling?: boolean;
   isSyncingCalendar?: boolean;
   isTogglingActive?: boolean;
+  notificationSchedules?: NotificationScheduleQueueItem[];
+  isLoadingNotificationSchedules?: boolean;
   backLabel?: string;
   onClose: () => void;
   onBack?: () => void;
@@ -181,6 +183,30 @@ function getHistoryTone(event: TaskHistoryEvent): string {
   }
 }
 
+function getScheduleKindLabel(kind: NotificationScheduleQueueItem['kind']) {
+  if (kind === 'pre_notice') return 'Pré-aviso';
+  if (kind === 'notification') return 'No horário';
+  if (kind === 'alarm') return 'Alarme';
+  if (kind === 'floating_reminder') return 'Sem horário';
+  return 'Atrasado';
+}
+
+function getScheduleStatusLabel(status: NotificationScheduleQueueItem['status']) {
+  if (status === 'pending') return 'Pendente';
+  if (status === 'processing') return 'Processando';
+  if (status === 'sent') return 'Enviado';
+  if (status === 'failed') return 'Erro';
+  return 'Cancelado';
+}
+
+function formatScheduleDate(value: string) {
+  try {
+    return format(parseISO(value), "dd/MM 'às' HH:mm", { locale: ptBR });
+  } catch {
+    return 'Data indisponível';
+  }
+}
+
 export function TaskDetailsDialog({
   open,
   task,
@@ -190,6 +216,8 @@ export function TaskDetailsDialog({
   isRescheduling = false,
   isSyncingCalendar = false,
   isTogglingActive = false,
+  notificationSchedules = [],
+  isLoadingNotificationSchedules = false,
   backLabel,
   onClose,
   onBack,
@@ -479,6 +507,51 @@ export function TaskDetailsDialog({
                         Sincronizado com {task.externalCalendarProvider === 'google' ? 'Google Calendar' : 'Outlook Calendar'}.
                       </div>
                     ) : null}
+
+                    <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="icon-slot h-9 w-9 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                            <Bell size={16} />
+                          </span>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Avisos agendados</h4>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Pré-aviso, horário, alarme e atrasos deste lembrete.
+                            </p>
+                          </div>
+                        </div>
+                        {isLoadingNotificationSchedules && <Loader2 size={16} className="animate-spin text-slate-400" />}
+                      </div>
+
+                      <div className="mt-4 grid gap-2">
+                        {notificationSchedules.length === 0 && !isLoadingNotificationSchedules ? (
+                          <p className="rounded-2xl bg-slate-50 px-3 py-3 text-sm text-slate-500 dark:bg-white/[0.04] dark:text-slate-400">
+                            Nenhum aviso encontrado na fila para este lembrete.
+                          </p>
+                        ) : (
+                          notificationSchedules.map((schedule) => (
+                            <div
+                              key={schedule.id}
+                              className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03] sm:grid-cols-[1fr_auto] sm:items-center"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                  {getScheduleKindLabel(schedule.kind)}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                  {formatScheduleDate(schedule.notifyAt)}
+                                  {schedule.errorMessage ? ` - ${schedule.errorMessage}` : ''}
+                                </p>
+                              </div>
+                              <span className="inline-flex w-fit rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-white/[0.06] dark:text-slate-300 dark:ring-white/10">
+                                {getScheduleStatusLabel(schedule.status)}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
 
                     <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-4 dark:border-white/10 dark:bg-white/[0.04]">
                       <div className="flex items-center gap-2">

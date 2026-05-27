@@ -75,9 +75,10 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completion_source TEXT
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_reason TEXT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS auto_deleted_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS floating_interval_minutes INTEGER;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_reminder_intensity TEXT NOT NULL DEFAULT 'normal'
-  CHECK (overdue_reminder_intensity IN ('gentle', 'normal', 'insistent', 'silent'));
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS floating_interval_minutes INTEGER;
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pre_notice_minutes INTEGER;
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS overdue_reminder_intensity TEXT NOT NULL DEFAULT 'normal'
+    CHECK (overdue_reminder_intensity IN ('gentle', 'normal', 'insistent', 'silent'));
 
 CREATE INDEX IF NOT EXISTS idx_tasks_tags_gin ON tasks USING GIN(tags);
 

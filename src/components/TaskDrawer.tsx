@@ -100,6 +100,7 @@ const OVERDUE_INTENSITY_OPTIONS: Array<{
 ];
 
 const MOBILE_KEYBOARD_HEIGHT_THRESHOLD = 120;
+const PRE_NOTICE_PRESETS = [5, 10, 15, 30];
 
 type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
 
@@ -186,6 +187,8 @@ interface TaskDrawerProps {
   setOverdueReminderIntensity: (value: TaskOverdueReminderIntensity) => void;
   alarmEnabled: boolean;
   setAlarmEnabled: (value: boolean) => void;
+  preNoticeMinutes: number;
+  setPreNoticeMinutes: (value: number) => void;
   recurrenceError?: string;
   recurrencePreviewCount?: number;
   holidaySuppressedCount?: number;
@@ -388,6 +391,8 @@ export function TaskDrawer({
   setOverdueReminderIntensity,
   alarmEnabled,
   setAlarmEnabled,
+  preNoticeMinutes,
+  setPreNoticeMinutes,
   recurrenceError = '',
   recurrencePreviewCount = 0,
   holidaySuppressedCount = 0,
@@ -1418,7 +1423,49 @@ export function TaskDrawer({
                                 </span>
                                 <div>
                                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Aviso</p>
-                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">15 minutos antes</p>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                    {date && time ? `${preNoticeMinutes} min antes` : 'Defina um horário'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Pré-aviso</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {PRE_NOTICE_PRESETS.map((minutes) => (
+                                    <button
+                                      key={minutes}
+                                      type="button"
+                                      disabled={isSubmitting || !date || !time}
+                                      onClick={() => setPreNoticeMinutes(minutes)}
+                                      aria-pressed={preNoticeMinutes === minutes}
+                                      className={cn(
+                                        'min-h-9 rounded-xl px-3 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                                        preNoticeMinutes === minutes
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/[0.06] dark:text-slate-300',
+                                      )}
+                                    >
+                                      {minutes}m
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="mt-3">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={1440}
+                                    value={preNoticeMinutes}
+                                    disabled={isSubmitting || !date || !time}
+                                    onChange={(event) => {
+                                      const next = Number(event.target.value);
+                                      if (Number.isFinite(next)) {
+                                        setPreNoticeMinutes(Math.min(Math.max(Math.round(next), 1), 1440));
+                                      }
+                                    }}
+                                    className="field-control h-11"
+                                    data-testid="task-pre-notice-minutes-input"
+                                    aria-label="Minutos de antecedência do pré-aviso"
+                                  />
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]">

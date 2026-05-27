@@ -35,6 +35,7 @@ export interface Task {
   suppressHolidayNotifications: boolean;
   overdueReminderIntensity?: TaskOverdueReminderIntensity;
   alarmEnabled: boolean;
+  preNoticeMinutes?: number | null;
   reminderMode?: 'timed' | 'floating';
   expiresAt?: string | null;
   overdueSince?: string | null;
@@ -116,6 +117,55 @@ export interface TaskHistoryEvent {
 export interface TaskTaxonomy {
   categories: string[];
   tags: string[];
+}
+
+export type NotificationScheduleKind =
+  | 'pre_notice'
+  | 'notification'
+  | 'alarm'
+  | 'floating_reminder'
+  | 'overdue_reminder';
+
+export type NotificationScheduleStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled';
+
+export interface NotificationScheduleQueueItem {
+  id: string;
+  userId: string;
+  taskId: string;
+  taskTitle: string;
+  kind: NotificationScheduleKind;
+  notifyAt: string;
+  status: NotificationScheduleStatus;
+  title: string;
+  message: string;
+  tone: 'info' | 'success' | 'warning' | 'error';
+  sequenceIndex?: number | null;
+  intervalMinutes?: number | null;
+  processingStartedAt?: string | null;
+  sentAt?: string | null;
+  failedAt?: string | null;
+  cancelledAt?: string | null;
+  dismissedAt?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationScheduleDiagnostics {
+  postgresNow: string | null;
+  oldestPendingNotifyAt: string | null;
+  duePendingCount: number;
+  futurePendingCount: number;
+  pendingByKind: Record<string, number>;
+  dueByKind: Record<string, number>;
+  processingCount: number;
+  failedCount: number;
+  cancelledCount: number;
+}
+
+export interface NotificationSchedulesResponse {
+  schedules: NotificationScheduleQueueItem[];
+  diagnostics: NotificationScheduleDiagnostics;
 }
 
 export interface HolidayRegionOption {

@@ -23,6 +23,8 @@ import {
   cancelPendingNotificationSchedulesForUser,
   detectOverdueNotificationSchedules,
   dismissAlarmSchedule,
+  getScheduleDiagnostics,
+  listNotificationSchedulesForUser,
   processDueNotificationSchedules,
   type ProcessNotificationSchedulesSummary,
   type ScheduleDiagnostics,
@@ -46,7 +48,9 @@ import {
 } from '../schemas.js';
 import {
   NOTIFICATION_SCHEDULE_KINDS,
+  NOTIFICATION_SCHEDULE_STATUSES,
   NOTIFICATION_TONES,
+  type NotificationScheduleStatus,
   type NotificationScheduleKind,
   type NotificationTone,
 } from '../contracts.js';
@@ -599,6 +603,42 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
   } catch (error) {
     logError('notifications_user_due_process_failed', error, getRequestMeta(request, { userId: user.id }));
     return json(500, { error: 'Erro ao processar notificações vencidas' });
+  }
+}
+
+export async function handleNotificationSchedulesQueue(context: HandlerContext): Promise<HandlerResult> {
+  const auth = await requireNotificationAuth(context);
+  if ('status' in auth) return auth;
+
+  const { request, sql } = context;
+  const user = auth.user;
+
+  if (request.method !== 'GET') return methodNotAllowed();
+
+  const taskId = firstQueryValue(request.query?.taskId) ?? null;
+  const statusRaw = firstQueryValue(request.query?.status);
+  const status = statusRaw && NOTIFICATION_SCHEDULE_STATUSES.includes(statusRaw as NotificationScheduleStatus)
+    ? statusRaw as NotificationScheduleStatus
+    : null;
+  const limitRaw = firstQueryValue(request.query?.limit);
+  const limit = limitRaw ? Number(limitRaw) : 100;
+
+  if (statusRaw && !status) return json(400, { error: 'Status da fila inválido.' });
+  if (!Number.isFinite(limit) || limit <= 0) return json(400, { error: 'Limite da fila inválido.' });
+
+  try {
+    const [schedules, diagnostics] = await Promise.all([
+      listNotificationSchedulesForUser(sql, user.id, {
+        taskId,
+        status,
+        limit,
+      }),
+      getScheduleDiagnostics(sql, { userId: user.id }),
+    ]);
+    return json(200, { schedules, diagnostics });
+  } catch (error) {
+    logError('notification_schedules_queue_failed', error, getRequestMeta(request, { userId: user.id, taskId }));
+    return json(500, { error: 'Erro ao carregar fila de notificações' });
   }
 }
 

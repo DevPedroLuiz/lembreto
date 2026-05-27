@@ -745,6 +745,7 @@ function createPushDeliverySqlMock() {
 
 function createTaskSideEffectsSqlMock(options?: {
   alarmEnabled?: boolean;
+  preNoticeMinutes?: number | null;
   dueMinutesFromNow?: number;
   includeExternalCalendarJob?: boolean;
   includeNotificationJob?: boolean;
@@ -806,6 +807,7 @@ function createTaskSideEffectsSqlMock(options?: {
     status: 'pending',
     createdAt: new Date(now.getTime() - 60_000).toISOString(),
     alarmEnabled: Boolean(options?.alarmEnabled),
+    preNoticeMinutes: options?.preNoticeMinutes ?? null,
     reminderMode: 'timed',
     expiresAt: null,
     overdueSince: null,
@@ -958,6 +960,7 @@ function createTaskSideEffectsSqlMock(options?: {
         status: task.status,
         createdAt: task.createdAt,
         alarmEnabled: task.alarmEnabled,
+        preNoticeMinutes: task.preNoticeMinutes,
         reminderMode: task.reminderMode,
         expiresAt: task.expiresAt,
         overdueSince: task.overdueSince,
@@ -3080,6 +3083,22 @@ async function main() {
     assert.equal(result.done, 1);
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'));
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
+  });
+
+  await run('side effect sync respects custom pre notice minutes', async () => {
+    const { sql, schedules, task } = createTaskSideEffectsSqlMock({
+      dueMinutesFromNow: 30,
+      preNoticeMinutes: 5,
+    });
+    const result = await processTaskSideEffects(sql, 3, 8000);
+
+    assert.equal(result.fetched, 1);
+    assert.equal(result.done, 1);
+    const preNotice = schedules.find((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice');
+    assert.ok(preNotice);
+    const dueTime = new Date(String(task.dueDate)).getTime();
+    const preNoticeTime = new Date(String(preNotice?.notifyAt)).getTime();
+    assert.equal(dueTime - preNoticeTime, 5 * 60_000);
   });
 
   await run('side effect sync creates immediate pre notice when due date is too close', async () => {
