@@ -267,78 +267,139 @@ export function DashboardPage({
       className="space-y-6 sm:space-y-8"
     >
       <section className="grid items-start gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
-        <div className="surface-panel overflow-hidden p-5 sm:p-6 md:p-8">
-          <div className="flex flex-col gap-5 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-2xl">
-              <span className="section-eyebrow">
-                <span className="icon-slot h-4 w-4">
-                  <Sparkles size={14} />
+        <div className="grid gap-4 sm:gap-6">
+          <div className="surface-panel overflow-hidden p-5 sm:p-6 md:p-8">
+            <div className="flex flex-col gap-5 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
+                <span className="section-eyebrow">
+                  <span className="icon-slot h-4 w-4">
+                    <Sparkles size={14} />
+                  </span>
+                  Visão geral do dia
                 </span>
-                Visão geral do dia
-              </span>
-              <h3 className="mt-4 font-display text-[1.35rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-3xl md:text-4xl">
-                Clareza para decidir o que vem primeiro.
-              </h3>
-              <p className="mt-3 max-w-xl text-[12px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm sm:leading-7 md:text-base">
-                Centralize prioridades, acompanhe prazos e mantenha uma rotina mais leve com um painel simples de consultar.
-              </p>
+                <h3 className="mt-4 font-display text-[1.35rem] font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-3xl md:text-4xl">
+                  Clareza para decidir o que vem primeiro.
+                </h3>
+                <p className="mt-3 max-w-xl text-[12px] leading-6 text-slate-500 dark:text-slate-400 sm:text-sm sm:leading-7 md:text-base">
+                  Centralize prioridades, acompanhe prazos e mantenha uma rotina mais leve com um painel simples de consultar.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <button type="button" onClick={onNewTask} className="action-primary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
+                  <span className="icon-slot h-[18px] w-[18px]">
+                    <Plus size={18} />
+                  </span>
+                  Novo lembrete
+                </button>
+                <button type="button" onClick={onViewAll} className="action-secondary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
+                  <span className="icon-slot h-[18px] w-[18px]">
+                    <ListTodo size={18} />
+                  </span>
+                  Ver agenda
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <button type="button" onClick={onNewTask} className="action-primary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
-                <span className="icon-slot h-[18px] w-[18px]">
-                  <Plus size={18} />
-                </span>
-                Novo lembrete
-              </button>
-              <button type="button" onClick={onViewAll} className="action-secondary min-h-[52px] w-full justify-center whitespace-nowrap px-5 sm:w-auto">
-                <span className="icon-slot h-[18px] w-[18px]">
-                  <ListTodo size={18} />
-                </span>
-                Ver agenda
-              </button>
+            <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-8 sm:gap-4 xl:grid-cols-4">
+              <MetricCard
+                title="Total"
+                value={tasks.length}
+                icon={<Target size={20} />}
+                tone="brand"
+                onClick={onViewAll}
+                ariaLabel="Abrir todos os lembretes"
+                testId="dashboard-metric-total"
+              />
+              <MetricCard
+                title="Concluídos"
+                value={completedTasks.length}
+                icon={<CheckCircle2 size={20} />}
+                tone="emerald"
+                onClick={onOpenCompleted}
+                ariaLabel="Abrir lembretes concluídos"
+                testId="dashboard-metric-completed"
+              />
+              <MetricCard
+                title="Hoje"
+                value={todayCount}
+                icon={<CalendarDays size={20} />}
+                tone="violet"
+                onClick={onOpenToday}
+                ariaLabel="Abrir lembretes para hoje"
+                testId="dashboard-metric-today"
+              />
+              <MetricCard
+                title="Atrasados"
+                value={overdueCount}
+                icon={<Bell size={20} />}
+                error
+                pulse={overdueCount > 0}
+                onClick={onOpenOverdue}
+                ariaLabel="Abrir lembretes atrasados"
+                testId="dashboard-metric-overdue"
+              />
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-8 sm:gap-4 xl:grid-cols-4">
-            <MetricCard
-              title="Total"
-              value={tasks.length}
-              icon={<Target size={20} />}
-              tone="brand"
-              onClick={onViewAll}
-              ariaLabel="Abrir todos os lembretes"
-              testId="dashboard-metric-total"
-            />
-            <MetricCard
-              title="Concluídos"
-              value={completedTasks.length}
-              icon={<CheckCircle2 size={20} />}
-              tone="emerald"
-              onClick={onOpenCompleted}
-              ariaLabel="Abrir lembretes concluídos"
-              testId="dashboard-metric-completed"
-            />
-            <MetricCard
-              title="Hoje"
-              value={todayCount}
-              icon={<CalendarDays size={20} />}
-              tone="violet"
-              onClick={onOpenToday}
-              ariaLabel="Abrir lembretes para hoje"
-              testId="dashboard-metric-today"
-            />
-            <MetricCard
-              title="Atrasados"
-              value={overdueCount}
-              icon={<Bell size={20} />}
-              error
-              pulse={overdueCount > 0}
-              onClick={onOpenOverdue}
-              ariaLabel="Abrir lembretes atrasados"
-              testId="dashboard-metric-overdue"
-            />
-          </div>
+          <section className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                label: 'Alta prioridade',
+                value: highPriorityOpenCount,
+                helper: 'Tarefas que pedem decisão',
+                icon: <Flag size={18} />,
+                tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
+                onClick: onViewAll,
+              },
+              {
+                label: 'Média prioridade',
+                value: mediumPriorityOpenCount,
+                helper: 'Itens para manter em ritmo',
+                icon: <Flag size={18} />,
+                tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+                onClick: onViewAll,
+              },
+              {
+                label: 'Baixa prioridade',
+                value: lowPriorityOpenCount,
+                helper: 'Pode esperar um pouco',
+                icon: <Flag size={18} />,
+                tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+                onClick: onViewAll,
+              },
+              {
+                label: 'Sem prazo',
+                value: unscheduledOpenCount,
+                helper: 'Bom para revisar e datar',
+                icon: <ListTodo size={18} />,
+                tone: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300',
+                onClick: onViewAll,
+              },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={item.onClick}
+                className="surface-soft flex min-h-[118px] items-start justify-between gap-4 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-2 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                    {item.value}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">
+                    {item.helper}
+                  </p>
+                </div>
+                <span className={`icon-slot h-10 w-10 rounded-2xl ${item.tone}`}>
+                  {item.icon}
+                </span>
+              </button>
+            ))}
+          </section>
         </div>
 
         <aside className="surface-panel relative flex flex-col overflow-hidden p-5 sm:p-6 md:p-7">
@@ -453,65 +514,6 @@ export function DashboardPage({
             </div>
           </button>
         </aside>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: 'Alta prioridade',
-            value: highPriorityOpenCount,
-            helper: 'Tarefas que pedem decisão',
-            icon: <Flag size={18} />,
-            tone: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300',
-            onClick: onViewAll,
-          },
-          {
-            label: 'Média prioridade',
-            value: mediumPriorityOpenCount,
-            helper: 'Itens para manter em ritmo',
-            icon: <Flag size={18} />,
-            tone: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-            onClick: onViewAll,
-          },
-          {
-            label: 'Baixa prioridade',
-            value: lowPriorityOpenCount,
-            helper: 'Pode esperar um pouco',
-            icon: <Flag size={18} />,
-            tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
-            onClick: onViewAll,
-          },
-          {
-            label: 'Sem prazo',
-            value: unscheduledOpenCount,
-            helper: 'Bom para revisar e datar',
-            icon: <ListTodo size={18} />,
-            tone: 'bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300',
-            onClick: onViewAll,
-          },
-        ].map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            onClick={item.onClick}
-            className="surface-soft flex min-h-[118px] items-start justify-between gap-4 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white dark:hover:border-white/20 dark:hover:bg-white/[0.07]"
-          >
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
-                {item.label}
-              </p>
-              <p className="mt-2 font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                {item.value}
-              </p>
-              <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-slate-400">
-                {item.helper}
-              </p>
-            </div>
-            <span className={`icon-slot h-10 w-10 rounded-2xl ${item.tone}`}>
-              {item.icon}
-            </span>
-          </button>
-        ))}
       </section>
 
       {assistantTask && (
