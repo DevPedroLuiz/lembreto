@@ -37,6 +37,7 @@ import {
   handleNoteById,
   handleNotesCollection,
 } from './lib/handlers/notes.js';
+import { handleAssistantMessage } from './lib/handlers/assistant.js';
 import { handleCleanupCron } from './lib/handlers/cron.js';
 import {
   handleCalendarConnectCallback,
@@ -139,6 +140,8 @@ async function startServer() {
   app.delete('/api/tasks/tags', run(handleTaskTagsCollection));
   app.put('/api/tasks/:id', run(handleTaskById));
   app.delete('/api/tasks/:id', run(handleTaskById));
+
+  app.post('/api/assistant/message', run(handleAssistantMessage));
 
   app.all('/api/tasks/notes', async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'POST') {

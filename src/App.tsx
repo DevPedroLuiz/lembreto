@@ -75,6 +75,7 @@ import { Sidebar } from './components/Sidebar';
 import type { SettingsView } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { AssistantFloatingButton } from './components/assistant/AssistantFloatingButton';
 import type { QuickStartTemplate } from './pages/DashboardPage';
 import type { TasksPageView } from './pages/TasksPage';
 
@@ -3764,6 +3765,16 @@ export default function App() {
     setLocationSearch(window.location.search);
   }, []);
 
+  const handleAssistantActionComplete = useCallback(async (actionType: string) => {
+    if (!auth.token) return;
+    if (actionType === 'create_task' || actionType === 'update_task') {
+      await refreshTasks(auth.token);
+    }
+    if (actionType === 'create_note') {
+      await refreshNotes(auth.token);
+    }
+  }, [auth.token, refreshNotes, refreshTasks]);
+
   if (isResetPasswordRoute) {
     return (
       <Suspense fallback={<LoadingScreen />}>
@@ -4500,6 +4511,12 @@ export default function App() {
       </Suspense>
 
       <Toast toast={toastMsg} onDismiss={dismissToast} />
+
+      <AssistantFloatingButton
+        currentUser={auth.currentUser}
+        token={auth.token}
+        onActionComplete={handleAssistantActionComplete}
+      />
 
       <ConfirmDialog
         open={Boolean(pendingDeleteTask || pendingDeleteTaskSelection || pendingDeleteNote)}

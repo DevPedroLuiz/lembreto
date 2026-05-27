@@ -80,6 +80,310 @@ function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean 
   };
 }
 
+function createAssistantSqlMock() {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const tasks: Array<Record<string, unknown>> = [];
+  const notes: Array<Record<string, unknown>> = [];
+  const conversations: Array<Record<string, unknown>> = [];
+  const messages: Array<Record<string, unknown>> = [];
+  const actionEvents: Array<Record<string, unknown>> = [];
+  const contextRefs: Array<Record<string, unknown>> = [];
+
+  const normalizeJson = (value: unknown) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return {};
+      }
+    }
+    return value ?? {};
+  };
+
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(' ');
+    const infrastructureRows = getInfrastructureCheckRows(query);
+    if (infrastructureRows) return infrastructureRows;
+
+    if (query.includes('FROM token_blacklist')) return [];
+
+    if (query.includes('FROM users')) {
+      return [{
+        id: values[0],
+        name: 'Pedro',
+        email: 'pedro@example.com',
+        avatar: null,
+      }];
+    }
+
+    if (query.includes('INSERT INTO assistant_conversations')) {
+      const conversation = {
+        id: values[0],
+        userId: values[1],
+        title: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        archivedAt: null,
+      };
+      conversations.push(conversation);
+      return [conversation];
+    }
+
+    if (query.includes('FROM assistant_conversations')) {
+      const id = values[0];
+      const scopedUserId = values[1];
+      return conversations.filter((conversation) => (
+        conversation.id === id &&
+        conversation.userId === scopedUserId &&
+        !conversation.archivedAt
+      ));
+    }
+
+    if (query.includes('INSERT INTO assistant_messages')) {
+      const message = {
+        id: values[0],
+        conversationId: values[1],
+        userId: values[2],
+        role: values[3],
+        content: values[4],
+        metadata: normalizeJson(values[5]),
+        createdAt: new Date().toISOString(),
+      };
+      messages.push(message);
+      return [message];
+    }
+
+    if (query.includes('UPDATE assistant_conversations')) {
+      const id = values[0];
+      const conversation = conversations.find((item) => item.id === id);
+      if (conversation) conversation.updatedAt = new Date().toISOString();
+      return [];
+    }
+
+    if (query.includes('FROM assistant_messages')) {
+      const conversationId = values[0];
+      const hasUserFilter = query.includes('AND user_id');
+      const scopedUserId = hasUserFilter ? values[1] : undefined;
+      const limit = Number(values[hasUserFilter ? 2 : 1] ?? 12);
+      return messages
+        .filter((message) => (
+          message.conversationId === conversationId &&
+          (!hasUserFilter || message.userId === scopedUserId)
+        ))
+        .slice(-limit)
+        .reverse();
+    }
+
+    if (query.includes('INSERT INTO assistant_action_events')) {
+      const event = {
+        id: values[0],
+        conversationId: values[1],
+        userId: values[2],
+        messageId: values[3],
+        actionType: values[4],
+        status: values[5],
+        entityType: values[6],
+        entityId: values[7],
+        entityTitle: values[8],
+        summary: values[9],
+        payload: normalizeJson(values[10]),
+        createdAt: new Date().toISOString(),
+      };
+      actionEvents.push(event);
+      return [event];
+    }
+
+    if (query.includes('FROM assistant_action_events')) {
+      const conversationId = values[0];
+      const hasUserFilter = query.includes('AND user_id');
+      const scopedUserId = hasUserFilter ? values[1] : undefined;
+      const limit = Number(values[hasUserFilter ? 2 : 1] ?? 10);
+      return actionEvents
+        .filter((event) => (
+          event.conversationId === conversationId &&
+          (!hasUserFilter || event.userId === scopedUserId)
+        ))
+        .slice(-limit)
+        .reverse();
+    }
+
+    if (query.includes('INSERT INTO assistant_context_refs')) {
+      const ref = {
+        id: values[0],
+        conversationId: values[1],
+        userId: values[2],
+        refKey: values[3],
+        entityType: values[4],
+        entityId: values[5],
+        entityTitle: values[6],
+        metadata: normalizeJson(values[7]),
+        expiresAt: values[8],
+        createdAt: new Date().toISOString(),
+      };
+      contextRefs.push(ref);
+      return [ref];
+    }
+
+    if (query.includes('FROM assistant_context_refs')) {
+      const conversationId = values[0];
+      const hasUserFilter = query.includes('AND user_id');
+      const scopedUserId = hasUserFilter ? values[1] : undefined;
+      const latest = new Map<string, Record<string, unknown>>();
+      for (const ref of contextRefs.filter((item) => (
+        item.conversationId === conversationId &&
+        (!hasUserFilter || item.userId === scopedUserId)
+      )).reverse()) {
+        if (!latest.has(String(ref.refKey))) latest.set(String(ref.refKey), ref);
+      }
+      return Array.from(latest.values()).slice(0, Number(values[hasUserFilter ? 2 : 1] ?? 10));
+    }
+
+    if (query.includes('INSERT INTO tasks')) {
+      const task = {
+        id: '22222222-2222-4222-8222-222222222222',
+        userId: values[0],
+        title: values[1],
+        description: values[2],
+        dueDate: values[3],
+        endDate: values[4],
+        priority: values[5],
+        category: values[6],
+        tags: values[7],
+        suppressHolidayNotifications: values[8],
+        overdueReminderIntensity: values[9],
+        alarmEnabled: values[10],
+        reminderMode: values[11],
+        expiresAt: values[12],
+        overdueSince: null,
+        overdueExpiresAt: null,
+        deletedAt: null,
+        completedAt: null,
+        completionSource: null,
+        autoDeletedReason: null,
+        autoDeletedAt: null,
+        mutedUntil: values[13],
+        status: values[15],
+        history: [],
+        createdAt: new Date().toISOString(),
+        externalCalendarProvider: null,
+        externalCalendarEventId: null,
+        externalCalendarSyncStatus: 'idle',
+        externalCalendarLastError: null,
+        externalCalendarSyncedAt: null,
+      };
+      tasks.unshift(task);
+      return [task];
+    }
+
+    if (query.includes('SELECT COUNT(*) AS total') && query.includes('FROM tasks')) {
+      return [{ total: tasks.length }];
+    }
+
+    if (query.includes('FROM tasks') && query.includes('ORDER BY')) {
+      const pattern = values.find((value) => typeof value === 'string' && String(value).startsWith('%'));
+      const search = typeof pattern === 'string' ? pattern.replace(/%/g, '') : null;
+      const filtered = typeof search === 'string'
+        ? tasks.filter((task) => String(task.title).toLowerCase().includes(search.toLowerCase()))
+        : tasks;
+      return filtered;
+    }
+
+    if (query.includes('FROM tasks') && query.includes('WHERE id')) {
+      const id = values[0];
+      return tasks.filter((task) => task.id === id);
+    }
+
+    if (query.includes('UPDATE tasks SET')) {
+      const id = values[values.length - 2];
+      const task = tasks.find((item) => item.id === id);
+      if (!task) return [];
+      Object.assign(task, {
+        title: values[0],
+        description: values[1],
+        dueDate: values[2],
+        endDate: values[3],
+        priority: values[4],
+        category: values[5],
+        tags: values[6],
+        suppressHolidayNotifications: values[7],
+        overdueReminderIntensity: values[8],
+        alarmEnabled: values[9],
+        mutedUntil: values[10],
+        status: values.find((value) => (
+          value === 'pending' ||
+          value === 'completed' ||
+          value === 'inactive' ||
+          value === 'cancelled'
+        )) ?? task.status,
+      });
+      return [task];
+    }
+
+    if (query.includes('INSERT INTO notes')) {
+      const note = {
+        id: '33333333-3333-4333-8333-333333333333',
+        userId: values[0],
+        taskId: values[1],
+        title: values[2],
+        content: values[3],
+        priority: values[4],
+        category: values[5],
+        tags: values[6],
+        mode: values[7],
+        expiresAt: values[8],
+        deletedAt: null,
+        deleteAfter: null,
+        deletionReason: null,
+        expiredNotificationSentAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      notes.unshift(note);
+      return [note];
+    }
+
+    return [];
+  }) as SqlClient;
+
+  return { sql, userId, tasks, notes, conversations, messages, actionEvents, contextRefs };
+}
+
+async function withMockedGeminiResponse<T>(
+  action: unknown,
+  fn: (requests: unknown[]) => Promise<T>,
+): Promise<T> {
+  const previousKey = process.env.GEMINI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const requests: unknown[] = [];
+
+  try {
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === 'string') {
+        try {
+          requests.push(JSON.parse(init.body));
+        } catch {
+          requests.push(init.body);
+        }
+      }
+
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [{ text: JSON.stringify(action) }],
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    return await fn(requests);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+  }
+}
+
 function createNotificationScheduleSqlMock(options?: {
   future?: boolean;
   kind?: 'pre_notice' | 'notification' | 'alarm' | 'floating_reminder' | 'overdue_reminder';
@@ -1190,6 +1494,9 @@ async function main() {
     handleTaskCalendarFeed,
     handleTasksCollection,
   } = await import('../lib/handlers/tasks.js');
+  const { handleAssistantMessage } = await import('../lib/handlers/assistant.js');
+  const { assistantActionSchema } = await import('../lib/assistant/schemas.js');
+  const { executeAssistantAction } = await import('../lib/assistant/tools.js');
   const {
     clearNotificationsForUser,
     listNotificationsForUser,
@@ -1233,6 +1540,423 @@ async function main() {
         return true;
       },
     );
+  });
+
+  await run('assistant message without auth returns 401', async () => {
+    const response = await handleAssistantMessage({
+      sql: createAssistantSqlMock().sql,
+      request: {
+        method: 'POST',
+        headers: {},
+        body: { message: 'Me lembre de estudar amanhã' },
+      },
+    });
+
+    assert.equal(response.status, 401);
+  });
+
+  await run('assistant rejects empty message before calling Gemini', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const response = await handleAssistantMessage({
+      sql: createAssistantSqlMock().sql,
+      request: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        body: { message: '   ' },
+      },
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(String((response.body as { error?: string }).error), /Digite uma mensagem/);
+  });
+
+  await run('assistant returns friendly error when Gemini key is missing', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const previousKey = process.env.GEMINI_API_KEY;
+
+    try {
+      delete process.env.GEMINI_API_KEY;
+      const response = await handleAssistantMessage({
+        sql: createAssistantSqlMock().sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Me lembre de estudar amanhã' },
+        },
+      });
+
+      assert.equal(response.status, 503);
+      assert.match(String((response.body as { error?: string }).error), /GEMINI_API_KEY/);
+    } finally {
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+    }
+  });
+
+  await run('assistant handles invalid Gemini JSON with friendly error', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const previousKey = process.env.GEMINI_API_KEY;
+    const previousFetch = globalThis.fetch;
+
+    try {
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'isso nao e json' }] } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+
+      const response = await handleAssistantMessage({
+        sql: createAssistantSqlMock().sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Me lembre de estudar amanhã' },
+        },
+      });
+
+      assert.equal(response.status, 503);
+      assert.match(String((response.body as { error?: string }).error), /interpretar/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+    }
+  });
+
+  await run('assistant Gemini create_task creates valid task', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const previousKey = process.env.GEMINI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    const { sql, tasks } = createAssistantSqlMock();
+
+    try {
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                type: 'create_task',
+                payload: {
+                  title: 'Estudar JavaScript',
+                  dueDate: '2026-05-28T20:00:00-03:00',
+                  priority: 'medium',
+                  category: 'Estudos',
+                  tags: ['javascript'],
+                  alarmEnabled: true,
+                },
+                confirmationMessage: 'Pronto, criei o lembrete para estudar JavaScript amanhã às 20h.',
+              }),
+            }],
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+
+      const response = await handleAssistantMessage({
+        sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Crie um lembrete para eu estudar JavaScript amanhã às 20h.' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(tasks.length, 1);
+      assert.equal(tasks[0].title, 'Estudar JavaScript');
+      assert.equal((response.body as { action?: { type?: string } }).action?.type, 'create_task');
+      assert.equal(typeof (response.body as { conversationId?: string }).conversationId, 'string');
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+    }
+  });
+
+  await run('assistant creates conversation, messages, event and last_created_task ref', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const store = createAssistantSqlMock();
+    await withMockedGeminiResponse({
+      type: 'create_task',
+      payload: {
+        title: 'Pagar aluguel',
+        dueDate: '2026-06-05T09:00:00-03:00',
+        category: 'Financeiro',
+        tags: ['aluguel'],
+        alarmEnabled: true,
+      },
+      confirmationMessage: 'Pronto, criei o lembrete para pagar o aluguel dia 5 às 9h.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Me lembre de pagar o aluguel dia 5 às 9h.' },
+        },
+      });
+
+      const body = response.body as {
+        conversationId?: string;
+        action?: { type?: string; status?: string; entityId?: string; entityTitle?: string };
+      };
+      assert.equal(response.status, 200);
+      assert.equal(store.conversations.length, 1);
+      assert.equal(body.conversationId, store.conversations[0].id);
+      assert.equal(store.messages.filter((message) => message.role === 'user').length, 1);
+      assert.equal(store.messages.filter((message) => message.role === 'assistant').length, 1);
+      assert.equal(store.actionEvents.some((event) => event.actionType === 'create_task' && event.status === 'success'), true);
+      assert.equal(store.contextRefs.some((ref) => ref.refKey === 'last_created_task' && ref.entityTitle === 'Pagar aluguel'), true);
+      assert.equal(body.action?.entityTitle, 'Pagar aluguel');
+    });
+  });
+
+  await run('assistant reuses conversation and updates last created task by context', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const store = createAssistantSqlMock();
+
+    let conversationId = '';
+    await withMockedGeminiResponse({
+      type: 'create_task',
+      payload: {
+        title: 'Estudar JavaScript',
+        dueDate: '2026-05-28T20:00:00-03:00',
+        priority: 'medium',
+      },
+      confirmationMessage: 'Pronto, criei o lembrete.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Cria um lembrete para estudar JavaScript amanhã às 20h.' },
+        },
+      });
+      conversationId = String((response.body as { conversationId?: string }).conversationId);
+    });
+
+    await withMockedGeminiResponse({
+      type: 'update_task',
+      payload: {
+        contextRef: 'last_created_task',
+        updates: { priority: 'high' },
+      },
+      confirmationMessage: 'Pronto, coloquei prioridade alta.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Coloca prioridade alta.', conversationId },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(store.conversations.length, 1);
+      assert.equal(store.messages.length, 4);
+      assert.equal(store.tasks[0].priority, 'high');
+      assert.equal((response.body as { conversationId?: string }).conversationId, conversationId);
+      assert.equal((response.body as { action?: { type?: string } }).action?.type, 'update_task');
+      assert.equal(store.contextRefs.some((ref) => ref.refKey === 'last_updated_task'), true);
+    });
+  });
+
+  await run('assistant blocks conversation from another user', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const otherToken = signToken({ sub: 'user-2', email: 'other@example.com' });
+    const store = createAssistantSqlMock();
+    let conversationId = '';
+
+    await withMockedGeminiResponse({
+      type: 'answer_only',
+      payload: { answer: 'Tudo certo.' },
+      confirmationMessage: 'Tudo certo.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Oi' },
+        },
+      });
+      conversationId = String((response.body as { conversationId?: string }).conversationId);
+    });
+
+    await withMockedGeminiResponse({
+      type: 'answer_only',
+      payload: { answer: 'Nao deveria executar.' },
+      confirmationMessage: 'Nao deveria executar.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${otherToken}` },
+          body: { message: 'Oi', conversationId },
+        },
+      });
+      assert.equal(response.status, 403);
+    });
+  });
+
+  await run('assistant updates first task from last listed tasks', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const store = createAssistantSqlMock();
+    store.tasks.push(
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        userId: 'user-1',
+        title: 'Pagar energia',
+        description: '',
+        dueDate: '2026-05-27T12:00:00.000Z',
+        endDate: null,
+        priority: 'medium',
+        category: 'Financeiro',
+        tags: [],
+        status: 'pending',
+        alarmEnabled: false,
+      },
+      {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        userId: 'user-1',
+        title: 'Comprar pão',
+        description: '',
+        dueDate: '2026-05-27T13:00:00.000Z',
+        endDate: null,
+        priority: 'medium',
+        category: 'Geral',
+        tags: [],
+        status: 'pending',
+        alarmEnabled: false,
+      },
+    );
+
+    let conversationId = '';
+    await withMockedGeminiResponse({
+      type: 'list_tasks',
+      payload: { status: 'pending' },
+      confirmationMessage: 'Aqui estao seus lembretes.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Quais lembretes tenho para hoje?' },
+        },
+      });
+      conversationId = String((response.body as { conversationId?: string }).conversationId);
+    });
+
+    await withMockedGeminiResponse({
+      type: 'update_task',
+      payload: {
+        contextRef: 'last_listed_task_first',
+        updates: { status: 'completed' },
+      },
+      confirmationMessage: 'Pronto, marquei o primeiro como concluido.',
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Marca o primeiro como concluído.', conversationId },
+        },
+      });
+      assert.equal(response.status, 200);
+      assert.equal(store.tasks.find((task) => task.id === 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')?.status, 'completed');
+      assert.equal((response.body as { action?: { entityId?: string } }).action?.entityId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    });
+  });
+
+  await run('assistant ambiguous update returns needs_confirmation and pending ref', async () => {
+    const store = createAssistantSqlMock();
+    store.tasks.push(
+      { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', userId: 'user-1', title: 'Pagar aluguel', description: '', category: 'Financeiro', tags: [], status: 'pending' },
+      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', userId: 'user-1', title: 'Pagar energia', description: '', category: 'Financeiro', tags: [], status: 'pending' },
+    );
+    const conversation = await (await import('../lib/assistant/memory.js')).ensureAssistantConversation(store.sql, 'user-1');
+    const action = assistantActionSchema.parse({
+      type: 'update_task',
+      payload: {
+        search: 'Pagar',
+        updates: { status: 'completed' },
+      },
+      confirmationMessage: 'Pronto.',
+    });
+    const response = await executeAssistantAction({
+      sql: store.sql,
+      request: { method: 'POST', headers: {} },
+    }, action, { userId: 'user-1', conversationId: conversation.id });
+
+    assert.equal(response.action.status, 'needs_confirmation');
+    assert.equal(store.contextRefs.some((ref) => ref.refKey === 'pending_confirmation'), true);
+    assert.match(response.message, /mais de um lembrete/i);
+  });
+
+  await run('assistant does not send messages from another conversation to Gemini', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const store = createAssistantSqlMock();
+    const ownConversation = await (await import('../lib/assistant/memory.js')).ensureAssistantConversation(store.sql, 'user-1');
+    const otherConversation = await (await import('../lib/assistant/memory.js')).ensureAssistantConversation(store.sql, 'user-2');
+    store.messages.push({
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      conversationId: otherConversation.id,
+      userId: 'user-2',
+      role: 'user',
+      content: 'segredo de outro usuario',
+      metadata: {},
+      createdAt: new Date().toISOString(),
+    });
+
+    await withMockedGeminiResponse({
+      type: 'answer_only',
+      payload: { answer: 'Tudo certo.' },
+      confirmationMessage: 'Tudo certo.',
+    }, async (requests) => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Oi', conversationId: ownConversation.id },
+        },
+      });
+      assert.equal(response.status, 200);
+      assert.doesNotMatch(JSON.stringify(requests), /segredo de outro usuario/);
+    });
+  });
+
+  await run('assistant needs_confirmation action returns question', async () => {
+    const action = assistantActionSchema.parse({
+      type: 'needs_confirmation',
+      payload: { question: 'Para qual dia voce quer esse lembrete?' },
+      confirmationMessage: 'Preciso confirmar uma informacao.',
+    });
+    const response = await executeAssistantAction({
+      sql: createAssistantSqlMock().sql,
+      request: {
+        method: 'POST',
+        headers: {},
+      },
+    }, action);
+
+    assert.equal(response.action.type, 'needs_confirmation');
+    assert.match(response.message, /qual dia/i);
+  });
+
+  await run('assistant frontend files expose floating button and chat wiring', () => {
+    const button = readFileSync(new URL('../src/components/assistant/AssistantFloatingButton.tsx', import.meta.url), 'utf8');
+    const chat = readFileSync(new URL('../src/components/assistant/AssistantChat.tsx', import.meta.url), 'utf8');
+    const api = readFileSync(new URL('../src/lib/assistantApi.ts', import.meta.url), 'utf8');
+
+    assert.match(button, /data-testid="assistant-floating-button"/);
+    assert.match(chat, /data-testid="assistant-chat"/);
+    assert.match(chat, /webkitSpeechRecognition|SpeechRecognition/);
+    assert.match(api, /\/api\/assistant\/message/);
   });
 
   await run('calendar feed JWT includes expiration and revocation identifiers', () => {

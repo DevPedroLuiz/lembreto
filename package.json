@@ -19,6 +19,7 @@
     "cleanup:db": "tsx --env-file=.env.local scripts/cleanup-db.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.6.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vercel/analytics": "^2.0.1",
     "@vitejs/plugin-react": "^5.0.4",
