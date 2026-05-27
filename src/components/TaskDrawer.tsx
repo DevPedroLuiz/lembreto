@@ -99,6 +99,8 @@ const OVERDUE_INTENSITY_OPTIONS: Array<{
   },
 ];
 
+const MOBILE_KEYBOARD_HEIGHT_THRESHOLD = 120;
+
 type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
 
 interface SpeechRecognitionLike extends EventTarget {
@@ -201,6 +203,10 @@ function normalizeSearchValue(value: string) {
     .toLocaleLowerCase('pt-BR');
 }
 
+function isEditableFormElement(element: Element | null): element is HTMLElement {
+  return Boolean(element?.matches('input, textarea, select'));
+}
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
@@ -213,19 +219,26 @@ function SectionHeader({
   title,
   description,
   icon,
+  compact = false,
 }: {
   title: string;
   description: string;
   icon: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <div className="mb-4 flex items-start gap-3">
-      <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+    <div className={cn('flex items-start gap-3', compact ? 'mb-3' : 'mb-4')}>
+      <span className={cn(
+        'icon-slot rounded-2xl bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300',
+        compact ? 'h-9 w-9' : 'h-10 w-10',
+      )}>
         {icon}
       </span>
       <div>
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</p>
+        <p className={cn('mt-1 text-sm text-slate-500 dark:text-slate-400', compact && 'hidden')}>
+          {description}
+        </p>
       </div>
     </div>
   );
@@ -390,6 +403,13 @@ export function TaskDrawer({
   const [voiceTranscript, setVoiceTranscript] = React.useState('');
   const [voiceFeedback, setVoiceFeedback] = React.useState('');
   const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
+  const drawerRef = React.useRef<HTMLDivElement | null>(null);
+  const mobileViewportBaselineRef = React.useRef(0);
+  const [mobileViewport, setMobileViewport] = React.useState({
+    height: 0,
+    offsetTop: 0,
+    keyboardOpen: false,
+  });
   const swipe = useSwipeToClose({
     enabled: open,
     direction: 'down',
@@ -426,6 +446,76 @@ export function TaskDrawer({
     }
   }, [alarmEnabled, date, setAlarmEnabled, time]);
 
+  React.useEffect(() => {
+    if (!open || typeof window === 'undefined') {
+      mobileViewportBaselineRef.current = 0;
+      setMobileViewport({ height: 0, offsetTop: 0, keyboardOpen: false });
+      return undefined;
+    }
+
+    let animationFrame = 0;
+    let focusTimer = 0;
+
+    const updateMobileViewport = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        const viewport = window.visualViewport;
+        const viewportHeight = viewport?.height ?? window.innerHeight;
+        const viewportOffsetTop = viewport?.offsetTop ?? 0;
+        const isMobileLayout = window.matchMedia('(max-width: 640px)').matches;
+        const activeElement = document.activeElement;
+        const isDrawerFieldFocused = isEditableFormElement(activeElement)
+          && Boolean(drawerRef.current?.contains(activeElement));
+        const currentHeight = Math.max(window.innerHeight, viewportHeight + viewportOffsetTop);
+        const baselineHeight = Math.max(mobileViewportBaselineRef.current, currentHeight);
+        const keyboardHeightFromViewport = Math.max(0, window.innerHeight - viewportHeight - viewportOffsetTop);
+        const keyboardHeightFromBaseline = Math.max(0, baselineHeight - viewportHeight - viewportOffsetTop);
+        const keyboardHeight = Math.max(keyboardHeightFromViewport, keyboardHeightFromBaseline);
+        const keyboardOpen = isMobileLayout
+          && isDrawerFieldFocused
+          && keyboardHeight > MOBILE_KEYBOARD_HEIGHT_THRESHOLD;
+
+        if (!isMobileLayout || !keyboardOpen) {
+          mobileViewportBaselineRef.current = baselineHeight;
+        }
+
+        setMobileViewport({
+          height: Math.floor(viewportHeight),
+          offsetTop: Math.floor(viewportOffsetTop),
+          keyboardOpen,
+        });
+
+        if (keyboardOpen && activeElement instanceof HTMLElement) {
+          window.requestAnimationFrame(() => {
+            activeElement.scrollIntoView({ block: 'center', inline: 'nearest' });
+          });
+        }
+      });
+    };
+
+    const handleFocusOut = () => {
+      window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(updateMobileViewport, 90);
+    };
+
+    updateMobileViewport();
+    window.visualViewport?.addEventListener('resize', updateMobileViewport);
+    window.visualViewport?.addEventListener('scroll', updateMobileViewport);
+    window.addEventListener('resize', updateMobileViewport);
+    document.addEventListener('focusin', updateMobileViewport);
+    document.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(focusTimer);
+      window.visualViewport?.removeEventListener('resize', updateMobileViewport);
+      window.visualViewport?.removeEventListener('scroll', updateMobileViewport);
+      window.removeEventListener('resize', updateMobileViewport);
+      document.removeEventListener('focusin', updateMobileViewport);
+      document.removeEventListener('focusout', handleFocusOut);
+    };
+  }, [open]);
+
   const titleCount = title.trim().length;
   const hasStart = Boolean(date && time);
   const summaryDue = hasStart ? date : 'Sem início';
@@ -434,6 +524,16 @@ export function TaskDrawer({
     : hasStart ? time : 'Sem início';
   const summaryPriority = PRIORITY_LABELS[priority];
   const supportsVoiceInput = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const mobileKeyboardOpen = mobileViewport.keyboardOpen;
+  const mobileViewportStyle = mobileKeyboardOpen && mobileViewport.height > 0
+    ? {
+      top: mobileViewport.offsetTop,
+      bottom: 'auto',
+      height: mobileViewport.height,
+      maxHeight: mobileViewport.height,
+    } satisfies React.CSSProperties
+    : undefined;
+  const compactDetailsClass = mobileKeyboardOpen ? 'p-3 sm:p-5' : 'p-3.5 sm:p-5';
   const availableTagSuggestions = React.useMemo(
     () => tagOptions.filter((item) => (
       !tags.some((tag) => normalizeSearchValue(tag) === normalizeSearchValue(item))
@@ -615,19 +715,29 @@ export function TaskDrawer({
             className="fixed inset-0 z-[100] bg-slate-900/55 backdrop-blur-sm dark:bg-black/72"
           />
 
-          <div className="fixed inset-0 z-[101] flex items-end justify-center p-0 sm:items-center sm:p-5">
+          <div
+            className={cn(
+              'fixed inset-0 z-[101] flex items-end justify-center p-0 sm:items-center sm:p-5',
+              mobileKeyboardOpen && 'items-end sm:items-center',
+            )}
+            style={mobileViewportStyle}
+          >
             <motion.div
+              ref={drawerRef}
               data-testid="task-drawer"
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: swipe.offset, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={swipe.isDragging ? { duration: 0 } : { type: 'spring', damping: 28, stiffness: 260 }}
-              className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px] sm:border"
+              className={cn(
+                'flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border-0 border-slate-200/80 bg-white/96 shadow-[0_30px_120px_-34px_rgba(15,23,42,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/94 sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:rounded-[34px] sm:border',
+                mobileKeyboardOpen && 'h-full max-h-full',
+              )}
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-drawer-title"
             >
-              {swipe.mobileEnabled && (
+              {swipe.mobileEnabled && !mobileKeyboardOpen && (
                 <div
                   className="flex justify-center border-b border-slate-200/70 px-4 py-2.5 dark:border-white/10"
                   aria-hidden="true"
@@ -637,7 +747,10 @@ export function TaskDrawer({
                 </div>
               )}
 
-              <div className="border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-3.5 py-2.5 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7">
+              <div className={cn(
+                'border-b border-slate-200/80 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-500 px-3.5 py-2.5 text-white dark:border-white/10 sm:px-5 sm:py-5 md:px-7',
+                mobileKeyboardOpen && 'hidden',
+              )}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 max-w-3xl">
                     <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/80 backdrop-blur-sm sm:text-[11px] sm:tracking-[0.18em]">
@@ -668,7 +781,10 @@ export function TaskDrawer({
                 </div>
               </div>
 
-              <div className="border-b border-slate-200/80 bg-white/80 px-3.5 py-2.5 dark:border-white/10 dark:bg-slate-950/86 sm:px-5 sm:py-4 md:px-7">
+              <div className={cn(
+                'border-b border-slate-200/80 bg-white/80 px-3.5 py-2.5 dark:border-white/10 dark:bg-slate-950/86 sm:px-5 sm:py-4 md:px-7',
+                mobileKeyboardOpen && 'px-3 py-2',
+              )}>
                 <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   <DrawerTabButton
                     active={activeTab === 'details'}
@@ -696,18 +812,28 @@ export function TaskDrawer({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain px-3.5 py-3 sm:px-5 sm:py-5 md:px-7 md:py-6">
-                <form id="task-form" onSubmit={onSubmit} className="space-y-4 sm:space-y-6" aria-busy={isSubmitting}>
+              <div className={cn(
+                'flex-1 overflow-y-auto overscroll-contain px-3.5 py-3 sm:px-5 sm:py-5 md:px-7 md:py-6',
+                mobileKeyboardOpen && 'px-3 py-2',
+              )}>
+                <form
+                  id="task-form"
+                  onSubmit={onSubmit}
+                  className={cn('space-y-4 sm:space-y-6', mobileKeyboardOpen && 'space-y-3')}
+                  aria-busy={isSubmitting}
+                >
                   {activeTab === 'details' && (
                     <>
-                      <section className="surface-soft p-3.5 sm:p-5">
+                      <section className={cn('surface-soft', compactDetailsClass)}>
                         <SectionHeader
                           title="Informações principais"
                           description="Defina o que precisa ser lembrado."
                           icon={<Sparkles size={18} />}
+                          compact={mobileKeyboardOpen}
                         />
 
-                        <div className="space-y-4">
+                        <div className={cn('space-y-4', mobileKeyboardOpen && 'space-y-3')}>
+                          {!mobileKeyboardOpen && (
                           <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                               <div className="min-w-0">
@@ -749,6 +875,7 @@ export function TaskDrawer({
                               </p>
                             )}
                           </div>
+                          )}
 
                           <div>
                             <div className="mb-2 flex items-center justify-between gap-3">
@@ -785,14 +912,15 @@ export function TaskDrawer({
                         </div>
                       </section>
 
-                      <section className="surface-soft p-3.5 sm:p-5">
+                      <section className={cn('surface-soft', compactDetailsClass)}>
                         <SectionHeader
                           title="Prazo"
                           description="Defina quando o lembrete começa, termina ou fica sem horário fixo."
                           icon={<CalendarDays size={18} />}
+                          compact={mobileKeyboardOpen}
                         />
 
-                        <div className="space-y-4">
+                        <div className={cn('space-y-4', mobileKeyboardOpen && 'space-y-3')}>
                           <div>
                             <FieldLabel>Prazo</FieldLabel>
                             <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
@@ -900,14 +1028,15 @@ export function TaskDrawer({
                         </div>
                       </section>
 
-                      <section className="surface-soft p-3.5 sm:p-5">
+                      <section className={cn('surface-soft', compactDetailsClass)}>
                         <SectionHeader
                           title="Organização"
                           description="Classifique o lembrete para encontrar e priorizar mais rápido."
                           icon={<Flag size={18} />}
+                          compact={mobileKeyboardOpen}
                         />
 
-                        <div className="space-y-5">
+                        <div className={cn('space-y-5', mobileKeyboardOpen && 'space-y-3')}>
                           <div className="grid gap-4 sm:grid-cols-2">
                             <div>
                               <FieldLabel>Prioridade</FieldLabel>
@@ -1360,13 +1489,19 @@ export function TaskDrawer({
                 </form>
               </div>
 
-              <div className="border-t border-slate-200/80 bg-white/88 px-3.5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7">
+              <div className={cn(
+                'border-t border-slate-200/80 bg-white/88 px-3.5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] dark:border-white/10 dark:bg-slate-950/92 sm:px-5 sm:py-4 md:px-7',
+                mobileKeyboardOpen && 'px-3 py-2 pb-2',
+              )}>
                 <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <button
                     type="button"
                     onClick={onClose}
                     disabled={isSubmitting}
-                    className="action-ghost justify-center rounded-2xl border border-slate-200/80 px-3 py-3 text-sm dark:border-white/10 sm:min-w-[140px] sm:px-4"
+                    className={cn(
+                      'action-ghost justify-center rounded-2xl border border-slate-200/80 px-3 py-3 text-sm dark:border-white/10 sm:min-w-[140px] sm:px-4',
+                      mobileKeyboardOpen && 'py-2.5',
+                    )}
                   >
                     Cancelar
                   </button>
@@ -1378,7 +1513,10 @@ export function TaskDrawer({
                         data-testid="task-save-draft-button"
                         onClick={onSaveDraft}
                         disabled={isSubmitting || !title.trim()}
-                        className="action-secondary w-full justify-center rounded-2xl px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:px-5 sm:py-4 sm:text-base"
+                        className={cn(
+                          'action-secondary w-full justify-center rounded-2xl px-3 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[180px] sm:w-auto sm:px-5 sm:py-4 sm:text-base',
+                          mobileKeyboardOpen && 'py-2.5',
+                        )}
                       >
                         {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : null}
                         Salvar rascunho
@@ -1390,7 +1528,10 @@ export function TaskDrawer({
                       type="submit"
                       data-testid="task-submit-button"
                       disabled={isSubmitting || Boolean(dueDateError) || Boolean(endTimeError) || Boolean(recurrenceError)}
-                      className="action-primary col-span-2 w-full justify-center rounded-2xl px-3 py-3.5 text-sm disabled:cursor-wait disabled:opacity-70 sm:min-w-[220px] sm:w-auto sm:px-5 sm:py-4 sm:text-base"
+                      className={cn(
+                        'action-primary col-span-2 w-full justify-center rounded-2xl px-3 py-3.5 text-sm disabled:cursor-wait disabled:opacity-70 sm:min-w-[220px] sm:w-auto sm:px-5 sm:py-4 sm:text-base',
+                        mobileKeyboardOpen && 'py-2.5',
+                      )}
                     >
                       {isSubmitting ? (
                         <>

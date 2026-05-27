@@ -12,7 +12,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import { addDays, compareAsc, format, isSameDay, isPast, isToday, parseISO, startOfWeek } from 'date-fns';
+import { compareAsc, format, isSameDay, isPast, isToday, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { MetricCard } from '../components/MetricCard';
@@ -65,7 +65,7 @@ const QUICK_START_TEMPLATES: QuickStartTemplate[] = [
   },
 ];
 
-const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+const HOURS_IN_DAY = 24;
 
 const PRIORITY_WEIGHT: Record<Priority, number> = {
   high: 0,
@@ -174,38 +174,54 @@ export function DashboardPage({
     : Math.round((completedTasks.length / tasks.length) * 100);
 
   const activeTasks = React.useMemo(() => [...overdueTasks, ...pendingTasks], [overdueTasks, pendingTasks]);
-  const weeklyProgress = React.useMemo(() => {
-    const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const dailyHourlyProgress = React.useMemo(() => {
+    const today = new Date();
+    const hourlyBuckets = Array.from({ length: HOURS_IN_DAY }, (_, hour) => ({
+      hour,
+      label: `${String(hour).padStart(2, '0')}h`,
+      total: 0,
+      completed: 0,
+    }));
+    let allDayCount = 0;
 
-    return Array.from({ length: 7 }, (_, index) => {
-      const date = addDays(weekStart, index);
-      const dayTasks = tasks.filter((task) => {
-        if (!task.dueDate) return false;
+    tasks.forEach((task) => {
+      if (!task.dueDate) return;
 
-        try {
-          return isSameDay(parseISO(task.dueDate), date);
-        } catch {
-          return false;
+      try {
+        const dueDate = parseISO(task.dueDate);
+        if (!isSameDay(dueDate, today)) return;
+
+        if (!getTaskTimeLabel(task.dueDate)) {
+          allDayCount += 1;
+          return;
         }
-      });
-      const dayCompletedTasks = dayTasks.filter((task) => getDerivedTaskStatus(task) === 'completed');
 
-      return {
-        date,
-        label: WEEKDAY_LABELS[index] ?? format(date, 'EEE', { locale: ptBR }).replace('.', ''),
-        total: dayTasks.length,
-        completed: dayCompletedTasks.length,
-      };
+        const bucket = hourlyBuckets[dueDate.getHours()];
+        if (!bucket) return;
+
+        bucket.total += 1;
+        if (getDerivedTaskStatus(task) === 'completed') {
+          bucket.completed += 1;
+        }
+      } catch {
+        // ignore invalid dates
+      }
     });
+
+    return {
+      buckets: hourlyBuckets,
+      allDayCount,
+    };
   }, [tasks]);
-  const weeklyProgressMax = Math.max(1, ...weeklyProgress.map((day) => day.total));
+  const dailyHourlyProgressMax = Math.max(1, ...dailyHourlyProgress.buckets.map((hour) => hour.total));
   const sortedPendingTasks = [...activeTasks].sort(compareDashboardTasks);
   const nextTasks = sortedPendingTasks.slice(0, 5);
   const highPriorityOpenCount = activeTasks.filter((task) => task.priority === 'high').length;
   const mediumPriorityOpenCount = activeTasks.filter((task) => task.priority === 'medium').length;
   const lowPriorityOpenCount = activeTasks.filter((task) => task.priority === 'low').length;
   const unscheduledOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
-  const weeklyScheduledCount = weeklyProgress.reduce((total, day) => total + day.total, 0);
+  const dailyTimedScheduledCount = dailyHourlyProgress.buckets.reduce((total, hour) => total + hour.total, 0);
+  const dailyScheduledCount = dailyTimedScheduledCount + dailyHourlyProgress.allDayCount;
   const assistantTask = sortedPendingTasks[0] ?? null;
   const assistantContext = assistantTask ? getAssistantContext(assistantTask) : null;
   const assistantDueLabel = assistantTask
@@ -440,20 +456,23 @@ export function DashboardPage({
           <button
             type="button"
             onClick={onOpenCalendar}
-            aria-label="Abrir calendário semanal"
+            aria-label="Abrir calendário do dia"
             className="group relative mt-5 w-full rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/40 dark:hover:bg-white/[0.06]"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Gráfico da semana
+                  Gráfico do dia
                 </span>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {weeklyScheduledCount} agendado{weeklyScheduledCount === 1 ? '' : 's'} nos próximos dias
+                  {dailyScheduledCount} agendado{dailyScheduledCount === 1 ? '' : 's'} hoje
+                  {dailyHourlyProgress.allDayCount > 0
+                    ? ` · ${dailyHourlyProgress.allDayCount} dia todo`
+                    : ''}
                 </p>
               </div>
               <span className="icon-slot h-9 w-9 rounded-2xl border border-slate-200 bg-white text-slate-600 transition group-hover:border-blue-300 group-hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-300 dark:group-hover:border-blue-500/40 dark:group-hover:text-blue-300">
-                <CalendarDays size={17} />
+                <Clock3 size={17} />
               </span>
             </div>
 
@@ -461,18 +480,23 @@ export function DashboardPage({
               <div className="pointer-events-none absolute inset-x-3 top-10 h-px bg-slate-200/70 dark:bg-white/10" />
               <div className="pointer-events-none absolute inset-x-3 top-[4.55rem] h-px bg-slate-200/50 dark:bg-white/[0.07]" />
               <div className="pointer-events-none absolute inset-x-3 top-[6.9rem] h-px bg-slate-200/40 dark:bg-white/[0.055]" />
-              <div className="grid h-32 grid-cols-7 items-end gap-2">
-                {weeklyProgress.map((day) => {
-                  const totalHeight = day.total === 0
+              <div className="grid h-32 grid-cols-[repeat(24,minmax(0,1fr))] items-end gap-1">
+                {dailyHourlyProgress.buckets.map((hour) => {
+                  const totalHeight = hour.total === 0
                     ? 0
-                    : Math.max(16, Math.round((day.total / weeklyProgressMax) * 100));
-                  const completedHeight = day.completed === 0
+                    : Math.max(18, Math.round((hour.total / dailyHourlyProgressMax) * 100));
+                  const completedHeight = hour.completed === 0
                     ? 0
-                    : Math.max(12, Math.round((day.completed / weeklyProgressMax) * 100));
+                    : Math.max(14, Math.round((hour.completed / dailyHourlyProgressMax) * 100));
+                  const showLabel = hour.hour % 3 === 0;
 
                   return (
-                    <div key={day.date.toISOString()} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
-                      <div className="relative flex h-24 w-full max-w-[34px] items-end overflow-hidden rounded-full bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.2),inset_0_10px_22px_rgba(148,163,184,0.12)] dark:bg-white/[0.07] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+                    <div key={hour.hour} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
+                      <div
+                        className="relative flex h-24 w-full min-w-[5px] max-w-[10px] items-end overflow-hidden rounded-full bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.2),inset_0_10px_22px_rgba(148,163,184,0.12)] dark:bg-white/[0.07] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] sm:max-w-[12px]"
+                        title={`${hour.label}: ${hour.total} agendado${hour.total === 1 ? '' : 's'}, ${hour.completed} concluído${hour.completed === 1 ? '' : 's'}`}
+                        aria-label={`${hour.label}: ${hour.total} agendado${hour.total === 1 ? '' : 's'}, ${hour.completed} concluído${hour.completed === 1 ? '' : 's'}`}
+                      >
                         <div
                           className="absolute inset-x-0 bottom-0 rounded-full bg-sky-200/85 transition-all dark:bg-sky-500/25"
                           style={{ height: `${totalHeight}%` }}
@@ -482,8 +506,8 @@ export function DashboardPage({
                           style={{ height: `${completedHeight}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-bold uppercase leading-none text-slate-400 dark:text-slate-500">
-                        {day.label}
+                      <span className="h-3 text-[9px] font-bold uppercase leading-none text-slate-400 dark:text-slate-500">
+                        {showLabel ? hour.label.replace('h', '') : ''}
                       </span>
                     </div>
                   );
@@ -498,8 +522,14 @@ export function DashboardPage({
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-sky-200 dark:bg-sky-500/30" />
-                Agendados
+                Com horário
               </span>
+              {dailyHourlyProgress.allDayCount > 0 && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-500" />
+                  Dia todo
+                </span>
+              )}
             </div>
           </button>
         </aside>
