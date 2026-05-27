@@ -568,8 +568,9 @@ async function scheduleTimedTask(
   let created = 0;
 
   const preNoticeAt = addMinutes(dueDate, -PRE_NOTICE_MINUTES);
-  if (preNoticeAt > now) {
-    const preNotice = applyScheduleSuppression(task, 'pre_notice', preNoticeAt);
+  const preNoticeNotifyAt = preNoticeAt > now ? preNoticeAt : now;
+  if (dueDate > now) {
+    const preNotice = applyScheduleSuppression(task, 'pre_notice', preNoticeNotifyAt);
     if (preNotice.action === 'send' && preNotice.notifyAt < dueDate) {
       const inserted = await insertSchedule(sql, task, {
         kind: 'pre_notice',
@@ -584,7 +585,7 @@ async function scheduleTimedTask(
         userId: task.userId,
         taskId: task.id,
         kind: 'pre_notice',
-        notifyAt: preNoticeAt.toISOString(),
+        notifyAt: preNoticeNotifyAt.toISOString(),
         holidayName: preNotice.holiday.name,
         holidayScope: preNotice.holiday.scope,
       });

@@ -1296,7 +1296,12 @@ function createCronPostSideEffectScheduleSqlMock() {
     if (query.includes('FROM notification_schedules') && query.includes('GROUP BY kind')) {
       const dueOnly = query.includes('notify_at <= NOW()');
       const source = dueOnly ? dueSchedules() : pendingSchedules();
-      return source.length > 0 ? [{ kind: 'notification', count: source.length }] : [];
+      const counts = new Map<string, number>();
+      for (const schedule of source) {
+        const kind = String(schedule.kind);
+        counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      }
+      return Array.from(counts.entries()).map(([kind, count]) => ({ kind, count }));
     }
 
     if (query.includes('SELECT COUNT(*) AS count FROM notification_schedules WHERE status =')) {
@@ -3077,13 +3082,17 @@ async function main() {
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
   });
 
-  await run('side effect sync skips pre notice when due date is too close', async () => {
+  await run('side effect sync creates immediate pre notice when due date is too close', async () => {
     const { sql, schedules, task } = createTaskSideEffectsSqlMock({ dueMinutesFromNow: 5 });
     const result = await processTaskSideEffects(sql, 3, 8000);
 
     assert.equal(result.fetched, 1);
     assert.equal(result.done, 1);
-    assert.equal(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'pre_notice'), false);
+    assert.ok(schedules.some((schedule) => (
+      schedule.taskId === task.id &&
+      schedule.kind === 'pre_notice' &&
+      new Date(String(schedule.notifyAt)).getTime() < new Date(String(task.dueDate)).getTime()
+    )));
     assert.ok(schedules.some((schedule) => schedule.taskId === task.id && schedule.kind === 'notification'));
   });
 
@@ -3220,13 +3229,14 @@ async function main() {
       };
       assert.equal(response.status, 200);
       assert.equal(body.sideEffects?.done, 1);
-      assert.equal(body.schedules?.fetched, 1);
-      assert.equal(body.schedules?.processed, 1);
-      assert.equal(body.schedules?.sent, 1);
+      assert.equal(body.schedules?.fetched, 2);
+      assert.equal(body.schedules?.processed, 2);
+      assert.equal(body.schedules?.sent, 2);
       assert.equal(job.status, 'done');
-      assert.equal(schedules.length, 1);
-      assert.equal(schedules[0].status, 'sent');
-      assert.equal(notifications.length, 1);
+      assert.equal(schedules.length, 2);
+      assert.ok(schedules.some((schedule) => schedule.kind === 'pre_notice' && schedule.status === 'sent'));
+      assert.ok(schedules.some((schedule) => schedule.kind === 'notification' && schedule.status === 'sent'));
+      assert.equal(notifications.length, 2);
     } finally {
       if (previousSecret === undefined) delete process.env.CRON_SECRET;
       else process.env.CRON_SECRET = previousSecret;
