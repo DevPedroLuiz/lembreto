@@ -9,6 +9,7 @@ import {
   PanelLeftClose,
   Settings,
   Target,
+  Wrench,
   User as UserIcon,
 } from 'lucide-react';
 import { SidebarItem } from './SidebarItem';
@@ -16,8 +17,8 @@ import type { User } from '../types';
 
 interface SidebarProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
-  setActiveTab: (tab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications') => void;
+  activeTab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'tools' | 'notifications';
+  setActiveTab: (tab: 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'tools' | 'notifications') => void;
   todayCount: number;
   overdueCount: number;
   onOpenProfile: () => void;
@@ -113,6 +114,13 @@ export function Sidebar({
             icon={<NotebookPen size={20} />}
             label="Minhas notas"
             testId="sidebar-notes"
+          />
+          <SidebarItem
+            active={activeTab === 'tools'}
+            onClick={() => setActiveTab('tools')}
+            icon={<Wrench size={20} />}
+            label="Ferramentas"
+            testId="sidebar-tools"
           />
         </nav>
 

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  Wrench,
   User as UserIcon,
 } from 'lucide-react';
 import { addDays, addHours, addMinutes, format, isPast, isToday, isTomorrow, parseISO } from 'date-fns';
@@ -86,6 +87,7 @@ const NotesPage = lazy(() => import('./pages/NotesPage').then((module) => ({ def
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then((module) => ({ default: module.NotificationsPage })));
 const ResetPage = lazy(() => import('./pages/ResetPage').then((module) => ({ default: module.ResetPage })));
 const TasksPage = lazy(() => import('./pages/TasksPage').then((module) => ({ default: module.TasksPage })));
+const ToolsPage = lazy(() => import('./pages/ToolsPage').then((module) => ({ default: module.ToolsPage })));
 
 const DashboardMetricDialog = lazy(() => import('./components/DashboardMetricDialog').then((module) => ({ default: module.DashboardMetricDialog })));
 const NoteDrawer = lazy(() => import('./components/NoteDrawer').then((module) => ({ default: module.NoteDrawer })));
@@ -114,7 +116,7 @@ function useHasBeenOpened(open: boolean) {
 }
 
 type DashboardMetricKey = 'completed' | 'today' | 'overdue';
-type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'notifications';
+type ViewTab = 'dashboard' | 'calendar' | 'tasks' | 'notes' | 'tools' | 'notifications';
 
 type NotificationTone = 'info' | 'success' | 'warning' | 'error';
 type QuickReschedulePreset = 'laterToday' | 'tomorrowMorning' | 'nextWeek';
@@ -1102,7 +1104,8 @@ export default function App() {
       calendar: 1,
       tasks: 2,
       notes: 3,
-      notifications: 4,
+      tools: 4,
+      notifications: 5,
     };
 
     const previousTab = previousTabRef.current;
@@ -3290,6 +3293,11 @@ export default function App() {
     setActiveTab('notes');
   }, [closeFloatingSurfacesForNavigation]);
 
+  const openToolsTab = useCallback(() => {
+    closeFloatingSurfacesForNavigation();
+    setActiveTab('tools');
+  }, [closeFloatingSurfacesForNavigation]);
+
   const openDashboardTab = useCallback(() => {
     closeFloatingSurfacesForNavigation();
     setActiveTab('dashboard');
@@ -3653,6 +3661,12 @@ export default function App() {
           return;
         }
 
+        if (shortcutKey === 'f') {
+          event.preventDefault();
+          openToolsTab();
+          return;
+        }
+
         if (shortcutKey === 'i') {
           event.preventDefault();
           openNotificationsCenter();
@@ -3743,6 +3757,7 @@ export default function App() {
     openNotificationsCenter,
     openSettings,
     openTasksTab,
+    openToolsTab,
     pendingDeleteNote,
     pendingDeleteTask,
     pendingDeleteTaskSelection,
@@ -3809,7 +3824,9 @@ export default function App() {
       ? 'Sua agenda'
       : activeTab === 'notes'
         ? 'Suas notas'
-      : 'Notificações';
+        : activeTab === 'tools'
+          ? 'Ferramentas'
+          : 'Notificações';
   const pageDescription = activeTab === 'dashboard'
     ? ''
     : activeTab === 'calendar'
@@ -3818,7 +3835,9 @@ export default function App() {
       ? 'Organize lembretes, rascunhos, datas e feriados em áreas separadas.'
       : activeTab === 'notes'
         ? 'Guarde contexto, ideias e apontamentos vinculados aos seus lembretes.'
-      : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
+        : activeTab === 'tools'
+          ? 'Use Pomodoro, cronômetro, timer, foco, checklist, prazo e rotina sem sair do fluxo dos lembretes.'
+          : 'Acompanhe tudo o que o sistema registrou para você recentemente.';
   const dashboardMetricContent = dashboardMetricDialog === 'completed'
     ? {
         title: 'Lembretes conclu\u00eddos',
@@ -3857,6 +3876,7 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={(tab) => {
             if (tab === 'tasks') setTasksPageView('agenda');
+            closeFloatingSurfacesForNavigation();
             setActiveTab(tab);
           }}
           todayCount={pendingSummary.todayCount}
@@ -3899,7 +3919,9 @@ export default function App() {
                       ? 'Tarefas'
                       : activeTab === 'notes'
                         ? 'Notas'
-                        : 'Avisos'}
+                        : activeTab === 'tools'
+                          ? 'Ferramentas'
+                          : 'Avisos'}
               </p>
               <h1 className="truncate text-lg font-semibold">Lembreto</h1>
             </div>
@@ -3971,6 +3993,8 @@ export default function App() {
                         ? 'Calendário'
                       : activeTab === 'notes'
                         ? 'Caderno pessoal'
+                      : activeTab === 'tools'
+                        ? 'Ferramentas'
                       : activeTab === 'notifications'
                         ? 'Central de notificações'
                           : 'Gestão de lembretes'}
@@ -4133,6 +4157,17 @@ export default function App() {
                     onRestoreNote={openRestoreNote}
                   />
                 )}
+                {activeTab === 'tools' && (
+                  <ToolsPage
+                    tasks={tasks}
+                    notes={notes}
+                    categories={categoryOptions}
+                    holidayEntries={holidayCalendar?.allEntries ?? []}
+                    onCreateTask={createTask}
+                    onCreateNote={createNote}
+                    onOpenTask={openTaskDetails}
+                  />
+                )}
                 {activeTab === 'notifications' && (
                   <NotificationsPage
                     notifications={notifications}
@@ -4154,7 +4189,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/94 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 lg:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
+        <div className="mx-auto grid max-w-xl grid-cols-[1fr_1fr_auto_1fr_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -4201,6 +4236,17 @@ export default function App() {
                 {Math.min(pendingSummary.overdueCount, 99)}
               </span>
             )}
+          </button>
+          <button
+            onClick={openToolsTab}
+            aria-label="Abrir ferramentas"
+            className={cn(
+              'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
+              activeTab === 'tools' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
+            )}
+          >
+            <Wrench size={22} />
+            <span className="text-[10px] font-semibold leading-none">Ferram.</span>
           </button>
           <button
             onClick={openNotesTab}
