@@ -61,6 +61,7 @@ import {
 import {
   DEFAULT_CATEGORIES,
   type AppNotification,
+  type HolidayLocationSuggestion,
   type Note,
   type NoteMode,
   type NotificationTarget,
@@ -636,6 +637,8 @@ export default function App() {
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
   const [isSavingHolidayLocation, setIsSavingHolidayLocation] = useState(false);
   const [isDetectingHolidayLocation, setIsDetectingHolidayLocation] = useState(false);
+  const [isApplyingHolidayLocationSuggestion, setIsApplyingHolidayLocationSuggestion] = useState(false);
+  const [holidayLocationSuggestion, setHolidayLocationSuggestion] = useState<HolidayLocationSuggestion | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
   );
@@ -658,6 +661,7 @@ export default function App() {
   const alarmDismissedKeysRef = useRef<Set<string>>(new Set());
   const alarmSnoozeUntilRef = useRef<Map<string, number>>(new Map());
   const alarmAutoCloseTimerRef = useRef<number | null>(null);
+  const holidayLocationAutoSuggestAttemptedRef = useRef(false);
   const {
     playSuccessSound,
     startAlarmSound,
@@ -3130,6 +3134,7 @@ export default function App() {
         cityName,
       });
       await refreshHolidays(auth.token ?? undefined);
+      setHolidayLocationSuggestion(null);
       emitNotification(
         'Região atualizada',
         'Os feriados agora consideram sua região configurada.',
@@ -3141,7 +3146,7 @@ export default function App() {
     }
   }, [auth, emitNotification, refreshHolidays]);
 
-  const detectHolidayLocation = useCallback(async () => {
+  const requestHolidayLocationSuggestion = useCallback(async () => {
     if (!auth.token) throw new Error('Você precisa estar autenticado para detectar a região.');
     if (!navigator.geolocation) throw new Error('Seu navegador não oferece suporte à geolocalização.');
 
@@ -3156,11 +3161,7 @@ export default function App() {
         });
       });
 
-      const detected = await apiPost<{
-        stateCode: string | null;
-        cityName: string | null;
-        regionCode: string | null;
-      }>(
+      const detected = await apiPost<HolidayLocationSuggestion>(
         '/api/tasks/holidays/location',
         {
           latitude: position.coords.latitude,
@@ -3169,19 +3170,8 @@ export default function App() {
         auth.token,
       );
 
-      await auth.updateProfile({
-        stateCode: detected.stateCode,
-        cityName: detected.cityName,
-        holidayRegionCode: detected.regionCode,
-      });
-      await refreshHolidays(auth.token);
-
-      emitNotification(
-        'Localização aplicada',
-        'Sua região foi identificada para mostrar os feriados corretos.',
-        'success',
-        { target: { type: 'settings' } },
-      );
+      setHolidayLocationSuggestion(detected);
+      return detected;
     } catch (error) {
       const message = error instanceof GeolocationPositionError
         ? error.code === error.PERMISSION_DENIED
@@ -3198,10 +3188,79 @@ export default function App() {
     } finally {
       setIsDetectingHolidayLocation(false);
     }
-  }, [auth, emitNotification, refreshHolidays]);
+  }, [auth.token, emitNotification]);
+
+  const applyDetectedHolidayLocation = useCallback(async (detected: HolidayLocationSuggestion) => {
+    await auth.updateProfile({
+      stateCode: detected.stateCode,
+      cityName: detected.cityName,
+      holidayRegionCode: detected.regionCode,
+    });
+    await refreshHolidays(auth.token ?? undefined);
+    setHolidayLocationSuggestion(null);
+  }, [auth, refreshHolidays]);
+
+  const applyHolidayLocationSuggestion = useCallback(async () => {
+    if (!holidayLocationSuggestion) return;
+
+    try {
+      setIsApplyingHolidayLocationSuggestion(true);
+      await applyDetectedHolidayLocation(holidayLocationSuggestion);
+
+      emitNotification(
+        'Calendário local aplicado',
+        'Sua cidade e estado agora serão usados para feriados regionais.',
+        'success',
+        { target: { type: 'settings' } },
+      );
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Não foi possível aplicar o calendário local agora.';
+
+      emitNotification('Falha na localização', message, 'error', {
+        target: { type: 'settings' },
+      });
+      throw new Error(message);
+    } finally {
+      setIsApplyingHolidayLocationSuggestion(false);
+    }
+  }, [applyDetectedHolidayLocation, emitNotification, holidayLocationSuggestion]);
+
+  const detectHolidayLocation = useCallback(async () => {
+    const detected = await requestHolidayLocationSuggestion();
+    await applyDetectedHolidayLocation(detected);
+
+    emitNotification(
+      'Localização aplicada',
+      'Sua região foi identificada para mostrar os feriados corretos.',
+      'success',
+      { target: { type: 'settings' } },
+    );
+  }, [applyDetectedHolidayLocation, emitNotification, requestHolidayLocationSuggestion]);
+
+  useEffect(() => {
+    if (!auth.token || !auth.currentUser || auth.currentUser.stateCode) return;
+    if (holidayLocationAutoSuggestAttemptedRef.current || !navigator.geolocation || !navigator.permissions) return;
+
+    holidayLocationAutoSuggestAttemptedRef.current = true;
+
+    void navigator.permissions
+      .query({ name: 'geolocation' as PermissionName })
+      .then((permission) => {
+        if (permission.state === 'granted') {
+          void requestHolidayLocationSuggestion().catch(() => {
+            // A sugestão automática é best effort; o botão manual continua disponível.
+          });
+        }
+      })
+      .catch(() => {
+        // Navegadores sem Permissions API ainda podem usar o botão manual.
+      });
+  }, [auth.currentUser, auth.token, requestHolidayLocationSuggestion]);
 
   const openHolidaySettings = useCallback(() => {
-    openSettings('organization');
+    openSettings('account');
   }, [openSettings]);
 
   const closeFloatingSurfacesForNavigation = useCallback(() => {
@@ -4413,10 +4472,14 @@ export default function App() {
             holidayMatchedRegionName={holidayCalendar?.location.matchedRegionName ?? null}
             holidayMunicipalSupported={holidayCalendar?.location.municipalSupported ?? false}
             holidaySupportedCities={holidayCalendar?.supportedCities ?? []}
+            holidayLocationSuggestion={holidayLocationSuggestion}
             isSavingHolidayLocation={isSavingHolidayLocation}
             isDetectingHolidayLocation={isDetectingHolidayLocation}
+            isApplyingHolidayLocationSuggestion={isApplyingHolidayLocationSuggestion}
             onSaveHolidayLocation={saveHolidayLocation}
-            onDetectHolidayLocation={detectHolidayLocation}
+            onSuggestHolidayLocation={requestHolidayLocationSuggestion}
+            onApplyHolidayLocationSuggestion={applyHolidayLocationSuggestion}
+            onClearHolidayLocationSuggestion={() => setHolidayLocationSuggestion(null)}
           />
         )}
 

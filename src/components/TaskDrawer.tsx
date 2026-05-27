@@ -8,6 +8,8 @@ import {
   Flag,
   Layers3,
   Loader2,
+  Mic,
+  MicOff,
   Repeat,
   Search,
   Sparkles,
@@ -17,6 +19,7 @@ import {
 import { cn } from '../lib/cn';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { getRecurrenceSuggestion, type RecurrenceMode, type RecurrenceSuggestion } from '../lib/taskRecurrence';
+import { parsePortugueseVoiceReminder } from '../lib/voiceReminder';
 import type { Priority, Task, TaskOverdueReminderIntensity } from '../types';
 
 const RECURRENCE_MODE_OPTIONS: Array<{ value: RecurrenceMode; label: string }> = [
@@ -97,6 +100,47 @@ const OVERDUE_INTENSITY_OPTIONS: Array<{
 ];
 
 type TaskDrawerTab = 'details' | 'recurrence' | 'alarm';
+
+interface SpeechRecognitionLike extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+interface SpeechRecognitionResultEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      length: number;
+      [index: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
+interface SpeechRecognitionErrorEventLike {
+  error: string;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
 
 interface TaskDrawerProps {
   open: boolean;
@@ -342,6 +386,10 @@ export function TaskDrawer({
   const [categorySearch, setCategorySearch] = React.useState('');
   const [tagDraft, setTagDraft] = React.useState('');
   const [tagFeedback, setTagFeedback] = React.useState('');
+  const [isListening, setIsListening] = React.useState(false);
+  const [voiceTranscript, setVoiceTranscript] = React.useState('');
+  const [voiceFeedback, setVoiceFeedback] = React.useState('');
+  const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
   const swipe = useSwipeToClose({
     enabled: open,
     direction: 'down',
@@ -355,8 +403,22 @@ export function TaskDrawer({
       setCategorySearch('');
       setTagDraft('');
       setTagFeedback('');
+      setVoiceTranscript('');
+      setVoiceFeedback('');
     }
   }, [editingTask, open]);
+
+  React.useEffect(() => {
+    if (!open && recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+      setIsListening(false);
+    }
+  }, [open]);
+
+  React.useEffect(() => () => {
+    recognitionRef.current?.abort();
+  }, []);
 
   React.useEffect(() => {
     if (alarmEnabled && (!date || !time)) {
@@ -371,6 +433,7 @@ export function TaskDrawer({
     ? `${time} - ${endTime}`
     : hasStart ? time : 'Sem início';
   const summaryPriority = PRIORITY_LABELS[priority];
+  const supportsVoiceInput = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
   const availableTagSuggestions = React.useMemo(
     () => tagOptions.filter((item) => (
       !tags.some((tag) => normalizeSearchValue(tag) === normalizeSearchValue(item))
@@ -443,6 +506,100 @@ export function TaskDrawer({
     },
     [setTags, tags],
   );
+
+  const applyVoiceTranscript = React.useCallback((transcript: string) => {
+    const parsed = parsePortugueseVoiceReminder(transcript);
+    const appliedFields: string[] = [];
+
+    if (parsed.title) {
+      setTitle(parsed.title.slice(0, 80));
+      appliedFields.push('título');
+    }
+
+    if (parsed.date) {
+      setDate(parsed.date);
+      appliedFields.push('data');
+    }
+
+    if (parsed.time) {
+      setTime(parsed.time);
+      setEndTime('');
+      appliedFields.push('horário');
+    }
+
+    setVoiceFeedback(
+      appliedFields.length > 0
+        ? `Preenchi ${appliedFields.join(', ')}.`
+        : 'Não consegui identificar os campos do lembrete.',
+    );
+  }, [setDate, setEndTime, setTime, setTitle]);
+
+  const handleVoiceInput = React.useCallback(() => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceFeedback('Entrada por voz indisponível neste navegador.');
+      return;
+    }
+
+    const recognition = new Recognition();
+    recognitionRef.current = recognition;
+    recognition.lang = 'pt-BR';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setVoiceTranscript('');
+      setVoiceFeedback('Ouvindo...');
+    };
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      let finalTranscript = '';
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const text = result[0]?.transcript ?? '';
+        transcript += text;
+        if (result.isFinal) finalTranscript += text;
+      }
+
+      const visibleTranscript = transcript.trim();
+      if (visibleTranscript) setVoiceTranscript(visibleTranscript);
+
+      const readyTranscript = finalTranscript.trim();
+      if (readyTranscript) applyVoiceTranscript(readyTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      const message = event.error === 'not-allowed' || event.error === 'service-not-allowed'
+        ? 'Permissão do microfone bloqueada.'
+        : event.error === 'no-speech'
+          ? 'Não ouvi nada desta vez.'
+          : 'Não foi possível usar o microfone.';
+      setVoiceFeedback(message);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setVoiceFeedback((current) => (current === 'Ouvindo...' ? 'Gravação encerrada.' : current));
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setVoiceFeedback('Não foi possível iniciar o microfone.');
+    }
+  }, [applyVoiceTranscript, isListening]);
 
   return (
     <AnimatePresence>
@@ -551,6 +708,48 @@ export function TaskDrawer({
                         />
 
                         <div className="space-y-4">
+                          <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                  Entrada por voz
+                                </p>
+                                {(voiceTranscript || voiceFeedback) && (
+                                  <p
+                                    data-testid="task-voice-feedback"
+                                    aria-live="polite"
+                                    className="mt-1 truncate text-sm text-slate-600 dark:text-slate-300"
+                                  >
+                                    {voiceFeedback || voiceTranscript}
+                                  </p>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                data-testid="task-voice-button"
+                                onClick={handleVoiceInput}
+                                disabled={isSubmitting || !supportsVoiceInput}
+                                aria-pressed={isListening}
+                                className={cn(
+                                  'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                                  isListening
+                                    ? 'bg-rose-600 text-white shadow-[0_14px_28px_-18px_rgba(225,29,72,0.85)] hover:bg-rose-700'
+                                    : 'bg-white text-blue-700 shadow-[0_12px_24px_-18px_rgba(37,99,235,0.55)] hover:bg-blue-50 dark:bg-white/[0.08] dark:text-blue-200 dark:hover:bg-white/[0.12]',
+                                )}
+                              >
+                                {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+                                {isListening ? 'Parar' : 'Falar'}
+                              </button>
+                            </div>
+
+                            {!supportsVoiceInput && (
+                              <p className="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                                Seu navegador não oferece reconhecimento de voz aqui.
+                              </p>
+                            )}
+                          </div>
+
                           <div>
                             <div className="mb-2 flex items-center justify-between gap-3">
                               <FieldLabel>Título</FieldLabel>

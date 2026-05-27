@@ -132,6 +132,8 @@ export interface HolidayLocationInfo {
   municipalSupported: boolean;
 }
 
+export interface HolidayLocationSuggestion extends HolidayLocationInfo {}
+
 export interface HolidayEntry {
   id: string;
   name: string;

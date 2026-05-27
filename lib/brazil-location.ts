@@ -43,7 +43,9 @@ export function normalizeBrazilText(value: string) {
 }
 
 export function normalizeStateCode(value?: string | null) {
-  return value?.trim().toUpperCase() || null;
+  const normalized = value?.trim().toUpperCase() || null;
+  if (!normalized) return null;
+  return BRAZIL_STATES.some((state) => state.code === normalized) ? normalized : null;
 }
 
 export function getBrazilStateName(stateCode?: string | null) {
@@ -55,7 +57,7 @@ export function getBrazilStateName(stateCode?: string | null) {
 
 export function resolveStateCodeFromName(stateName?: string | null) {
   if (!stateName) return null;
-  const normalized = normalizeBrazilText(stateName);
+  const normalized = normalizeBrazilText(stateName).replace(/^estado de /, '');
 
   const matched = BRAZIL_STATES.find((state) => normalizeBrazilText(state.name) === normalized);
   return matched?.code ?? null;

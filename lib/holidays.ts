@@ -288,6 +288,46 @@ export interface ReverseDetectedLocation {
   matchedRegionName: string | null;
 }
 
+function normalizeDetectedCityCandidate(value?: string | null): string | null {
+  const normalized = value
+    ?.replace(/^munic[ií]pio de\s+/i, '')
+    .replace(/^cidade de\s+/i, '')
+    .replace(/^regi[aã]o geogr[aá]fica imediata de\s+/i, '')
+    .replace(/^regi[aã]o imediata de\s+/i, '')
+    .replace(/^regi[aã]o metropolitana de\s+/i, '')
+    .trim();
+
+  return normalized || null;
+}
+
+function uniqueCityCandidates(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizeDetectedCityCandidate(value);
+    if (!normalized) continue;
+
+    const key = normalizeBrazilText(normalized);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    candidates.push(normalized);
+  }
+
+  return candidates;
+}
+
+function resolveDetectedLocation(stateCode: string | null, cityCandidates: string[]) {
+  const supported = cityCandidates
+    .map((candidate) => resolveHolidayLocation(stateCode, candidate))
+    .find((candidate) => candidate.municipalSupported);
+
+  if (supported) return supported;
+
+  return resolveHolidayLocation(stateCode, cityCandidates[0] ?? null);
+}
+
 export async function detectBrazilLocationFromCoordinates(
   latitude: number,
   longitude: number,
@@ -320,6 +360,8 @@ export async function detectBrazilLocationFromCoordinates(
       town?: string;
       village?: string;
       county?: string;
+      city_district?: string;
+      suburb?: string;
       ['ISO3166-2-lvl4']?: string;
     };
   };
@@ -332,15 +374,18 @@ export async function detectBrazilLocationFromCoordinates(
   const stateCode =
     normalizeStateCode(payload.address?.['ISO3166-2-lvl4']?.replace('BR-', '')) ??
     resolveStateCodeFromName(payload.address?.state ?? null);
-  const cityName =
+  const cityCandidates = uniqueCityCandidates([
     payload.address?.municipality ??
     payload.address?.city ??
     payload.address?.town ??
     payload.address?.village ??
-    payload.address?.county ??
-    null;
+    null,
+    payload.address?.city_district,
+    payload.address?.suburb,
+    payload.address?.county,
+  ]);
 
-  const resolved = resolveHolidayLocation(stateCode, cityName);
+  const resolved = resolveDetectedLocation(stateCode, cityCandidates);
   return {
     stateCode: resolved.stateCode,
     stateName: resolved.stateName,

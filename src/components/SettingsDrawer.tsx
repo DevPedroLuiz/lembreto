@@ -34,6 +34,7 @@ import type {
   CalendarIntegrationProvider,
   CalendarIntegrationStatus,
   CalendarSyncAllResult,
+  HolidayLocationSuggestion,
   HolidayRegionOption,
 } from '../types';
 
@@ -125,10 +126,14 @@ interface SettingsDrawerProps {
   holidayMatchedRegionName: string | null;
   holidayMunicipalSupported: boolean;
   holidaySupportedCities: HolidayRegionOption[];
+  holidayLocationSuggestion: HolidayLocationSuggestion | null;
   isSavingHolidayLocation: boolean;
   isDetectingHolidayLocation: boolean;
+  isApplyingHolidayLocationSuggestion: boolean;
   onSaveHolidayLocation: (payload: { stateCode: string | null; cityName: string | null }) => Promise<void>;
-  onDetectHolidayLocation: () => Promise<void>;
+  onSuggestHolidayLocation: () => Promise<HolidayLocationSuggestion>;
+  onApplyHolidayLocationSuggestion: () => Promise<void>;
+  onClearHolidayLocationSuggestion: () => void;
 }
 
 export type SettingsView =
@@ -348,10 +353,14 @@ export function SettingsDrawer({
   holidayMatchedRegionName,
   holidayMunicipalSupported,
   holidaySupportedCities,
+  holidayLocationSuggestion,
   isSavingHolidayLocation,
   isDetectingHolidayLocation,
+  isApplyingHolidayLocationSuggestion,
   onSaveHolidayLocation,
-  onDetectHolidayLocation,
+  onSuggestHolidayLocation,
+  onApplyHolidayLocationSuggestion,
+  onClearHolidayLocationSuggestion,
 }: SettingsDrawerProps) {
   const [activeView, setActiveView] = React.useState<SettingsView>(initialView);
   const [categoryDraft, setCategoryDraft] = React.useState('');
@@ -491,8 +500,11 @@ export function SettingsDrawer({
 
   const handleDetectHolidayLocation = React.useCallback(async () => {
     try {
-      await onDetectHolidayLocation();
-      setHolidayFeedback('Localização detectada e aplicada com sucesso.');
+      const suggestion = await onSuggestHolidayLocation();
+      const suggestionFeedback = suggestion.stateCode
+        ? 'Sugestão pronta. Confira a cidade detectada antes de aplicar.'
+        : 'Detectamos sua posição, mas não encontramos um estado brasileiro compatível.';
+      setHolidayFeedback(suggestionFeedback);
     } catch (error) {
       setHolidayFeedback(
         error instanceof Error
@@ -500,7 +512,20 @@ export function SettingsDrawer({
           : 'Não foi possível detectar sua localização agora.',
       );
     }
-  }, [onDetectHolidayLocation]);
+  }, [onSuggestHolidayLocation]);
+
+  const handleApplyHolidayLocationSuggestion = React.useCallback(async () => {
+    try {
+      await onApplyHolidayLocationSuggestion();
+      setHolidayFeedback('Calendário local aplicado com sucesso.');
+    } catch (error) {
+      setHolidayFeedback(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível aplicar o calendário local agora.',
+      );
+    }
+  }, [onApplyHolidayLocationSuggestion]);
 
   const handleDownloadCalendar = React.useCallback(async () => {
     if (isDownloadingCalendar) return;
@@ -743,6 +768,73 @@ export function SettingsDrawer({
       />
 
       <div className="rounded-3xl border border-slate-200/80 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+        {holidayLocationSuggestion ? (
+          <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
+                  <MapPin size={14} />
+                  Sugestão local
+                </span>
+                <p className="mt-2 text-sm font-semibold text-slate-950 dark:text-white">
+                  {holidayLocationSuggestion.cityName && holidayLocationSuggestion.stateCode
+                    ? `${holidayLocationSuggestion.cityName}, ${holidayLocationSuggestion.stateCode}`
+                    : holidayLocationSuggestion.stateName ?? 'Localização detectada'}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {holidayLocationSuggestion.municipalSupported
+                    ? `Calendário municipal disponível para ${holidayLocationSuggestion.matchedRegionName ?? holidayLocationSuggestion.cityName}.`
+                    : 'Calendário estadual disponível; feriados municipais dependem da cobertura da cidade detectada.'}
+                </p>
+              </div>
+
+              <div className="grid gap-2 sm:min-w-[220px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleApplyHolidayLocationSuggestion();
+                  }}
+                  disabled={isApplyingHolidayLocationSuggestion || !holidayLocationSuggestion.stateCode}
+                  className="action-primary min-h-[44px] justify-center disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isApplyingHolidayLocationSuggestion ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  Aplicar calendário local
+                </button>
+                <button
+                  type="button"
+                  onClick={onClearHolidayLocationSuggestion}
+                  disabled={isApplyingHolidayLocationSuggestion}
+                  className="action-ghost min-h-[40px] justify-center rounded-xl border border-emerald-200 px-3 py-0 text-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/20"
+                >
+                  Ignorar sugestão
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : !holidayStateCode ? (
+          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-500/20 dark:bg-blue-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">Sugerir calendário local</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  Use sua localização aproximada para encontrar cidade e estado antes de aplicar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDetectHolidayLocation();
+                }}
+                disabled={isDetectingHolidayLocation}
+                className="action-secondary min-h-[44px] shrink-0 justify-center disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDetectingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
+                Buscar sugestão
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-1 grid gap-3 sm:grid-cols-2">
           <label className="space-y-2">
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
@@ -820,7 +912,7 @@ export function SettingsDrawer({
             className="action-secondary min-h-[46px] flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isDetectingHolidayLocation ? <Loader2 size={16} className="animate-spin" /> : <Compass size={16} />}
-            Usar minha localização
+            Buscar sugestão
           </button>
           <button
             type="button"

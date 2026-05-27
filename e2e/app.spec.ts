@@ -212,6 +212,80 @@ test.describe('Lembreto critical flows', () => {
     }
   });
 
+  test('fills a reminder from voice input', async ({ page }) => {
+    const user = buildE2ETestUser();
+
+    await page.addInitScript(() => {
+      class MockSpeechRecognition extends EventTarget {
+        lang = '';
+        continuous = false;
+        interimResults = false;
+        maxAlternatives = 1;
+        onstart: (() => void) | null = null;
+        onend: (() => void) | null = null;
+        onresult: ((event: {
+          resultIndex: number;
+          results: {
+            length: number;
+            [index: number]: {
+              isFinal: boolean;
+              length: number;
+              [index: number]: { transcript: string };
+            };
+          };
+        }) => void) | null = null;
+        onerror: (() => void) | null = null;
+
+        start() {
+          this.onstart?.();
+          this.onresult?.({
+            resultIndex: 0,
+            results: {
+              0: {
+                isFinal: true,
+                length: 1,
+                0: { transcript: 'Lembre-me amanha as oito de comprar remedio' },
+              },
+              length: 1,
+            },
+          });
+          this.onend?.();
+        }
+
+        stop() {
+          this.onend?.();
+        }
+
+        abort() {
+          this.onend?.();
+        }
+      }
+
+      const speechWindow = window as Window & typeof globalThis & {
+        SpeechRecognition?: typeof MockSpeechRecognition;
+        webkitSpeechRecognition?: typeof MockSpeechRecognition;
+      };
+      speechWindow.SpeechRecognition = MockSpeechRecognition;
+      speechWindow.webkitSpeechRecognition = MockSpeechRecognition;
+    });
+
+    await cleanupUsersByEmail([user.email]);
+
+    try {
+      await registerUser(page, user);
+
+      await page.getByTestId('dashboard-create-first-task').click();
+      await page.getByTestId('task-voice-button').click();
+
+      await expect(page.getByTestId('task-title-input')).toHaveValue('comprar remedio');
+      await expect(page.getByTestId('task-date-input')).toHaveValue(formatDateLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      await expect(page.getByTestId('task-time-input')).toHaveValue('08:00');
+      await expect(page.getByTestId('task-voice-feedback')).toContainText('Preenchi');
+    } finally {
+      await cleanupUsersByEmail([user.email]);
+    }
+  });
+
   test('shows a guided empty state for first-time users', async ({ page }) => {
     const user = buildE2ETestUser();
 
