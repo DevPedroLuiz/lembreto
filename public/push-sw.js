@@ -1,4 +1,4 @@
-self.__LEMBRETO_SW_VERSION = '2026-05-06-1';
+self.__LEMBRETO_SW_VERSION = '2026-05-27-1';
 const recentPushKeys = new Map();
 const PUSH_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -78,7 +78,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  if (url.origin !== self.location.origin || request.method !== 'GET' || isApiRequest(url)) {
+  if (url.origin !== self.location.origin || request.method !== 'GET') {
+    return;
+  }
+
+  if (isApiRequest(url)) {
     return;
   }
 

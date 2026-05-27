@@ -39,10 +39,15 @@ function getApiErrorMessage(data: unknown, fallback: string): string {
 async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = new Headers(init.headers);
+  headers.set('Cache-Control', 'no-cache');
+  headers.set('Pragma', 'no-cache');
 
   try {
     return await fetch(path, {
       ...init,
+      cache: 'no-store',
+      headers,
       signal: controller.signal,
     });
   } catch (error) {

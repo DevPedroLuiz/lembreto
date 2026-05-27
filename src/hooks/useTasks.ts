@@ -367,8 +367,11 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
         }
 
         lastListenerSyncAtRef.current = Date.now();
-        void syncOfflineTasks(token, userId).catch(() => {
-          // Best effort sync when the browser reports connectivity again.
+        void (async () => {
+          await syncOfflineTasks(token, userId);
+          await refreshTasksAndTaxonomy(token, userId);
+        })().catch(() => {
+          // Keep the current local state if the foreground refresh cannot reach the server.
         });
       };
 
@@ -393,7 +396,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
         listenerSyncTimeoutRef.current = null;
       }
     };
-  }, [syncOfflineTasks, token, userId]);
+  }, [refreshTasksAndTaxonomy, syncOfflineTasks, token, userId]);
 
   const createTask = useCallback(async (payload: TaskPayload) => {
     if (!userId) throw new Error('Não autenticado');

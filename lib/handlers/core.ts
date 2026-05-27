@@ -87,6 +87,12 @@ export function getRequestMeta(
 }
 
 export function sendHandlerResult(res: ResponseLike, result: HandlerResult) {
+  if (!result.headers?.['Cache-Control']) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+
   if (result.headers) {
     for (const [name, value] of Object.entries(result.headers)) {
       res.setHeader(name, value);
