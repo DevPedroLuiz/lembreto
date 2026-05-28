@@ -1682,6 +1682,36 @@ async function main() {
     }
   });
 
+  await run('assistant accepts Gemini action alias response for create_task', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const store = createAssistantSqlMock();
+
+    await withMockedGeminiResponse({
+      action: 'create_task',
+      payload: {
+        title: 'teste de IA',
+        dueDate: '2026-05-27T23:59:00-03:00',
+        alarmEnabled: true,
+        timezone: 'America/Fortaleza',
+      },
+    }, async () => {
+      const response = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'crie um lembrete para hoje as 23:59 com o titulo teste de IA' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(store.tasks.length, 1);
+      assert.equal(store.tasks[0].title, 'teste de IA');
+      assert.equal((response.body as { action?: { type?: string } }).action?.type, 'create_task');
+      assert.match(String((response.body as { message?: string }).message), /teste de IA/);
+    });
+  });
+
   await run('assistant creates conversation, messages, event and last_created_task ref', async () => {
     const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
     const store = createAssistantSqlMock();

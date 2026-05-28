@@ -76,6 +76,158 @@ function extractJson(text: string) {
   return trimmed;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function pickString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function pickStringOrNull(value: unknown) {
+  if (value === null) return null;
+  return pickString(value);
+}
+
+function pickBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function pickNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function pickStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+    : undefined;
+}
+
+function normalizeActionType(value: unknown) {
+  const type = pickString(value);
+  if (!type) return undefined;
+  const normalized = type.toLowerCase().replace(/[\s-]+/g, '_');
+  const aliases: Record<string, string> = {
+    add_task: 'create_task',
+    create_reminder: 'create_task',
+    add_reminder: 'create_task',
+    list_reminders: 'list_tasks',
+    list_tasks: 'list_tasks',
+    update_reminder: 'update_task',
+    complete_task: 'update_task',
+    create_notification: 'manage_notifications',
+    list_alerts: 'list_notifications',
+    list_notifications: 'list_notifications',
+    manage_alerts: 'manage_notifications',
+    manage_notifications: 'manage_notifications',
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+function defaultConfirmationMessage(type: string, payload: Record<string, unknown>) {
+  const title = pickString(payload.title) ?? 'Lembrete';
+  if (type === 'create_task') return `Pronto, criei o lembrete "${title}".`;
+  if (type === 'list_tasks') return 'Consultei seus lembretes.';
+  if (type === 'update_task') return 'Pronto, atualizei o lembrete.';
+  if (type === 'create_note') return `Pronto, criei a nota "${title}".`;
+  if (type === 'list_notifications') return 'Consultei suas notificacoes.';
+  if (type === 'manage_notifications') return 'Pronto, organizei suas notificacoes.';
+  if (type === 'needs_confirmation') return pickString(payload.question) ?? 'Preciso de mais uma informacao para continuar.';
+  return pickString(payload.answer) ?? 'Certo, vou te ajudar com isso.';
+}
+
+function normalizePayload(type: string, payload: Record<string, unknown>) {
+  if (type === 'create_task') {
+    return {
+      ...(pickString(payload.title) ? { title: pickString(payload.title) } : {}),
+      ...(typeof payload.description === 'string' ? { description: payload.description } : {}),
+      ...(payload.dueDate !== undefined || payload.date !== undefined
+        ? { dueDate: pickStringOrNull(payload.dueDate ?? payload.date) }
+        : {}),
+      ...(payload.endDate !== undefined ? { endDate: pickStringOrNull(payload.endDate) } : {}),
+      ...(pickString(payload.priority) ? { priority: pickString(payload.priority) } : {}),
+      ...(pickString(payload.category) ? { category: pickString(payload.category) } : {}),
+      ...(pickStringArray(payload.tags) ? { tags: pickStringArray(payload.tags) } : {}),
+      ...(pickBoolean(payload.alarmEnabled) !== undefined ? { alarmEnabled: pickBoolean(payload.alarmEnabled) } : {}),
+      ...(pickNumber(payload.noTimeReminderMinutes) !== undefined
+        ? { noTimeReminderMinutes: pickNumber(payload.noTimeReminderMinutes) }
+        : {}),
+      ...(isRecord(payload.recurrence) ? { recurrence: payload.recurrence } : {}),
+    };
+  }
+
+  if (type === 'list_tasks') {
+    return {
+      ...(pickString(payload.status) ? { status: pickString(payload.status) } : {}),
+      ...(payload.from !== undefined ? { from: pickStringOrNull(payload.from) } : {}),
+      ...(payload.to !== undefined ? { to: pickStringOrNull(payload.to) } : {}),
+      ...(payload.search !== undefined ? { search: pickStringOrNull(payload.search) } : {}),
+    };
+  }
+
+  if (type === 'update_task') {
+    return {
+      ...(pickString(payload.taskId) ? { taskId: pickString(payload.taskId) } : {}),
+      ...(pickString(payload.search) ? { search: pickString(payload.search) } : {}),
+      ...(pickString(payload.contextRef) ? { contextRef: pickString(payload.contextRef) } : {}),
+      updates: isRecord(payload.updates) ? payload.updates : {},
+    };
+  }
+
+  if (type === 'create_note') {
+    return {
+      ...(pickString(payload.title) ? { title: pickString(payload.title) } : {}),
+      ...(typeof payload.content === 'string' ? { content: payload.content } : {}),
+      ...(pickString(payload.category) ? { category: pickString(payload.category) } : {}),
+      ...(pickStringArray(payload.tags) ? { tags: pickStringArray(payload.tags) } : {}),
+    };
+  }
+
+  if (type === 'list_notifications') {
+    return {
+      ...(pickString(payload.read) ? { read: pickString(payload.read) } : {}),
+      ...(pickString(payload.kind) ? { kind: pickString(payload.kind) } : {}),
+      ...(pickNumber(payload.limit) !== undefined ? { limit: pickNumber(payload.limit) } : {}),
+    };
+  }
+
+  if (type === 'manage_notifications') {
+    return {
+      action: pickString(payload.action) ?? pickString(payload.operation) ?? 'process_due',
+    };
+  }
+
+  if (type === 'needs_confirmation') {
+    return {
+      question: pickString(payload.question) ?? 'Preciso de mais uma informacao para continuar.',
+      ...(payload.draftAction !== undefined ? { draftAction: payload.draftAction } : {}),
+    };
+  }
+
+  if (type === 'answer_only') {
+    return {
+      answer: pickString(payload.answer) ?? pickString(payload.message) ?? 'Posso te ajudar a organizar isso no Lembreto.',
+    };
+  }
+
+  return payload;
+}
+
+function normalizeAssistantAction(value: unknown) {
+  if (!isRecord(value)) return value;
+  const type = normalizeActionType(value.type ?? value.action ?? value.intent);
+  if (!type) return value;
+  const rawPayload = isRecord(value.payload) ? value.payload : value;
+  const payload = normalizePayload(type, rawPayload);
+  return {
+    type,
+    payload,
+    confirmationMessage: pickString(value.confirmationMessage) ??
+      pickString(value.message) ??
+      defaultConfirmationMessage(type, rawPayload),
+  };
+}
+
 export class AssistantUnavailableError extends Error {
   constructor() {
     super('O assistente esta indisponivel no momento. Configure a variavel GEMINI_API_KEY para ativar o Gemini.');
@@ -97,6 +249,21 @@ export class AssistantModelRequestError extends Error {
   }
 }
 
+function parseAssistantAction(text: string): AssistantAction | null {
+  try {
+    const parsed = JSON.parse(extractJson(text)) as unknown;
+    return assistantActionSchema.parse(normalizeAssistantAction(parsed));
+  } catch (error) {
+    if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
+      console.warn('[assistant] invalid model response', {
+        error: error instanceof Error ? error.message : String(error),
+        text,
+      });
+    }
+    return null;
+  }
+}
+
 export async function interpretAssistantMessage(
   message: string,
   memoryContext?: AssistantMemoryContext,
@@ -108,7 +275,7 @@ export async function interpretAssistantMessage(
   const models = Array.from(new Set([configuredModel, FALLBACK_MODEL].filter(Boolean))) as string[];
   const ai = new GoogleGenAI({ apiKey });
 
-  let text: string | undefined;
+  let receivedInvalidModelResponse = false;
   let lastError: unknown;
   for (const model of models) {
     try {
@@ -128,22 +295,28 @@ export async function interpretAssistantMessage(
           responseMimeType: 'application/json',
         },
       });
-      text = response.text;
-      break;
+      if (!response.text) {
+        receivedInvalidModelResponse = true;
+        continue;
+      }
+
+      const action = parseAssistantAction(response.text);
+      if (action) return action;
+      if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
+        console.warn('[assistant] invalid response from model', { model });
+      }
+      receivedInvalidModelResponse = true;
     } catch (error) {
+      if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
+        console.warn('[assistant] model request failed', {
+          model,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       lastError = error;
     }
   }
 
-  if (!text) {
-    if (lastError) throw new AssistantModelRequestError(lastError);
-    throw new AssistantInvalidModelResponseError();
-  }
-
-  try {
-    const parsed = JSON.parse(extractJson(text)) as unknown;
-    return assistantActionSchema.parse(parsed);
-  } catch {
-    throw new AssistantInvalidModelResponseError();
-  }
+  if (receivedInvalidModelResponse) throw new AssistantInvalidModelResponseError();
+  throw new AssistantModelRequestError(lastError);
 }
