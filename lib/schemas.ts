@@ -27,6 +27,7 @@ const dueDateSchema = z.string().refine(
 );
 const optionalDateSchema = dueDateSchema.nullable().optional();
 const optionalReminderMinutesSchema = z.number().int().min(1).max(24 * 60).nullable().optional();
+const clientMutationIdSchema = z.string().uuid('Identificador da criação inválido').optional();
 const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
 const WORK_END_AFTER_START_MESSAGE = 'Horário final precisa ser depois do horário inicial.';
 
@@ -104,6 +105,7 @@ export const profileUpdateSchema = z.object({
 );
 
 export const createTaskSchema = z.object({
+  clientMutationId: clientMutationIdSchema,
   title: titleSchema,
   description: descriptionSchema.default(''),
   dueDate: optionalDateSchema,

@@ -13,9 +13,10 @@ interface SpeechRecognition extends EventTarget {
   continuous: boolean;
   start: () => void;
   stop: () => void;
+  onstart: (() => void) | null;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
 }
 
 interface SpeechRecognitionEvent {
@@ -27,6 +28,10 @@ interface SpeechRecognitionEvent {
       };
     };
   };
+}
+
+interface SpeechRecognitionErrorEvent {
+  error?: string;
 }
 
 interface AssistantChatProps {
@@ -51,6 +56,8 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
   const [voiceError, setVoiceError] = useState('');
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const voiceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalTranscriptRef = useRef('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { messages, isLoading, error, sendMessage, startNewConversation } = useAssistant(token, onActionComplete, storageKey);
 
@@ -60,6 +67,7 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
   }, [messages, open]);
 
   useEffect(() => () => {
+    if (voiceTimeoutRef.current) clearTimeout(voiceTimeoutRef.current);
     recognitionRef.current?.stop();
   }, []);
 
@@ -72,6 +80,11 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
   };
 
   const startVoiceInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
     const Recognition = getSpeechRecognition();
     if (!Recognition) {
       setVoiceError('Seu navegador nao oferece suporte a entrada por voz. Voce ainda pode digitar sua mensagem.');
@@ -79,25 +92,56 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
     }
 
     setVoiceError('');
+    finalTranscriptRef.current = '';
     const recognition = new Recognition();
     recognition.lang = 'pt-BR';
     recognition.interimResults = false;
     recognition.continuous = false;
+    recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event) => {
       const transcript = Array.from({ length: event.results.length })
         .map((_, index) => event.results[index]?.[0]?.transcript ?? '')
         .join(' ')
         .trim();
-      if (transcript) setInput((prev) => `${prev}${prev ? ' ' : ''}${transcript}`.trim());
+      if (transcript) {
+        finalTranscriptRef.current = `${input.trim()} ${transcript}`.trim();
+        setInput(finalTranscriptRef.current);
+      }
     };
-    recognition.onerror = () => {
-      setVoiceError('Nao consegui capturar sua voz agora. Tente novamente ou digite sua mensagem.');
+    recognition.onerror = (event) => {
+      const nextMessage = event.error === 'not-allowed'
+        ? 'Permita o uso do microfone no navegador para falar com o assistente.'
+        : event.error === 'no-speech'
+          ? 'Nao ouvi nada. Tente falar mais perto do microfone ou digite sua mensagem.'
+          : 'Nao consegui capturar sua voz agora. Tente novamente ou digite sua mensagem.';
+      setVoiceError(nextMessage);
       setIsListening(false);
+      if (voiceTimeoutRef.current) clearTimeout(voiceTimeoutRef.current);
     };
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      if (voiceTimeoutRef.current) clearTimeout(voiceTimeoutRef.current);
+      const transcript = finalTranscriptRef.current.trim();
+      finalTranscriptRef.current = '';
+      if (transcript) {
+        setInput('');
+        void sendMessage(transcript);
+      }
+    };
     recognitionRef.current = recognition;
-    setIsListening(true);
-    recognition.start();
+    voiceTimeoutRef.current = setTimeout(() => {
+      recognition.stop();
+      if (!finalTranscriptRef.current.trim()) {
+        setVoiceError('Nao ouvi nada dentro do tempo limite. Tente novamente ou digite sua mensagem.');
+      }
+    }, 12000);
+    try {
+      recognition.start();
+    } catch {
+      if (voiceTimeoutRef.current) clearTimeout(voiceTimeoutRef.current);
+      setIsListening(false);
+      setVoiceError('Nao consegui iniciar o microfone. Confira a permissao do navegador e tente novamente.');
+    }
   };
 
   return (
@@ -184,13 +228,13 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
               <button
                 type="button"
                 onClick={startVoiceInput}
-                disabled={isLoading || isListening}
-                aria-label="Usar microfone"
-                title="Usar microfone"
+                disabled={isLoading}
+                aria-label={isListening ? 'Parar gravacao' : 'Usar microfone'}
+                title={isListening ? 'Parar gravacao' : 'Usar microfone'}
                 className="icon-slot h-12 w-12 rounded-2xl border border-slate-200 bg-white text-slate-600 transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:text-blue-300"
                 data-testid="assistant-microphone-button"
               >
-                <Mic size={19} />
+                {isListening ? <Loader2 className="animate-spin" size={19} /> : <Mic size={19} />}
               </button>
               <button
                 type="submit"

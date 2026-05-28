@@ -242,18 +242,20 @@ function createAssistantSqlMock() {
       const task = {
         id: '22222222-2222-4222-8222-222222222222',
         userId: values[0],
-        title: values[1],
-        description: values[2],
-        dueDate: values[3],
-        endDate: values[4],
-        priority: values[5],
-        category: values[6],
-        tags: values[7],
-        suppressHolidayNotifications: values[8],
-        overdueReminderIntensity: values[9],
-        alarmEnabled: values[10],
-        reminderMode: values[11],
-        expiresAt: values[12],
+        clientMutationId: values[1],
+        title: values[2],
+        description: values[3],
+        dueDate: values[4],
+        endDate: values[5],
+        priority: values[6],
+        category: values[7],
+        tags: values[8],
+        suppressHolidayNotifications: values[9],
+        overdueReminderIntensity: values[10],
+        alarmEnabled: values[11],
+        preNoticeMinutes: values[12],
+        reminderMode: values[13],
+        expiresAt: values[14],
         overdueSince: null,
         overdueExpiresAt: null,
         deletedAt: null,
@@ -261,8 +263,8 @@ function createAssistantSqlMock() {
         completionSource: null,
         autoDeletedReason: null,
         autoDeletedAt: null,
-        mutedUntil: values[13],
-        status: values[15],
+        mutedUntil: values[15],
+        status: values[17],
         history: [],
         createdAt: new Date().toISOString(),
         externalCalendarProvider: null,
@@ -2177,6 +2179,7 @@ async function main() {
 
   await run('task schemas validate create and update payloads', () => {
     const created = createTaskSchema.parse({
+      clientMutationId: '44444444-4444-4444-8444-444444444444',
       title: 'Estudar',
       description: 'Revisar schemas',
       dueDate: new Date().toISOString(),
@@ -2187,6 +2190,7 @@ async function main() {
 
     assert.equal(created.priority, 'high');
     assert.equal(created.suppressHolidayNotifications, true);
+    assert.equal(created.clientMutationId, '44444444-4444-4444-8444-444444444444');
 
     const floatingCreated = createTaskSchema.parse({
       title: 'Sem horario fixo',

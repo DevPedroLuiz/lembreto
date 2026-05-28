@@ -3,6 +3,7 @@ import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import {
   buildOfflineTask,
   enqueueOfflineTaskCreate,
+  ensureTaskClientMutationId,
   getQueueIdFromOfflineTaskId,
   isOfflineRequestError,
   loadOfflineTaskCreates,
@@ -67,6 +68,38 @@ function updateCachedTaskStatus(userId: string, taskId: string, status: Status) 
       cachedTask.id === taskId ? { ...cachedTask, status } : cachedTask
     )),
   );
+}
+
+function upsertTaskList(tasks: Task[], task: Task): Task[] {
+  return [task, ...tasks.filter((current) => current.id !== task.id)];
+}
+
+function normalizeOptionalTime(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? null : time;
+}
+
+function normalizeTags(tags: string[] | undefined): string {
+  return [...(tags ?? [])].map((tag) => tag.trim()).filter(Boolean).sort().join('\n');
+}
+
+function taskMatchesCreatePayload(task: Task, payload: TaskPayload): boolean {
+  if (task.clientMutationId && payload.clientMutationId && task.clientMutationId === payload.clientMutationId) {
+    return true;
+  }
+
+  return task.title === payload.title
+    && task.description === payload.description
+    && normalizeOptionalTime(task.dueDate) === normalizeOptionalTime(payload.dueDate)
+    && normalizeOptionalTime(task.endDate) === normalizeOptionalTime(payload.endDate)
+    && task.priority === payload.priority
+    && task.category === payload.category
+    && task.suppressHolidayNotifications === payload.suppressHolidayNotifications
+    && (task.overdueReminderIntensity ?? 'normal') === (payload.overdueReminderIntensity ?? 'normal')
+    && task.alarmEnabled === (payload.alarmEnabled ?? false)
+    && task.status === (payload.status ?? 'pending')
+    && normalizeTags(task.tags) === normalizeTags(payload.tags);
 }
 
 function findOfflineTask(queueId: string, userId: string): Task {
@@ -226,14 +259,22 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       }
 
       let syncedCount = 0;
+      let knownSyncedTasks = loadTaskCache(requestUserId);
       setIsSyncingOfflineTasks(true);
 
       try {
         for (const item of offlineCreates) {
+          if (knownSyncedTasks.some((task) => taskMatchesCreatePayload(task, item.payload))) {
+            removeOfflineTaskCreate(item.id);
+            syncedCount += 1;
+            continue;
+          }
+
           try {
             const created = await apiPost<Task>('/api/tasks', item.payload, requestToken);
             removeOfflineTaskCreate(item.id);
             syncedCount += 1;
+            knownSyncedTasks = upsertTaskList(knownSyncedTasks, created);
 
             const offlineTaskId = buildOfflineTask(item).id;
             setTasks((prev) => prev.map((task) => (task.id === offlineTaskId ? created : task)));
@@ -400,11 +441,12 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
 
   const createTask = useCallback(async (payload: TaskPayload) => {
     if (!userId) throw new Error('Não autenticado');
+    const payloadWithMutationId = ensureTaskClientMutationId(payload);
     const queueOfflineCreate = () => {
-      const queued = enqueueOfflineTaskCreate(userId, payload);
+      const queued = enqueueOfflineTaskCreate(userId, payloadWithMutationId);
       const optimisticTask = buildOfflineTask(queued);
 
-      setTasks((prev) => [optimisticTask, ...prev]);
+      setTasks((prev) => upsertTaskList(prev, optimisticTask));
       setCategories((prev) => Array.from(new Set([...prev, optimisticTask.category])));
       setTags((prev) => Array.from(new Set([...prev, ...(optimisticTask.tags ?? [])])));
       setPendingOfflineTaskCount((prev) => prev + 1);
@@ -414,13 +456,13 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     try {
       if (!token) return queueOfflineCreate();
 
-      const created = await apiPost<Task>('/api/tasks', payload, token);
+      const created = await apiPost<Task>('/api/tasks', payloadWithMutationId, token);
       tasksMutationVersionRef.current += 1;
       taxonomyMutationVersionRef.current += 1;
-      setTasks((prev) => [created, ...prev]);
+      setTasks((prev) => upsertTaskList(prev, created));
       setCategories((prev) => Array.from(new Set([...prev, created.category])));
       setTags((prev) => Array.from(new Set([...prev, ...(created.tags ?? [])])));
-      saveTaskCache(userId, [created, ...loadTaskCache(userId)]);
+      saveTaskCache(userId, upsertTaskList(loadTaskCache(userId), created));
       return created;
     } catch (error) {
       if (isOfflineRequestError(error)) return queueOfflineCreate();

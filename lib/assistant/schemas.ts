@@ -3,6 +3,16 @@ import { z } from 'zod';
 const prioritySchema = z.enum(['low', 'medium', 'high']);
 const taskStatusSchema = z.enum(['pending', 'completed', 'inactive', 'cancelled']);
 const listTaskStatusSchema = z.enum(['pending', 'overdue', 'completed']);
+const notificationReadFilterSchema = z.enum(['unread', 'read', 'all']);
+const notificationKindSchema = z.enum(['pre_notice', 'notification', 'alarm', 'floating_reminder', 'overdue_reminder']);
+const manageNotificationsActionSchema = z.enum([
+  'process_due',
+  'mark_all_read',
+  'clear_all',
+  'clear_read',
+  'enable',
+  'disable',
+]);
 const contextRefSchema = z.enum([
   'last_created_task',
   'last_updated_task',
@@ -105,6 +115,24 @@ const createNoteActionSchema = z.object({
   confirmationMessage: z.string().trim().min(1).max(500),
 }).strict();
 
+const listNotificationsActionSchema = z.object({
+  type: z.literal('list_notifications'),
+  payload: z.object({
+    read: notificationReadFilterSchema.optional(),
+    kind: notificationKindSchema.optional(),
+    limit: z.number().int().min(1).max(10).optional(),
+  }).strict(),
+  confirmationMessage: z.string().trim().min(1).max(500),
+}).strict();
+
+const manageNotificationsActionObjectSchema = z.object({
+  type: z.literal('manage_notifications'),
+  payload: z.object({
+    action: manageNotificationsActionSchema,
+  }).strict(),
+  confirmationMessage: z.string().trim().min(1).max(500),
+}).strict();
+
 const answerOnlyActionSchema = z.object({
   type: z.literal('answer_only'),
   payload: z.object({
@@ -126,6 +154,8 @@ export const assistantActionSchema = z.discriminatedUnion('type', [
   createTaskActionSchema,
   listTasksActionSchema,
   updateTaskActionSchema,
+  listNotificationsActionSchema,
+  manageNotificationsActionObjectSchema,
   createNoteActionSchema,
   answerOnlyActionSchema,
   needsConfirmationActionSchema,

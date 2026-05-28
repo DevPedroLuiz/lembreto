@@ -4,7 +4,7 @@ import { assistantActionSchema, type AssistantAction } from './schemas.js';
 
 export const ASSISTANT_TIMEZONE = 'America/Fortaleza';
 
-const FALLBACK_MODEL = 'gemini-1.5-flash';
+const FALLBACK_MODEL = 'gemini-2.5-flash';
 
 function getFortalezaNow() {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -22,7 +22,9 @@ function getFortalezaNow() {
 function buildSystemPrompt() {
   return [
     'Voce e a Lumi, assistente pessoal inteligente do sistema Lembreto.',
-    'Sua funcao e ajudar o usuario a organizar tarefas, lembretes, notas e rotina.',
+    'Sua funcao e ajudar o usuario a organizar tarefas, lembretes, notificacoes, notas e rotina.',
+    'Aja como um assistente pessoal proativo: quando concluir algo, indique o proximo passo util sem esperar o usuario pedir.',
+    'Use o Lembreto como ferramenta de trabalho: crie, consulte, atualize e organize informacoes do usuario dentro do sistema.',
     'Voce nao executa acoes fora do sistema.',
     'Voce pode usar o historico recente da conversa e as referencias contextuais para entender comandos incompletos.',
     'Use o contexto para resolver expressoes como: "esse lembrete", "ele", "essa tarefa", "o primeiro", "o ultimo", "aquela nota", "muda para amanha" e "confirma".',
@@ -34,6 +36,8 @@ function buildSystemPrompt() {
     'Se nao houver contexto suficiente, peca confirmacao.',
     'Responda sempre em JSON valido.',
     'Quando o usuario pedir para criar um lembrete, extraia titulo, data, hora, prioridade, categoria e tags.',
+    'Quando o usuario falar de avisos, alertas, alarmes ou central de notificacoes, use as acoes de notificacoes.',
+    'Ao criar lembretes com data/hora, habilite alarmEnabled quando fizer sentido avisar o usuario.',
     `Use o timezone ${ASSISTANT_TIMEZONE}.`,
     `Data e hora atuais em ${ASSISTANT_TIMEZONE}: ${getFortalezaNow()}.`,
     'Quando faltar informacao essencial, retorne needs_confirmation.',
@@ -47,6 +51,8 @@ function buildSystemPrompt() {
     '- list_tasks: consulta lembretes.',
     '- update_task: atualiza ou conclui lembrete; use search se nao souber o ID.',
     '  Para referencias contextuais em update_task, use payload.contextRef com last_created_task, last_updated_task, last_relevant_task, last_listed_task_first ou last_listed_task_last.',
+    '- list_notifications: consulta notificacoes recentes, pendentes ou lidas.',
+    '- manage_notifications: processa notificacoes vencidas, marca como lidas, limpa a central ou ativa/desativa notificacoes.',
     '- create_note: cria nota.',
     '- answer_only: responde orientacoes de rotina sem executar acao.',
     '- needs_confirmation: pede dado essencial que esta faltando.',
@@ -82,6 +88,15 @@ export class AssistantInvalidModelResponseError extends Error {
   }
 }
 
+export class AssistantModelRequestError extends Error {
+  cause?: unknown;
+
+  constructor(cause?: unknown) {
+    super('O assistente nao conseguiu falar com a IA agora. Verifique a chave/modelo do Gemini e tente novamente.');
+    this.cause = cause;
+  }
+}
+
 export async function interpretAssistantMessage(
   message: string,
   memoryContext?: AssistantMemoryContext,
@@ -89,28 +104,41 @@ export async function interpretAssistantMessage(
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw new AssistantUnavailableError();
 
-  const model = process.env.GEMINI_MODEL?.trim() || FALLBACK_MODEL;
+  const configuredModel = process.env.GEMINI_MODEL?.trim();
+  const models = Array.from(new Set([configuredModel, FALLBACK_MODEL].filter(Boolean))) as string[];
   const ai = new GoogleGenAI({ apiKey });
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: JSON.stringify({
-      currentMessage: message,
-      memory: memoryContext ?? {
-        recentMessages: [],
-        recentActions: [],
-        contextRefs: {},
-      },
-    }),
-    config: {
-      systemInstruction: buildSystemPrompt(),
-      temperature: 0.2,
-      responseMimeType: 'application/json',
-    },
-  });
+  let text: string | undefined;
+  let lastError: unknown;
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: JSON.stringify({
+          currentMessage: message,
+          memory: memoryContext ?? {
+            recentMessages: [],
+            recentActions: [],
+            contextRefs: {},
+          },
+        }),
+        config: {
+          systemInstruction: buildSystemPrompt(),
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+        },
+      });
+      text = response.text;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-  const text = response.text;
-  if (!text) throw new AssistantInvalidModelResponseError();
+  if (!text) {
+    if (lastError) throw new AssistantModelRequestError(lastError);
+    throw new AssistantInvalidModelResponseError();
+  }
 
   try {
     const parsed = JSON.parse(extractJson(text)) as unknown;

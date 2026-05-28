@@ -3,7 +3,7 @@ import { ApiError } from '../../api/client';
 import { sendAssistantMessage } from '../../lib/assistantApi';
 import type { AssistantChatMessage } from './AssistantMessage';
 
-const WELCOME_MESSAGE = 'Ola! Eu sou seu assistente do Lembreto. Posso criar lembretes, organizar tarefas, consultar sua rotina e transformar suas ideias em acoes.';
+const WELCOME_MESSAGE = 'Ola! Eu sou seu assistente pessoal do Lembreto. Posso revisar seus atrasados, criar lembretes com alarmes, organizar prioridades e cuidar das notificacoes para voce.';
 
 function createMessage(role: AssistantChatMessage['role'], content: string): AssistantChatMessage {
   const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'

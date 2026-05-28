@@ -1,6 +1,7 @@
 import type { Priority, Status, Task, TaskOverdueReminderIntensity, TaskTaxonomy } from '../types';
 
 export type TaskCreatePayload = {
+  clientMutationId?: string;
   title: string;
   description: string;
   dueDate: string | null;
@@ -52,7 +53,43 @@ function createLocalId() {
     return crypto.randomUUID();
   }
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (char) => (
+    (Number(char) ^ Math.floor(Math.random() * 16) >> Number(char) / 4).toString(16)
+  ));
+}
+
+export function createTaskClientMutationId() {
+  return createLocalId();
+}
+
+export function ensureTaskClientMutationId(payload: TaskCreatePayload): TaskCreatePayload {
+  return payload.clientMutationId
+    ? payload
+    : { ...payload, clientMutationId: createTaskClientMutationId() };
+}
+
+function dedupeTasksById(tasks: Task[]): Task[] {
+  const seen = new Set<string>();
+  return tasks.filter((task) => {
+    if (seen.has(task.id)) return false;
+    seen.add(task.id);
+    return true;
+  });
+}
+
+function normalizeOfflineCreates(items: OfflineTaskCreate[]): OfflineTaskCreate[] {
+  let changed = false;
+  const normalized = items.map((item) => {
+    if (item.payload.clientMutationId) return item;
+    changed = true;
+    return {
+      ...item,
+      payload: ensureTaskClientMutationId(item.payload),
+    };
+  });
+
+  if (changed) saveOfflineCreates(normalized);
+  return normalized;
 }
 
 export function getOfflineTaskId(queueId: string) {
@@ -64,14 +101,14 @@ export function getQueueIdFromOfflineTaskId(taskId: string) {
 }
 
 export function loadOfflineTaskCreates(userId: string): OfflineTaskCreate[] {
-  return getOfflineCreates().filter((item) => item.userId === userId);
+  return normalizeOfflineCreates(getOfflineCreates()).filter((item) => item.userId === userId);
 }
 
 export function enqueueOfflineTaskCreate(userId: string, payload: TaskCreatePayload): OfflineTaskCreate {
   const item: OfflineTaskCreate = {
     id: createLocalId(),
     userId,
-    payload,
+    payload: ensureTaskClientMutationId(payload),
     createdAt: new Date().toISOString(),
   };
 
@@ -103,6 +140,7 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
   return {
     id: getOfflineTaskId(item.id),
     userId: item.userId,
+    clientMutationId: item.payload.clientMutationId ?? null,
     title: item.payload.title,
     description: item.payload.description,
     dueDate: item.payload.dueDate,
@@ -130,14 +168,14 @@ export function buildOfflineTask(item: OfflineTaskCreate): Task {
 }
 
 export function mergeTasksWithOfflineCreates(tasks: Task[], offlineCreates: OfflineTaskCreate[]): Task[] {
-  return [
+  return dedupeTasksById([
     ...offlineCreates.map(buildOfflineTask),
     ...tasks,
-  ];
+  ]);
 }
 
 export function saveTaskCache(userId: string, tasks: Task[]) {
-  const syncedTasks = tasks.filter((task) => task.syncStatus !== 'pending');
+  const syncedTasks = dedupeTasksById(tasks.filter((task) => task.syncStatus !== 'pending'));
   localStorage.setItem(`${TASK_CACHE_PREFIX}${userId}`, JSON.stringify(syncedTasks));
 }
 

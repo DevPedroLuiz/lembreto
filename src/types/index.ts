@@ -25,6 +25,7 @@ export interface User {
 export interface Task {
   id: string;
   userId: string;
+  clientMutationId?: string | null;
   title: string;
   description: string;
   dueDate: string | null;

@@ -94,12 +94,16 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
     await ensureTaskSideEffectsInfrastructure(sql);
     await ensureNotificationSchedulingInfrastructure(sql);
     await assertInfrastructure(sql, 'task list indexes', {
+      columns: [
+        { table: 'tasks', column: 'client_mutation_id' },
+      ],
       indexes: [
         { name: 'idx_tasks_user_deleted_status_created' },
         { name: 'idx_tasks_user_deleted_status_due' },
         { name: 'idx_tasks_user_priority_due' },
         { name: 'idx_tasks_user_category_due' },
         { name: 'idx_tasks_search_gin' },
+        { name: 'idx_tasks_user_client_mutation_id' },
       ],
     });
   })().catch((error) => {
@@ -572,6 +576,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         SELECT
           id,
           user_id     AS "userId",
+          client_mutation_id AS "clientMutationId",
           title,
           description,
           due_date    AS "dueDate",
@@ -677,6 +682,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
     }
 
     const {
+      clientMutationId,
       title,
       description,
       dueDate,
@@ -720,6 +726,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       const rows = await sql`
         INSERT INTO tasks (
           user_id,
+          client_mutation_id,
           title,
           description,
           due_date,
@@ -741,6 +748,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         )
         VALUES (
           ${user.id},
+          ${clientMutationId ?? null},
           ${title},
           ${description},
           ${effectiveDueDate},
@@ -760,9 +768,12 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           ${effectiveDueDate && status === 'pending' ? 'pending' : 'idle'},
           ${history}::jsonb
         )
+        ON CONFLICT (user_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
+        DO UPDATE SET client_mutation_id = EXCLUDED.client_mutation_id
         RETURNING
           id,
           user_id     AS "userId",
+          client_mutation_id AS "clientMutationId",
           title,
           description,
           due_date    AS "dueDate",
@@ -996,6 +1007,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         RETURNING
           id,
           user_id     AS "userId",
+          client_mutation_id AS "clientMutationId",
           title,
           description,
           due_date    AS "dueDate",

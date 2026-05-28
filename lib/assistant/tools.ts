@@ -1,5 +1,11 @@
 import { createNoteSchema, createTaskSchema, formatZodError, updateTaskSchema } from '../schemas.js';
 import { handleNotesCollection } from '../handlers/notes.js';
+import {
+  handleNotificationMarkAllRead,
+  handleNotificationProcessDue,
+  handleNotificationSettings,
+  handleNotificationsCollection,
+} from '../handlers/notifications.js';
 import { handleTaskById, handleTasksCollection } from '../handlers/tasks.js';
 import type { HandlerContext, HandlerResult } from '../handlers/core.js';
 import { ASSISTANT_TIMEZONE } from './gemini.js';
@@ -227,6 +233,33 @@ function buildTaskSummary(tasks: Array<Record<string, unknown>>) {
 
   const extra = tasks.length > 8 ? `\nE mais ${tasks.length - 8} lembrete(s).` : '';
   return `Encontrei ${tasks.length} lembrete(s):\n${lines.join('\n')}${extra}`;
+}
+
+function buildNotificationSummary(notifications: Array<Record<string, unknown>>) {
+  if (notifications.length === 0) {
+    return 'Nao encontrei notificacoes com esse filtro. Posso verificar lembretes vencidos ou revisar sua agenda agora.';
+  }
+
+  const lines = notifications.slice(0, 6).map((notification) => {
+    const title = String(notification.title ?? 'Notificacao');
+    const message = String(notification.message ?? '').trim();
+    const createdAt = typeof notification.createdAt === 'string' && notification.createdAt
+      ? new Intl.DateTimeFormat('pt-BR', {
+        timeZone: ASSISTANT_TIMEZONE,
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(new Date(notification.createdAt))
+      : 'sem data';
+    const read = notification.read ? 'lida' : 'nao lida';
+    return `- ${title} (${read}, ${createdAt})${message ? `: ${message}` : ''}`;
+  });
+
+  const unreadCount = notifications.filter((notification) => notification.read === false).length;
+  const extra = notifications.length > 6 ? `\nE mais ${notifications.length - 6} notificacoes.` : '';
+  const nextStep = unreadCount > 0
+    ? '\nPosso marcar as lidas, abrir a central ou transformar algum aviso em novo lembrete.'
+    : '\nSua central esta sob controle; posso procurar proximos prazos se quiser agir agora.';
+  return `Encontrei ${notifications.length} notificacoes:\n${lines.join('\n')}${extra}${nextStep}`;
 }
 
 function getEntityId(value: unknown): string | undefined {
@@ -588,6 +621,93 @@ async function executeCreateNote(
   };
 }
 
+async function executeListNotifications(
+  context: HandlerContext,
+  action: Extract<AssistantAction, { type: 'list_notifications' }>,
+): Promise<AssistantExecutionResult> {
+  const read = action.payload.read === 'unread'
+    ? 'false'
+    : action.payload.read === 'read'
+      ? 'true'
+      : undefined;
+  const result = await handleNotificationsCollection(childContext(context, {
+    method: 'GET',
+    query: {
+      limit: String(action.payload.limit ?? 6),
+      ...(read ? { read } : {}),
+      ...(action.payload.kind ? { kind: action.payload.kind } : {}),
+    },
+  }));
+  assertSuccessfulResult(result, 'Nao consegui consultar suas notificacoes agora.');
+
+  const body = result.body as { notifications?: Array<Record<string, unknown>> };
+  const notifications = Array.isArray(body.notifications) ? body.notifications : [];
+
+  return {
+    message: notifications.length > 0 ? buildNotificationSummary(notifications) : action.confirmationMessage,
+    action: {
+      type: action.type,
+      status: 'success',
+      summary: `Consulta retornou ${notifications.length} notificacoes.`,
+    },
+    data: body,
+  };
+}
+
+async function executeManageNotifications(
+  context: HandlerContext,
+  action: Extract<AssistantAction, { type: 'manage_notifications' }>,
+): Promise<AssistantExecutionResult> {
+  const actionName = action.payload.action;
+  let result: HandlerResult;
+  let summary = action.confirmationMessage;
+
+  if (actionName === 'process_due') {
+    result = await handleNotificationProcessDue(childContext(context, {
+      method: 'POST',
+      body: {},
+    }));
+    assertSuccessfulResult(result, 'Nao consegui processar as notificacoes agora.');
+    const notifications = Array.isArray((result.body as { notifications?: unknown }).notifications)
+      ? (result.body as { notifications: Array<Record<string, unknown>> }).notifications
+      : [];
+    summary = notifications.length > 0
+      ? buildNotificationSummary(notifications)
+      : 'Verifiquei as notificacoes vencidas e nao encontrei novos avisos agora. Posso revisar seus lembretes atrasados em seguida.';
+  } else if (actionName === 'mark_all_read') {
+    result = await handleNotificationMarkAllRead(childContext(context, {
+      method: 'POST',
+      body: {},
+    }));
+    assertSuccessfulResult(result, 'Nao consegui marcar as notificacoes como lidas.');
+  } else if (actionName === 'clear_all' || actionName === 'clear_read') {
+    result = await handleNotificationsCollection(childContext(context, {
+      method: 'DELETE',
+      body: actionName === 'clear_read' ? { read: true } : {},
+    }));
+    assertSuccessfulResult(result, 'Nao consegui limpar a central de notificacoes.');
+  } else {
+    result = await handleNotificationSettings(childContext(context, {
+      method: 'PUT',
+      body: { enabled: actionName === 'enable' },
+    }));
+    assertSuccessfulResult(result, 'Nao consegui atualizar a preferencia de notificacoes.');
+    summary = actionName === 'enable'
+      ? 'Notificacoes ativadas. Vou usar os lembretes e alarmes do Lembreto para te avisar no momento certo.'
+      : 'Notificacoes desativadas. Ainda posso organizar seus lembretes, mas nao vou enviar novos avisos ate voce reativar.';
+  }
+
+  return {
+    message: summary,
+    action: {
+      type: action.type,
+      status: 'success',
+      summary,
+    },
+    data: result.body,
+  };
+}
+
 async function buildReferences(context: HandlerContext, options?: AssistantToolOptions): Promise<AssistantExecutionResult['references']> {
   if (!options?.conversationId || !options.userId) return undefined;
   const refs = await getAssistantContextRefs(context.sql, options.conversationId, 10, options.userId);
@@ -760,6 +880,14 @@ export async function executeAssistantAction(
     }
     if (action.type === 'update_task') {
       result = await executeUpdateTask(context, action, options);
+      return persistExecutionOutcome(context, result, action, options);
+    }
+    if (action.type === 'list_notifications') {
+      result = await executeListNotifications(context, action);
+      return persistExecutionOutcome(context, result, action, options);
+    }
+    if (action.type === 'manage_notifications') {
+      result = await executeManageNotifications(context, action);
       return persistExecutionOutcome(context, result, action, options);
     }
     if (action.type === 'create_note') {

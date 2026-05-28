@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tasks (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_mutation_id UUID,
   title       TEXT        NOT NULL,
   description TEXT        NOT NULL DEFAULT '',
   due_date    TIMESTAMPTZ,
@@ -52,6 +53,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id
   WHERE google_id IS NOT NULL;
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+
+ALTER TABLE tasks
+ADD COLUMN IF NOT EXISTS client_mutation_id UUID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_client_mutation_id
+  ON tasks(user_id, client_mutation_id)
+  WHERE client_mutation_id IS NOT NULL;
 
 ALTER TABLE tasks
 ADD COLUMN IF NOT EXISTS history JSONB NOT NULL DEFAULT '[]'::JSONB;
