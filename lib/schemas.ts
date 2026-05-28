@@ -26,6 +26,7 @@ const dueDateSchema = z.string().refine(
   'Data inválida',
 );
 const optionalDateSchema = dueDateSchema.nullable().optional();
+const optionalReminderMinutesSchema = z.number().int().min(1).max(24 * 60).nullable().optional();
 const WORK_TIME_REQUIRED_MESSAGE = 'Horário inicial e horário final são obrigatórios para categoria Trabalho.';
 const WORK_END_AFTER_START_MESSAGE = 'Horário final precisa ser depois do horário inicial.';
 
@@ -114,8 +115,8 @@ export const createTaskSchema = z.object({
   overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).default('normal'),
   alarmEnabled: z.boolean().default(false),
   mutedUntil: optionalDateSchema,
-  preNoticeMinutes: z.number().int().min(1).max(24 * 60).optional(),
-  noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
+  preNoticeMinutes: optionalReminderMinutesSchema,
+  noTimeReminderMinutes: optionalReminderMinutesSchema,
   status: z.enum(TASK_STATUSES).default('pending'),
 }).strict().superRefine((value, ctx) => {
   if (isWorkCategory(value.category) && (!value.dueDate || !value.endDate)) {
@@ -147,8 +148,8 @@ export const updateTaskSchema = z.object({
   overdueReminderIntensity: z.enum(OVERDUE_REMINDER_INTENSITIES).optional(),
   alarmEnabled: z.boolean().optional(),
   mutedUntil: optionalDateSchema,
-  preNoticeMinutes: z.number().int().min(1).max(24 * 60).optional(),
-  noTimeReminderMinutes: z.number().int().min(1).max(24 * 60).optional(),
+  preNoticeMinutes: optionalReminderMinutesSchema,
+  noTimeReminderMinutes: optionalReminderMinutesSchema,
   status: z.enum(TASK_STATUSES).optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,

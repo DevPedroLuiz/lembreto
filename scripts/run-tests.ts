@@ -2188,13 +2188,28 @@ async function main() {
     assert.equal(created.priority, 'high');
     assert.equal(created.suppressHolidayNotifications, true);
 
+    const floatingCreated = createTaskSchema.parse({
+      title: 'Sem horario fixo',
+      description: '',
+      dueDate: null,
+      endDate: null,
+      preNoticeMinutes: null,
+      noTimeReminderMinutes: 150,
+    });
+
+    assert.equal(floatingCreated.dueDate, null);
+    assert.equal(floatingCreated.preNoticeMinutes, null);
+    assert.equal(floatingCreated.noTimeReminderMinutes, 150);
+
     const updated = updateTaskSchema.parse({
       status: 'completed',
       suppressHolidayNotifications: false,
+      preNoticeMinutes: null,
     });
 
     assert.equal(updated.status, 'completed');
     assert.equal(updated.suppressHolidayNotifications, false);
+    assert.equal(updated.preNoticeMinutes, null);
 
     const result = updateTaskSchema.safeParse({});
     assert.equal(result.success, false);
