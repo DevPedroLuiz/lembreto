@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AlertTriangle,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -37,11 +38,19 @@ interface CalendarPageProps {
   onToggle: (task: Task) => void;
   onDelete: (id: string, event: React.MouseEvent) => void;
   onEdit: (task: Task) => void;
+  onReschedule: (task: Task, dueDate: string, endDate: string | null) => void | Promise<void>;
   deletingTaskIds?: ReadonlySet<string>;
   togglingTaskIds?: ReadonlySet<string>;
 }
 
 const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+const DAY_START_HOUR = 0;
+const DAY_END_HOUR = 23;
+const DEFAULT_TASK_DURATION_MINUTES = 30;
+const DAY_HOUR_BLOCKS = Array.from(
+  { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
+  (_, index) => DAY_START_HOUR + index,
+);
 
 const PRIORITY_LABELS: Record<Priority, string> = {
   low: 'Baixa',
@@ -86,6 +95,83 @@ function parseTaskDate(task: Task): Date | null {
   } catch {
     return null;
   }
+}
+
+function parseTaskEndDate(task: Task): Date | null {
+  if (!task.endDate) return null;
+
+  try {
+    const date = parseISO(task.endDate);
+    return Number.isNaN(date.getTime()) ? null : date;
+  } catch {
+    return null;
+  }
+}
+
+function getTaskTimeRange(task: Task): { start: Date; end: Date } | null {
+  const start = parseTaskDate(task);
+  if (!start) return null;
+
+  const parsedEnd = parseTaskEndDate(task);
+  const end = parsedEnd && parsedEnd > start
+    ? parsedEnd
+    : new Date(start.getTime() + DEFAULT_TASK_DURATION_MINUTES * 60 * 1000);
+
+  return { start, end };
+}
+
+function buildTaskDateAtHour(date: Date, hour: number, sourceTask: Task): { dueDate: string; endDate: string | null } | null {
+  const sourceRange = getTaskTimeRange(sourceTask);
+  if (!sourceRange) return null;
+
+  const nextDueDate = new Date(date);
+  nextDueDate.setHours(hour, sourceRange.start.getMinutes(), 0, 0);
+
+  const durationMs = sourceRange.end.getTime() - sourceRange.start.getTime();
+  const nextEndDate = new Date(nextDueDate.getTime() + durationMs);
+
+  return {
+    dueDate: nextDueDate.toISOString(),
+    endDate: sourceTask.endDate ? nextEndDate.toISOString() : null,
+  };
+}
+
+function findConflictingTaskIds(tasks: Task[]): Set<string> {
+  const grouped = new Map<string, Array<{ task: Task; start: Date; end: Date }>>();
+
+  tasks.forEach((task) => {
+    const range = getTaskTimeRange(task);
+    if (!range) return;
+
+    const key = formatDateKey(range.start);
+    const current = grouped.get(key) ?? [];
+    current.push({ task, ...range });
+    grouped.set(key, current);
+  });
+
+  const conflictingIds = new Set<string>();
+
+  grouped.forEach((dayRanges) => {
+    const sorted = [...dayRanges].sort((left, right) => left.start.getTime() - right.start.getTime());
+    if (sorted.length === 0) return;
+
+    let latestOpenRange = sorted[0];
+
+    for (let index = 1; index < sorted.length; index += 1) {
+      const current = sorted[index];
+
+      if (latestOpenRange.end > current.start) {
+        conflictingIds.add(latestOpenRange.task.id);
+        conflictingIds.add(current.task.id);
+      }
+
+      if (current.end > latestOpenRange.end) {
+        latestOpenRange = current;
+      }
+    }
+  });
+
+  return conflictingIds;
 }
 
 function addCalendarDays(date: Date, days: number): Date {
@@ -237,6 +323,7 @@ export function CalendarPage({
   onToggle,
   onDelete,
   onEdit,
+  onReschedule,
   deletingTaskIds,
   togglingTaskIds,
 }: CalendarPageProps) {
@@ -250,6 +337,7 @@ export function CalendarPage({
   const [priorityFilter, setPriorityFilter] = React.useState<PriorityFilter>('all');
   const [categoryFilter, setCategoryFilter] = React.useState('Todas');
   const [tagFilter, setTagFilter] = React.useState('Todas');
+  const [draggedTaskId, setDraggedTaskId] = React.useState<string | null>(null);
 
   const availableTags = React.useMemo(() => buildAvailableTags(tags, tasks), [tags, tasks]);
   const calendarDays = React.useMemo(() => buildCalendarDays(cursorDate), [cursorDate]);
@@ -282,6 +370,8 @@ export function CalendarPage({
     return grouped;
   }, [filteredTasks]);
 
+  const conflictingTaskIds = React.useMemo(() => findConflictingTaskIds(filteredTasks), [filteredTasks]);
+
   const timelineGroups = React.useMemo<TimelineGroup[]>(
     () =>
       Array.from(tasksByDay.entries())
@@ -302,6 +392,25 @@ export function CalendarPage({
   const dayTimelineDateValue = dayTimelineDate ?? selectedDate;
   const dayTimelineKey = formatDateKey(dayTimelineDateValue);
   const dayTimelineTasks = tasksByDay.get(dayTimelineKey) ?? [];
+  const dayTimelineConflicts = dayTimelineTasks.filter((task) => conflictingTaskIds.has(task.id));
+  const dayTimelineTasksByHour = React.useMemo(() => {
+    const grouped = new Map<number, Task[]>();
+
+    dayTimelineTasks.forEach((task) => {
+      const dueDate = parseTaskDate(task);
+      if (!dueDate) return;
+      const hour = dueDate.getHours();
+      const current = grouped.get(hour) ?? [];
+      current.push(task);
+      grouped.set(hour, current);
+    });
+
+    grouped.forEach((hourTasks, hour) => {
+      grouped.set(hour, [...hourTasks].sort(compareTasksByDueDate));
+    });
+
+    return grouped;
+  }, [dayTimelineTasks]);
   const dayTimelinePendingCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'pending').length;
   const dayTimelineOverdueCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
   const dayTimelineCompletedCount = dayTimelineTasks.filter((task) => getDerivedTaskStatus(task) === 'completed').length;
@@ -353,6 +462,19 @@ export function CalendarPage({
     setPriorityFilter('all');
     setCategoryFilter('Todas');
     setTagFilter('Todas');
+  };
+
+  const handleTaskDrop = (date: Date, hour: number) => {
+    if (!draggedTaskId) return;
+
+    const task = tasks.find((item) => item.id === draggedTaskId);
+    setDraggedTaskId(null);
+    if (!task) return;
+
+    const nextDates = buildTaskDateAtHour(date, hour, task);
+    if (!nextDates) return;
+
+    void onReschedule(task, nextDates.dueDate, nextDates.endDate);
   };
 
   const filtersPanel = (
@@ -720,10 +842,18 @@ export function CalendarPage({
                     <div className="mt-1.5 hidden space-y-1 sm:mt-2 sm:block">
                       {dayTasks.slice(0, 3).map((task) => {
                         const timeLabel = getTaskTimeLabel(task.dueDate);
+                        const hasConflict = conflictingTaskIds.has(task.id);
                         return (
                           <button
                             key={task.id}
                             type="button"
+                            draggable
+                            onDragStart={(event) => {
+                              event.stopPropagation();
+                              setDraggedTaskId(task.id);
+                              event.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onDragEnd={() => setDraggedTaskId(null)}
                             onClick={(event) => {
                               event.stopPropagation();
                               onEdit(task);
@@ -734,11 +864,14 @@ export function CalendarPage({
                               getDerivedTaskStatus(task) === 'completed'
                                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700 line-through dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
                                 : getDerivedTaskStatus(task) === 'overdue'
-                                  ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
-                                : PRIORITY_STYLES[task.priority],
+                                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300'
+                                : hasConflict
+                                  ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+                                  : PRIORITY_STYLES[task.priority],
                             )}
                             title={task.title}
                           >
+                            {hasConflict ? 'Conflito · ' : ''}
                             {timeLabel ? `${timeLabel} ` : ''}
                             {task.title}
                           </button>
@@ -837,29 +970,85 @@ export function CalendarPage({
                 </div>
               </div>
 
-              {dayTimelineTasks.length > 0 ? (
-                <div className="relative border-l border-slate-200 pl-4 dark:border-white/10">
-                  <div className="space-y-3">
-                    {dayTimelineTasks.map((task) => (
-                      <div key={task.id} className="relative">
-                        <span className="absolute -left-[21px] top-5 h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)] dark:border-slate-950" />
-                        <TaskItem
-                          task={task}
-                          onToggle={onToggle}
-                          onDelete={onDelete}
-                          onEdit={onEdit}
-                          showToggleControl
-                          compact
-                          isDeleting={deletingTaskIds?.has(task.id)}
-                          isToggling={togglingTaskIds?.has(task.id)}
-                        />
-                      </div>
-                    ))}
+              {dayTimelineConflicts.length > 0 && (
+                <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                  <span className="icon-slot mt-0.5 h-8 w-8 rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                    <AlertTriangle size={16} />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {dayTimelineConflicts.length} lembrete{dayTimelineConflicts.length === 1 ? '' : 's'} com conflito de horário
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-100/75">
+                      Arraste um lembrete para outro bloco de horário para reagendar mantendo a duração.
+                    </p>
                   </div>
                 </div>
-              ) : (
-                <EmptyDayState onNewTask={onNewTask} />
               )}
+
+              <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50/70 dark:border-white/10 dark:bg-white/[0.03]">
+                {DAY_HOUR_BLOCKS.map((hour) => {
+                  const hourTasks = dayTimelineTasksByHour.get(hour) ?? [];
+
+                  return (
+                    <div
+                      key={hour}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={() => handleTaskDrop(dayTimelineDateValue, hour)}
+                      className={cn(
+                        'grid min-h-[92px] gap-3 border-b border-slate-200/80 p-3 transition-colors last:border-b-0 dark:border-white/10 sm:grid-cols-[82px_minmax(0,1fr)]',
+                        draggedTaskId && 'bg-blue-50/55 dark:bg-blue-500/[0.06]',
+                      )}
+                    >
+                      <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                        {`${hour}`.padStart(2, '0')}:00
+                      </div>
+
+                      {hourTasks.length > 0 ? (
+                        <div className="space-y-3">
+                          {hourTasks.map((task) => {
+                            const hasConflict = conflictingTaskIds.has(task.id);
+
+                            return (
+                              <div
+                                key={task.id}
+                                draggable
+                                onDragStart={(event) => {
+                                  setDraggedTaskId(task.id);
+                                  event.dataTransfer.effectAllowed = 'move';
+                                }}
+                                onDragEnd={() => setDraggedTaskId(null)}
+                                className={cn(
+                                  'rounded-[20px] transition-transform hover:-translate-y-0.5',
+                                  hasConflict && 'ring-2 ring-amber-300/70 dark:ring-amber-400/30',
+                                )}
+                              >
+                                <TaskItem
+                                  task={task}
+                                  onToggle={onToggle}
+                                  onDelete={onDelete}
+                                  onEdit={onEdit}
+                                  showToggleControl
+                                  compact
+                                  isDeleting={deletingTaskIds?.has(task.id)}
+                                  isToggling={togglingTaskIds?.has(task.id)}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[44px] items-center rounded-2xl border border-dashed border-slate-200 bg-white/70 px-3 text-xs font-semibold text-slate-400 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-500">
+                          Solte aqui para mover para {`${hour}`.padStart(2, '0')}:00
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </section>
           ) : (
             <section className="surface-panel p-5 md:p-6">

@@ -1,14 +1,29 @@
-export type RecurrenceMode = 'daily' | 'weekdays' | 'weekends' | 'weekly';
+export type RecurrenceMode =
+  | 'daily'
+  | 'weekdays'
+  | 'weekends'
+  | 'weekly'
+  | 'custom_weekdays'
+  | 'monthly'
+  | 'last_business_day';
 export type RecurrenceSuggestion = 'weekdays' | 'weekends' | 'month' | 'weekly' | 'next7Days';
+export type RecurrenceWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export const MAX_RECURRENCE_OCCURRENCES = 120;
+export const MAX_RECURRENCE_WINDOW_DAYS = 730;
 
 type RecurrenceValidationInput = {
   isEditing: boolean;
   enabled: boolean;
+  mode: RecurrenceMode;
   startDateValue: string;
   endDateValue: string;
   occurrenceCount: number;
+  selectedWeekdays?: readonly number[];
+};
+
+type RecurrenceBuildOptions = {
+  selectedWeekdays?: readonly number[];
 };
 
 function parseDateOnly(dateValue: string): Date | null {
@@ -26,38 +41,70 @@ function formatDateOnly(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function formatDisplayDate(date: Date): string {
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
 function addDays(date: Date, amount: number): Date {
   const next = new Date(date);
   next.setDate(next.getDate() + amount);
   return next;
 }
 
+function addMonths(date: Date, amount: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1, 12, 0, 0, 0);
+}
+
 function endOfMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0, 12, 0, 0, 0);
 }
 
-function getUtcDateOnlyTime(date: Date): number {
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+function getDaysInMonth(date: Date): number {
+  return endOfMonth(date).getDate();
 }
 
-function getDaysSince(startDate: Date, date: Date): number {
-  const millisecondsPerDay = 24 * 60 * 60 * 1000;
-  return Math.round((getUtcDateOnlyTime(date) - getUtcDateOnlyTime(startDate)) / millisecondsPerDay);
-}
+function getLastBusinessDayOfMonth(date: Date): Date {
+  const lastDay = endOfMonth(date);
 
-function matchesRecurrence(date: Date, mode: RecurrenceMode, startDate: Date): boolean {
-  const day = date.getDay();
-
-  switch (mode) {
-    case 'daily':
-      return true;
-    case 'weekdays':
-      return day >= 1 && day <= 5;
-    case 'weekends':
-      return day === 0 || day === 6;
-    case 'weekly':
-      return getDaysSince(startDate, date) % 7 === 0;
+  while (lastDay.getDay() === 0 || lastDay.getDay() === 6) {
+    lastDay.setDate(lastDay.getDate() - 1);
   }
+
+  return lastDay;
+}
+
+function buildMonthlyOccurrence(startDate: Date, monthOffset: number): Date {
+  const monthAnchor = addMonths(startDate, monthOffset);
+  const day = Math.min(startDate.getDate(), getDaysInMonth(monthAnchor));
+  return new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), day, 12, 0, 0, 0);
+}
+
+function sanitizeWeekdays(weekdays: readonly number[] = []): RecurrenceWeekday[] {
+  const validWeekdays = new Set<RecurrenceWeekday>();
+
+  weekdays.forEach((weekday) => {
+    if (Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) {
+      validWeekdays.add(weekday as RecurrenceWeekday);
+    }
+  });
+
+  const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
+  return Array.from(validWeekdays).sort((left, right) => weekdayOrder.indexOf(left) - weekdayOrder.indexOf(right));
+}
+
+function pushDateWithinLimit(dates: string[], date: Date, endDate: Date, limit: number): boolean {
+  if (date <= endDate) {
+    dates.push(formatDateOnly(date));
+  }
+
+  return dates.length >= limit;
+}
+
+export function getRecurrenceDateLimit(startDateValue: string): string | null {
+  const startDate = parseDateOnly(startDateValue);
+  return startDate ? formatDateOnly(addDays(startDate, MAX_RECURRENCE_WINDOW_DAYS)) : null;
 }
 
 export function buildRecurringDates(
@@ -65,19 +112,52 @@ export function buildRecurringDates(
   endDateValue: string,
   mode: RecurrenceMode,
   limit = MAX_RECURRENCE_OCCURRENCES + 1,
+  options: RecurrenceBuildOptions = {},
 ): string[] {
   const startDate = parseDateOnly(startDateValue);
-  const endDate = parseDateOnly(endDateValue);
+  const requestedEndDate = parseDateOnly(endDateValue);
 
-  if (!startDate || !endDate || endDate < startDate) return [];
+  if (!startDate || !requestedEndDate || requestedEndDate < startDate) return [];
 
+  const maxEndDate = addDays(startDate, MAX_RECURRENCE_WINDOW_DAYS);
+  const endDate = requestedEndDate > maxEndDate ? maxEndDate : requestedEndDate;
   const dates: string[] = [];
 
-  for (let current = new Date(startDate); current <= endDate; current = addDays(current, 1)) {
-    if (matchesRecurrence(current, mode, startDate)) {
-      dates.push(formatDateOnly(current));
-      if (dates.length >= limit) break;
+  if (mode === 'weekly') {
+    for (let current = new Date(startDate); current <= endDate; current = addDays(current, 7)) {
+      if (pushDateWithinLimit(dates, current, endDate, limit)) break;
     }
+    return dates;
+  }
+
+  if (mode === 'monthly') {
+    for (let offset = 0; ; offset += 1) {
+      const current = buildMonthlyOccurrence(startDate, offset);
+      if (current > endDate) break;
+      if (current >= startDate && pushDateWithinLimit(dates, current, endDate, limit)) break;
+    }
+    return dates;
+  }
+
+  if (mode === 'last_business_day') {
+    for (let offset = 0; ; offset += 1) {
+      const current = getLastBusinessDayOfMonth(addMonths(startDate, offset));
+      if (current > endDate) break;
+      if (current >= startDate && pushDateWithinLimit(dates, current, endDate, limit)) break;
+    }
+    return dates;
+  }
+
+  const selectedWeekdays = sanitizeWeekdays(options.selectedWeekdays);
+
+  for (let current = new Date(startDate); current <= endDate; current = addDays(current, 1)) {
+    const weekday = current.getDay() as RecurrenceWeekday;
+    const matches = mode === 'daily'
+      || (mode === 'weekdays' && weekday >= 1 && weekday <= 5)
+      || (mode === 'weekends' && (weekday === 0 || weekday === 6))
+      || (mode === 'custom_weekdays' && selectedWeekdays.includes(weekday));
+
+    if (matches && pushDateWithinLimit(dates, current, endDate, limit)) break;
   }
 
   return dates;
@@ -86,14 +166,30 @@ export function buildRecurringDates(
 export function getRecurrenceValidationError({
   isEditing,
   enabled,
+  mode,
   startDateValue,
   endDateValue,
   occurrenceCount,
+  selectedWeekdays = [],
 }: RecurrenceValidationInput): string {
   if (isEditing || !enabled) return '';
-  if (!startDateValue) return '';
+
+  const startDate = parseDateOnly(startDateValue);
+  const endDate = parseDateOnly(endDateValue);
+  if (!startDate) return 'Defina a data inicial antes de ativar a repetição.';
   if (!endDateValue) return 'Defina a data final da repetição.';
-  if (endDateValue < startDateValue) return 'A repetição precisa terminar na mesma data ou depois do início.';
+  if (!endDate) return 'A data final da repetição é inválida.';
+  if (endDate < startDate) return 'A repetição precisa terminar na mesma data ou depois do início.';
+
+  const maxEndDate = addDays(startDate, MAX_RECURRENCE_WINDOW_DAYS);
+  if (endDate > maxEndDate) {
+    return `A repetição pode cobrir no máximo ${MAX_RECURRENCE_WINDOW_DAYS} dias. Use até ${formatDisplayDate(maxEndDate)}.`;
+  }
+
+  if (mode === 'custom_weekdays' && sanitizeWeekdays(selectedWeekdays).length === 0) {
+    return 'Escolha pelo menos um dia da semana para essa repetição.';
+  }
+
   if (occurrenceCount === 0) return 'Nenhuma data do intervalo corresponde a esse padrão de repetição.';
   if (occurrenceCount > MAX_RECURRENCE_OCCURRENCES) {
     return `Reduza o intervalo para no máximo ${MAX_RECURRENCE_OCCURRENCES} lembretes por criação.`;

@@ -18,7 +18,14 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
-import { getRecurrenceSuggestion, type RecurrenceMode, type RecurrenceSuggestion } from '../lib/taskRecurrence';
+import {
+  getRecurrenceSuggestion,
+  MAX_RECURRENCE_OCCURRENCES,
+  MAX_RECURRENCE_WINDOW_DAYS,
+  type RecurrenceMode,
+  type RecurrenceSuggestion,
+  type RecurrenceWeekday,
+} from '../lib/taskRecurrence';
 import { parsePortugueseVoiceReminder } from '../lib/voiceReminder';
 import type { Priority, Task, TaskOverdueReminderIntensity } from '../types';
 
@@ -27,6 +34,19 @@ const RECURRENCE_MODE_OPTIONS: Array<{ value: RecurrenceMode; label: string }> =
   { value: 'weekdays', label: 'De segunda a sexta' },
   { value: 'weekends', label: 'Apenas fins de semana' },
   { value: 'weekly', label: 'Uma vez por semana' },
+  { value: 'custom_weekdays', label: 'Dias específicos da semana' },
+  { value: 'monthly', label: 'Mensal' },
+  { value: 'last_business_day', label: 'Último dia útil' },
+];
+
+const RECURRENCE_WEEKDAY_OPTIONS: Array<{ value: RecurrenceWeekday; label: string }> = [
+  { value: 1, label: 'Seg' },
+  { value: 2, label: 'Ter' },
+  { value: 3, label: 'Qua' },
+  { value: 4, label: 'Qui' },
+  { value: 5, label: 'Sex' },
+  { value: 6, label: 'Sáb' },
+  { value: 0, label: 'Dom' },
 ];
 
 const RECURRENCE_SUGGESTIONS: Array<{
@@ -179,8 +199,11 @@ interface TaskDrawerProps {
   setRecurrenceEnabled: (value: boolean) => void;
   recurrenceMode: RecurrenceMode;
   setRecurrenceMode: (value: RecurrenceMode) => void;
+  recurrenceWeekdays: RecurrenceWeekday[];
+  setRecurrenceWeekdays: (value: RecurrenceWeekday[]) => void;
   recurrenceUntil: string;
   setRecurrenceUntil: (value: string) => void;
+  recurrenceMaxDate?: string | null;
   suppressHolidayNotifications: boolean;
   setSuppressHolidayNotifications: (value: boolean) => void;
   overdueReminderIntensity: TaskOverdueReminderIntensity;
@@ -191,6 +214,7 @@ interface TaskDrawerProps {
   setPreNoticeMinutes: (value: number) => void;
   recurrenceError?: string;
   recurrencePreviewCount?: number;
+  recurrencePreviewDates?: string[];
   holidaySuppressedCount?: number;
   onApplyRecurrenceSuggestion: (suggestion: RecurrenceSuggestion) => void;
 }
@@ -204,6 +228,12 @@ function normalizeSearchValue(value: string) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('pt-BR');
+}
+
+function formatPreviewDate(dateValue: string): string {
+  const [year, month, day] = dateValue.split('-');
+  if (!year || !month || !day) return dateValue;
+  return `${day}/${month}/${year}`;
 }
 
 function isEditableFormElement(element: Element | null): element is HTMLElement {
@@ -383,8 +413,11 @@ export function TaskDrawer({
   setRecurrenceEnabled,
   recurrenceMode,
   setRecurrenceMode,
+  recurrenceWeekdays,
+  setRecurrenceWeekdays,
   recurrenceUntil,
   setRecurrenceUntil,
+  recurrenceMaxDate,
   suppressHolidayNotifications,
   setSuppressHolidayNotifications,
   overdueReminderIntensity,
@@ -395,6 +428,7 @@ export function TaskDrawer({
   setPreNoticeMinutes,
   recurrenceError = '',
   recurrencePreviewCount = 0,
+  recurrencePreviewDates = [],
   holidaySuppressedCount = 0,
   onApplyRecurrenceSuggestion,
 }: TaskDrawerProps) {
@@ -580,6 +614,27 @@ export function TaskDrawer({
     },
     [date, recurrenceEnabled, recurrenceMode, recurrenceUntil],
   );
+
+  const handleRecurrenceModeChange = React.useCallback((nextMode: RecurrenceMode) => {
+    setRecurrenceMode(nextMode);
+
+    if (nextMode === 'custom_weekdays' && recurrenceWeekdays.length === 0) {
+      const [year, month, day] = date.split('-').map(Number);
+      const initialDate = year && month && day ? new Date(year, month - 1, day) : null;
+      const initialWeekday = initialDate && !Number.isNaN(initialDate.getTime())
+        ? initialDate.getDay()
+        : 1;
+      setRecurrenceWeekdays([initialWeekday as RecurrenceWeekday]);
+    }
+  }, [date, recurrenceWeekdays.length, setRecurrenceMode, setRecurrenceWeekdays]);
+
+  const toggleRecurrenceWeekday = React.useCallback((weekday: RecurrenceWeekday) => {
+    setRecurrenceWeekdays(
+      recurrenceWeekdays.includes(weekday)
+        ? recurrenceWeekdays.filter((current) => current !== weekday)
+        : [...recurrenceWeekdays, weekday],
+    );
+  }, [recurrenceWeekdays, setRecurrenceWeekdays]);
 
   const addTag = React.useCallback(
     (value: string) => {
@@ -1271,7 +1326,7 @@ export function TaskDrawer({
                                       value={recurrenceMode}
                                       disabled={isSubmitting}
                                       data-testid="task-recurrence-mode"
-                                      onChange={(event) => setRecurrenceMode(event.target.value as RecurrenceMode)}
+                                      onChange={(event) => handleRecurrenceModeChange(event.target.value as RecurrenceMode)}
                                       className="field-control cursor-pointer"
                                     >
                                       {RECURRENCE_MODE_OPTIONS.map((option) => (
@@ -1287,6 +1342,7 @@ export function TaskDrawer({
                                     <input
                                       type="date"
                                       min={date || minimumDate}
+                                      max={recurrenceMaxDate ?? undefined}
                                       value={recurrenceUntil}
                                       disabled={isSubmitting}
                                       data-testid="task-recurrence-until"
@@ -1298,8 +1354,54 @@ export function TaskDrawer({
                                           'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:focus:border-rose-400',
                                       )}
                                     />
+                                    <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                                      {recurrenceMaxDate
+                                        ? `Máximo recomendado: ${formatPreviewDate(recurrenceMaxDate)}.`
+                                        : 'Defina a data inicial para liberar o limite automático.'}
+                                    </p>
                                   </div>
                                 </div>
+
+                                {recurrenceMode === 'custom_weekdays' && (
+                                  <div className="mt-4">
+                                    <FieldLabel>Dias da semana</FieldLabel>
+                                    <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                                      {RECURRENCE_WEEKDAY_OPTIONS.map((weekday) => {
+                                        const active = recurrenceWeekdays.includes(weekday.value);
+
+                                        return (
+                                          <button
+                                            key={weekday.value}
+                                            type="button"
+                                            disabled={isSubmitting}
+                                            onClick={() => toggleRecurrenceWeekday(weekday.value)}
+                                            aria-pressed={active}
+                                            className={cn(
+                                              'h-10 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                                              active
+                                                ? 'bg-blue-600 text-white shadow-[0_12px_24px_-18px_rgba(37,99,235,0.78)]'
+                                                : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.09]',
+                                            )}
+                                          >
+                                            {weekday.label}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {recurrenceMode === 'monthly' && (
+                                  <p className="mt-4 rounded-2xl border border-blue-200 bg-blue-50/70 p-3 text-xs leading-5 text-blue-900 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-100">
+                                    Repete todo mês no mesmo dia. Quando o mês for mais curto, usa o último dia disponível.
+                                  </p>
+                                )}
+
+                                {recurrenceMode === 'last_business_day' && (
+                                  <p className="mt-4 rounded-2xl border border-blue-200 bg-blue-50/70 p-3 text-xs leading-5 text-blue-900 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-100">
+                                    Cria lembretes no último dia útil de cada mês, considerando fins de semana.
+                                  </p>
+                                )}
                               </div>
 
                               <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.04]">
@@ -1313,7 +1415,9 @@ export function TaskDrawer({
                                       className="text-sm font-semibold text-slate-900 dark:text-white"
                                     >
                                       {recurrencePreviewCount > 0
-                                        ? recurrencePreviewCount === 1
+                                        ? recurrencePreviewCount > MAX_RECURRENCE_OCCURRENCES
+                                          ? `Mais de ${MAX_RECURRENCE_OCCURRENCES} lembretes no intervalo`
+                                          : recurrencePreviewCount === 1
                                           ? '1 lembrete será criado'
                                           : `${recurrencePreviewCount} lembretes serão criados`
                                         : 'Defina o intervalo para gerar seus lembretes'}
@@ -1327,6 +1431,38 @@ export function TaskDrawer({
                                     >
                                       {recurrenceError || 'A prévia muda automaticamente conforme a regra escolhida.'}
                                     </p>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Limites</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
+                                      Até {MAX_RECURRENCE_OCCURRENCES} lembretes
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                                      Janela máxima de {MAX_RECURRENCE_WINDOW_DAYS} dias por criação.
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Primeiras datas</p>
+                                    {recurrencePreviewDates.length > 0 ? (
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {recurrencePreviewDates.map((dateValue) => (
+                                          <span
+                                            key={dateValue}
+                                            className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300"
+                                          >
+                                            {formatPreviewDate(dateValue)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                                        A prévia aparece após escolher início e fim.
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1450,7 +1586,14 @@ export function TaskDrawer({
                                   ))}
                                 </div>
                                 <div className="mt-3">
+                                  <label
+                                    htmlFor="task-pre-notice-minutes-input"
+                                    className="mb-2 block text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500"
+                                  >
+                                    Personalizado
+                                  </label>
                                   <input
+                                    id="task-pre-notice-minutes-input"
                                     type="number"
                                     min={1}
                                     max={1440}
@@ -1466,6 +1609,9 @@ export function TaskDrawer({
                                     data-testid="task-pre-notice-minutes-input"
                                     aria-label="Minutos de antecedência do pré-aviso"
                                   />
+                                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                                    Use 5, 10, 15, 30 minutos ou informe outro valor.
+                                  </p>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]">
@@ -1589,6 +1735,8 @@ export function TaskDrawer({
                         'Adicionar lembrete'
                       ) : isEditing ? (
                         'Salvar alterações'
+                      ) : recurrenceError ? (
+                        'Ajuste a repetição'
                       ) : recurrenceEnabled && recurrencePreviewCount > 1 ? (
                         `Criar ${recurrencePreviewCount} lembretes`
                       ) : (

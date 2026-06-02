@@ -15,9 +15,14 @@ import {
   markAllNotificationsRead,
   markNotificationReadState,
   NotificationReferenceUnavailableError,
+  retryTemporaryPushDeliveries,
   setNotificationsEnabled,
   upsertPushSubscription,
 } from '../notifications.js';
+import {
+  getNotificationPreferences,
+  setNotificationPreferences,
+} from '../notification-preferences.js';
 import {
   backfillMissingNotificationSchedules,
   cancelPendingNotificationSchedulesForUser,
@@ -82,6 +87,7 @@ const USER_DUE_SCHEDULE_LIMIT = 5;
 const USER_DUE_SCHEDULE_DURATION_MS = 3500;
 const USER_NOTIFICATION_SIDE_EFFECT_LIMIT = 3;
 const USER_NOTIFICATION_SIDE_EFFECT_DURATION_MS = 2500;
+const DEFAULT_SCHEDULE_BACKLOG_ALERT_THRESHOLD = 10;
 
 type BackfillSummary = Awaited<ReturnType<typeof backfillMissingNotificationSchedules>> & {
   stoppedByTimeLimit?: boolean;
@@ -110,6 +116,7 @@ type CronDbHealth = {
     schedulesPendingMs: number | null;
     schedulesDueMs: number | null;
     schedulesProcessingMs: number | null;
+    missingScheduleCandidatesMs: number | null;
     tasksPendingMs: number | null;
     overdueCandidatesMs: number | null;
   };
@@ -123,6 +130,7 @@ type CronDbHealth = {
     schedulesDueByKind: ScheduleKindCounts;
     schedulesProcessing: number | null;
     schedulesStuckProcessing: number | null;
+    missingScheduleCandidates: number | null;
     tasksPending: number | null;
     overdueCandidates: number | null;
   };
@@ -144,7 +152,7 @@ type SideEffectKindCounts = Record<string, number>;
 
 type CronBacklogWarning = {
   message: string;
-  kind: 'has_more' | 'schedule_backlog' | 'side_effect_backlog' | 'calendar_backlog' | 'overdue_backlog';
+  kind: 'has_more' | 'schedule_backlog' | 'side_effect_backlog' | 'backfill_backlog' | 'calendar_backlog' | 'overdue_backlog';
   dueCount?: number;
   processedCount?: number;
   limit?: number;
@@ -195,6 +203,13 @@ function getCronResponseBudgetMs() {
 function getDbHealthQueryTimeoutMs() {
   const configured = Number(process.env.CRON_DB_HEALTH_QUERY_TIMEOUT_MS ?? DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_DB_HEALTH_QUERY_TIMEOUT_MS;
+}
+
+function getScheduleBacklogAlertThreshold() {
+  const configured = Number(process.env.CRON_SCHEDULE_BACKLOG_ALERT_THRESHOLD ?? DEFAULT_SCHEDULE_BACKLOG_ALERT_THRESHOLD);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_SCHEDULE_BACKLOG_ALERT_THRESHOLD;
 }
 
 function emptyScheduleKindCounts(): ScheduleKindCounts {
@@ -468,14 +483,16 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
     if ('error' in options) return json(400, { error: options.error });
 
     try {
-      const [page, enabled] = await Promise.all([
+      const [page, enabled, preferences] = await Promise.all([
         listNotificationsForUser(sql, user.id, options),
         getNotificationsEnabled(sql, user.id),
+        getNotificationPreferences(sql, user.id),
       ]);
       return json(200, {
         notifications: page.notifications,
         pageInfo: page.pageInfo,
         enabled,
+        preferences,
         pushConfigured: isPushConfigured(),
         pushPublicKey: getPushPublicKey(),
       });
@@ -574,9 +591,11 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       );
       addScheduleSummaries(schedules, postSideEffectSchedules);
     }
-    const [page, enabled] = await Promise.all([
+    const pushRetries = await retryTemporaryPushDeliveries(sql, 5);
+    const [page, enabled, preferences] = await Promise.all([
       listNotificationsForUser(sql, user.id),
       getNotificationsEnabled(sql, user.id),
+      getNotificationPreferences(sql, user.id),
     ]);
 
     logInfo('notifications_user_due_processed', getRequestMeta(request, {
@@ -587,6 +606,7 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       failed: schedules.failedSchedules,
       sideEffectsProcessed: sideEffects.processed,
       sideEffectsDone: sideEffects.done,
+      pushRetries,
       durationMs: schedules.durationMs,
     }));
 
@@ -594,9 +614,11 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       ok: true,
       schedules,
       sideEffects,
+      pushRetries,
       notifications: page.notifications,
       pageInfo: page.pageInfo,
       enabled,
+      preferences,
       pushConfigured: isPushConfigured(),
       pushPublicKey: getPushPublicKey(),
     });
@@ -703,9 +725,13 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
 
   if (request.method === 'GET') {
     try {
-      const enabled = await getNotificationsEnabled(sql, user.id);
+      const [enabled, preferences] = await Promise.all([
+        getNotificationsEnabled(sql, user.id),
+        getNotificationPreferences(sql, user.id),
+      ]);
       return json(200, {
         enabled,
+        preferences,
         pushConfigured: isPushConfigured(),
         pushPublicKey: getPushPublicKey(),
       });
@@ -718,12 +744,18 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
   if (request.method === 'PUT') {
     const parsed = updateNotificationSettingsSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
-      return json(400, { error: 'Envie o campo "enabled" com true ou false.' });
+      return json(400, { error: formatZodError(parsed.error) });
     }
 
     try {
-      await setNotificationsEnabled(sql, user.id, parsed.data.enabled);
-      if (!parsed.data.enabled) {
+      if (parsed.data.enabled !== undefined) {
+        await setNotificationsEnabled(sql, user.id, parsed.data.enabled);
+      }
+      const preferences = parsed.data.preferences
+        ? await setNotificationPreferences(sql, user.id, parsed.data.preferences)
+        : await getNotificationPreferences(sql, user.id);
+      const enabled = parsed.data.enabled ?? await getNotificationsEnabled(sql, user.id);
+      if (parsed.data.enabled === false) {
         try {
           await cancelPendingNotificationSchedulesForUser(sql, user.id, {
             reason: 'notifications_disabled',
@@ -733,8 +765,12 @@ export async function handleNotificationSettings(context: HandlerContext): Promi
           logError('notification_settings_cancel_schedules_failed', error, getRequestMeta(request, { userId: user.id }));
         }
       }
-      logInfo('notification_settings_updated', getRequestMeta(request, { userId: user.id, enabled: parsed.data.enabled }));
-      return json(200, { enabled: parsed.data.enabled });
+      logInfo('notification_settings_updated', getRequestMeta(request, {
+        userId: user.id,
+        enabled,
+        preferencesUpdated: Boolean(parsed.data.preferences),
+      }));
+      return json(200, { enabled, preferences });
     } catch (error) {
       logError('notification_settings_update_failed', error, getRequestMeta(request, { userId: user.id }));
       return json(500, { error: 'Erro ao salvar preferência de notificações' });
@@ -894,6 +930,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     schedulesDueByKind: emptyScheduleKindCounts(),
     schedulesProcessing: null,
     schedulesStuckProcessing: null,
+    missingScheduleCandidates: null,
     tasksPending: null,
     overdueCandidates: null,
   };
@@ -906,6 +943,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     schedulesPendingMs: null,
     schedulesDueMs: null,
     schedulesProcessingMs: null,
+    missingScheduleCandidatesMs: null,
     tasksPendingMs: null,
     overdueCandidatesMs: null,
   };
@@ -924,6 +962,7 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
     steps.schedulesDue = skippedStep();
     steps.schedulesDueByKind = skippedStep();
     steps.schedulesProcessing = skippedStep();
+    steps.missingScheduleCandidates = skippedStep();
     steps.tasksPending = skippedStep();
     steps.overdueCandidates = skippedStep();
     return {
@@ -1065,6 +1104,30 @@ async function runCronDbHealth(sql: HandlerContext['sql'], options: { includeLoc
   db.schedulesProcessingMs = schedulesProcessing.step.durationMs;
   counts.schedulesProcessing = schedulesProcessing.step.ok ? toCount(schedulesProcessing.rows[0]?.processingCount) : null;
   counts.schedulesStuckProcessing = schedulesProcessing.step.ok ? toCount(schedulesProcessing.rows[0]?.stuckProcessingCount) : null;
+
+  const missingScheduleCandidates = await measureQuery(
+    'missing_schedule_candidates',
+    () => sql`
+      SELECT COUNT(*) AS count
+      FROM tasks
+      WHERE tasks.deleted_at IS NULL
+        AND tasks.status = 'pending'
+        AND (
+          tasks.due_date IS NULL
+          OR tasks.due_date >= NOW()
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM notification_schedules existing_schedule
+          WHERE existing_schedule.user_id = tasks.user_id
+            AND existing_schedule.task_id = tasks.id
+            AND existing_schedule.status IN ('pending', 'processing')
+        )
+    `,
+  );
+  steps.missingScheduleCandidates = missingScheduleCandidates.step;
+  db.missingScheduleCandidatesMs = missingScheduleCandidates.step.durationMs;
+  counts.missingScheduleCandidates = missingScheduleCandidates.step.ok ? toCount(missingScheduleCandidates.rows[0]?.count) : null;
 
   const tasksPending = await measureQuery(
     'tasks_pending',
@@ -1238,6 +1301,8 @@ function buildCronBacklogWarnings(input: {
   notificationSideEffectsProcessed: number;
   calendarSideEffectsDue: number;
   calendarSideEffectsProcessed: number;
+  backfillCandidates: number;
+  backfilledSchedules: number;
   overdueCandidates: number;
   overdueDetected: number;
 }): CronBacklogWarning[] {
@@ -1272,6 +1337,17 @@ function buildCronBacklogWarnings(input: {
     });
   }
 
+  if (input.backfillCandidates > BACKFILL_LIMIT || input.backfillCandidates > input.backfilledSchedules) {
+    warnings.push({
+      kind: 'backfill_backlog',
+      message: `Notification backfill backlog: ${input.backfillCandidates} reminders without active schedules before the run, ${input.backfilledSchedules} schedules recreated, limit ${BACKFILL_LIMIT}.`,
+      dueCount: input.backfillCandidates,
+      processedCount: input.backfilledSchedules,
+      limit: BACKFILL_LIMIT,
+      remainingEstimate: Math.max(0, input.backfillCandidates - input.backfilledSchedules),
+    });
+  }
+
   if (input.calendarSideEffectsDue > CALENDAR_SYNC_LIMIT || input.calendarSideEffectsDue > input.calendarSideEffectsProcessed) {
     warnings.push({
       kind: 'calendar_backlog',
@@ -1297,6 +1373,71 @@ function buildCronBacklogWarnings(input: {
   return input.stoppedByTimeLimit
     ? warnings.map((warning) => ({ ...warning, message: `${warning.message} The cron response budget was exhausted.` }))
     : warnings;
+}
+
+async function createScheduleBacklogInternalAlerts(
+  sql: HandlerContext['sql'],
+  input: {
+    dueCountBeforeRun: number;
+    processedCount: number;
+    threshold: number;
+  },
+) {
+  if (input.dueCountBeforeRun < input.threshold) return { scannedUsers: 0, created: 0, deduplicated: 0, threshold: input.threshold };
+
+  const rows = await sql`
+    SELECT
+      user_id AS "userId",
+      COUNT(*) AS "dueCount",
+      MIN(notify_at) AS "oldestNotifyAt"
+    FROM notification_schedules
+    WHERE status = 'pending'
+      AND notify_at <= NOW()
+      AND sent_at IS NULL
+      AND failed_at IS NULL
+      AND cancelled_at IS NULL
+    GROUP BY user_id
+    HAVING COUNT(*) >= ${input.threshold}
+    ORDER BY COUNT(*) DESC
+    LIMIT 20
+  `;
+
+  let created = 0;
+  let deduplicated = 0;
+  const hourKey = new Date().toISOString().slice(0, 13);
+
+  for (const row of rows) {
+    const userId = String(row.userId);
+    const dueCount = toCount(row.dueCount);
+    const oldestNotifyAt = row.oldestNotifyAt ? new Date(String(row.oldestNotifyAt)).toISOString() : null;
+    const result = await createNotification(sql, {
+      userId,
+      title: 'Fila de avisos em recuperação',
+      message: `${dueCount} avisos vencidos ainda nao foram processados. O sistema esta recriando e enviando a fila aos poucos.`,
+      tone: 'warning',
+      target: { type: 'notifications' },
+      dedupeKey: `internal:schedule-backlog:${userId}:${hourKey}`,
+      sendPush: false,
+    });
+    if (result.created) created += 1;
+    else deduplicated += 1;
+    logWarn('cron_notifications_internal_backlog_alert', {
+      userId,
+      dueCount,
+      oldestNotifyAt,
+      processedCount: input.processedCount,
+      threshold: input.threshold,
+      notificationId: result.notification.id,
+      created: result.created,
+    });
+  }
+
+  return {
+    scannedUsers: rows.length,
+    created,
+    deduplicated,
+    threshold: input.threshold,
+  };
 }
 
 export async function handleAlarmDismiss(context: HandlerContext): Promise<HandlerResult> {
@@ -1508,9 +1649,25 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       );
       addScheduleSummaries(result, postSideEffectSchedules);
     }
-    const maintenanceStagesEnabled = process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' && !dbHealth.slow;
+    const pushRetries = hasCronBudget(deadline)
+      ? await (() => {
+          const budgetMs = remainingBudgetMs(deadline, 2500);
+          return withTimeout(
+            retryTemporaryPushDeliveries(sql, 10),
+            budgetMs,
+            { scanned: 0, retried: 0, delivered: 0, failed: 0, skipped: 0 },
+            'retryTemporaryPushDeliveries',
+          );
+        })()
+      : { scanned: 0, retried: 0, delivered: 0, failed: 0, skipped: 0 };
+    const hasBackfillCandidates = (dbHealth.counts.missingScheduleCandidates ?? 0) > 0;
+    const maintenanceStagesEnabled = (process.env.CRON_ENABLE_MAINTENANCE_STAGES === 'true' || hasBackfillCandidates) && !dbHealth.slow;
     const hasOverdueCandidates = (dbHealth.counts.overdueCandidates ?? 0) > 0;
-    const dbHealthMaintenanceSkipReason = dbHealth.slow ? 'db_health_slow' : 'disabled_in_notification_cron';
+    const dbHealthMaintenanceSkipReason = dbHealth.slow
+      ? 'db_health_slow'
+      : hasBackfillCandidates
+        ? 'time_limit'
+        : 'disabled_in_notification_cron';
     const backfill = maintenanceStagesEnabled && hasCronBudget(deadline)
       ? await (() => {
           const budgetMs = remainingBudgetMs(deadline, BACKFILL_DURATION_MS);
@@ -1612,16 +1769,35 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       notificationSideEffectsProcessed: sideEffects.processed,
       calendarSideEffectsDue: externalCalendarSideEffectsDue,
       calendarSideEffectsProcessed: calendarSync.scanned,
+      backfillCandidates: dbHealth.counts.missingScheduleCandidates ?? 0,
+      backfilledSchedules: backfill.backfilledSchedules,
       overdueCandidates: dbHealth.counts.overdueCandidates ?? 0,
       overdueDetected: overdueDetection.detectedOverdueTasks,
     });
+    const internalAlerts = await withTimeout(
+      createScheduleBacklogInternalAlerts(sql, {
+        dueCountBeforeRun: effectiveScheduleDiagnostics.duePendingCount,
+        processedCount: result.processedSchedules,
+        threshold: getScheduleBacklogAlertThreshold(),
+      }),
+      remainingBudgetMs(deadline, 1000),
+      {
+        scannedUsers: 0,
+        created: 0,
+        deduplicated: 0,
+        threshold: getScheduleBacklogAlertThreshold(),
+      },
+      'createScheduleBacklogInternalAlerts',
+    );
     if (backlogWarnings.length > 0) {
       logWarn('cron_notifications_backlog_warning', getRequestMeta(request, {
         backlogWarnings,
+        internalAlerts,
         hasMore,
         stoppedByTimeLimit,
         schedules,
         sideEffects,
+        pushRetries,
         calendarSync,
         overdueDetection,
         scheduleDiagnostics: effectiveScheduleDiagnostics,
@@ -1633,8 +1809,10 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       stoppedByTimeLimit,
       hasMore,
       backlogWarnings,
+      internalAlerts,
       sideEffects,
       schedules,
+      pushRetries,
       dbHealth,
       scheduleDiagnostics: effectiveScheduleDiagnostics,
       sideEffectDiagnostics: effectiveSideEffectDiagnostics,
@@ -1652,9 +1830,11 @@ export async function handleNotificationsCron(context: HandlerContext): Promise<
       schedules,
       sideEffects,
       backfill,
+      pushRetries,
       calendarSync,
       overdueDetection,
       backlogWarnings,
+      internalAlerts,
       dbHealth,
       scheduleDiagnostics: effectiveScheduleDiagnostics,
       sideEffectDiagnostics: effectiveSideEffectDiagnostics,

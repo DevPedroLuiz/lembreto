@@ -211,8 +211,18 @@ export const updateNotificationSchema = z.object({
 }).strict();
 
 export const updateNotificationSettingsSchema = z.object({
-  enabled: z.boolean(),
-}).strict();
+  enabled: z.boolean().optional(),
+  preferences: z.object({
+    quietHoursEnabled: z.boolean().default(false),
+    quietHoursStart: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Horário inicial inválido').default('22:00'),
+    quietHoursEnd: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Horário final inválido').default('07:00'),
+    mutedCategories: z.array(categorySchema).max(80, 'Muitas categorias silenciadas').default([]),
+    categoryMessageTemplates: z.record(categorySchema, z.string().trim().max(500, 'Template muito longo')).default({}),
+  }).strict().optional(),
+}).strict().refine(
+  (value) => value.enabled !== undefined || value.preferences !== undefined,
+  'Envie enabled ou preferences para atualizar',
+);
 
 export const pushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url('Endpoint de push inválido').max(4096, 'Endpoint de push muito longo'),

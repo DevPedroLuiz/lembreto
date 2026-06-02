@@ -10,6 +10,10 @@ import { assertInfrastructure } from './infrastructure.js';
 import { logError, logInfo, logWarn } from './logger.js';
 
 const DEFAULT_PUSH_SEND_TIMEOUT_MS = 3000;
+const TEMPORARY_PUSH_RETRY_ATTEMPTS = 2;
+const TEMPORARY_PUSH_RETRY_DELAY_MS = 750;
+const DEFAULT_TEMPORARY_PUSH_RETRY_LIMIT = 20;
+const MAX_TEMPORARY_PUSH_DELIVERY_ATTEMPTS = 4;
 
 export function getPushSendTimeoutMs() {
   const configured = Number(process.env.PUSH_SEND_TIMEOUT_MS ?? DEFAULT_PUSH_SEND_TIMEOUT_MS);
@@ -54,6 +58,22 @@ interface PushSubscriptionRow {
   p256dh: string;
   auth: string;
   userAgent: string | null;
+}
+
+interface PushRetryRow extends PushSubscriptionRow {
+  userId: string;
+  notificationId: string;
+  notificationTitle: string;
+  notificationMessage: string;
+  notificationCreatedAt: string;
+  notificationRead: boolean;
+  notificationTone: NotificationTone;
+  targetType: NotificationTargetType | null;
+  targetTaskId: string | null;
+  dedupeKey: string | null;
+  sourceScheduleId: string | null;
+  kind: NotificationScheduleKind | null;
+  lastError: string | null;
 }
 
 export interface PushSubscriptionInput {
@@ -255,6 +275,36 @@ function getPushDeliveryError(error: unknown) {
   return [statusCode, message, body].filter(Boolean).join(': ').slice(0, 1000) || 'push_delivery_failed';
 }
 
+function getPushDeliveryStatusCode(error: unknown) {
+  return typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+    ? (error as { statusCode: number }).statusCode
+    : null;
+}
+
+function isTemporaryPushDeliveryError(error: unknown) {
+  const statusCode = getPushDeliveryStatusCode(error);
+  if (statusCode === null) return true;
+  return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
+}
+
+function looksLikeTemporaryPushDeliveryError(value: unknown) {
+  if (typeof value !== 'string' || value.trim() === '') return true;
+  if (!value.startsWith('status_')) return true;
+  return value.startsWith('status_408') ||
+    value.startsWith('status_425') ||
+    value.startsWith('status_429') ||
+    /^status_5\d\d/.test(value);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function normalizeNotificationListLimit(limit: number | undefined) {
   if (!Number.isFinite(limit)) return DEFAULT_NOTIFICATION_LIST_LIMIT;
   return Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_NOTIFICATION_LIST_LIMIT)), MAX_NOTIFICATION_LIST_LIMIT);
@@ -413,29 +463,45 @@ export async function sendPushPayloadToUser(
 
   await Promise.allSettled(
     subscriptions.map(async (subscription) => {
-      const deliveryId = await recordPushDeliveryAttempt(sql, userId, notificationId, subscription);
+      let deliveryId: string | null = null;
+      let attempt = 0;
       try {
-        await client.sendNotification(
-          {
-            endpoint: subscription.endpoint,
-            keys: {
-              p256dh: subscription.p256dh,
-              auth: subscription.auth,
-            },
-          },
-          serializedPayload,
-          { timeout: getPushSendTimeoutMs() },
-        );
+        while (true) {
+          attempt += 1;
+          deliveryId = await recordPushDeliveryAttempt(sql, userId, notificationId, subscription);
+          try {
+            await client.sendNotification(
+              {
+                endpoint: subscription.endpoint,
+                keys: {
+                  p256dh: subscription.p256dh,
+                  auth: subscription.auth,
+                },
+              },
+              serializedPayload,
+              { timeout: getPushSendTimeoutMs() },
+            );
+            break;
+          } catch (error) {
+            if (!isTemporaryPushDeliveryError(error) || attempt > TEMPORARY_PUSH_RETRY_ATTEMPTS) {
+              throw error;
+            }
+            logWarn('push_notification_temporary_failure_retrying', {
+              userId,
+              endpoint: subscription.endpoint,
+              notificationId,
+              deliveryId,
+              attempt,
+              maxAttempts: TEMPORARY_PUSH_RETRY_ATTEMPTS + 1,
+              error: getPushDeliveryError(error),
+            });
+            await delay(TEMPORARY_PUSH_RETRY_DELAY_MS * attempt);
+          }
+        }
         await updatePushDeliveryStatus(sql, deliveryId, 'delivered');
       } catch (error) {
         const deliveryError = getPushDeliveryError(error);
-        const statusCode =
-          typeof error === 'object' &&
-          error !== null &&
-          'statusCode' in error &&
-          typeof (error as { statusCode?: unknown }).statusCode === 'number'
-            ? (error as { statusCode: number }).statusCode
-            : null;
+        const statusCode = getPushDeliveryStatusCode(error);
 
         await updatePushDeliveryStatus(sql, deliveryId, 'failed', deliveryError);
 
@@ -461,6 +527,133 @@ export async function sendPushPayloadToUser(
       }
     }),
   );
+}
+
+export async function retryTemporaryPushDeliveries(sql: SqlClient, limit = DEFAULT_TEMPORARY_PUSH_RETRY_LIMIT) {
+  await ensureNotificationsInfrastructure(sql);
+  const client = getWebPushClient();
+  if (!client) {
+    return { scanned: 0, retried: 0, delivered: 0, failed: 0, skipped: 0 };
+  }
+
+  const retryLimit = Math.min(Math.max(1, Math.floor(limit)), DEFAULT_TEMPORARY_PUSH_RETRY_LIMIT);
+  const rows = await sql`
+    SELECT
+      deliveries.user_id AS "userId",
+      deliveries.notification_id AS "notificationId",
+      subscriptions.id,
+      subscriptions.endpoint,
+      subscriptions.p256dh,
+      subscriptions.auth,
+      subscriptions.user_agent AS "userAgent",
+      notifications.title AS "notificationTitle",
+      notifications.message AS "notificationMessage",
+      notifications.created_at AS "notificationCreatedAt",
+      notifications.read AS "notificationRead",
+      notifications.tone AS "notificationTone",
+      notifications.target_type AS "targetType",
+      notifications.target_task_id AS "targetTaskId",
+      notifications.dedupe_key AS "dedupeKey",
+      notifications.source_schedule_id AS "sourceScheduleId",
+      notifications.kind,
+      deliveries.last_error AS "lastError"
+    FROM notification_deliveries deliveries
+    INNER JOIN notifications ON notifications.id = deliveries.notification_id
+    INNER JOIN push_subscriptions subscriptions ON subscriptions.id = deliveries.push_subscription_id
+    WHERE deliveries.status = 'failed'
+      AND deliveries.attempt_count < ${MAX_TEMPORARY_PUSH_DELIVERY_ATTEMPTS}
+      AND deliveries.failed_at <= NOW() - INTERVAL '1 minute'
+      AND (
+        deliveries.last_error IS NULL
+        OR deliveries.last_error NOT LIKE 'status_%'
+        OR deliveries.last_error LIKE 'status_408%'
+        OR deliveries.last_error LIKE 'status_425%'
+        OR deliveries.last_error LIKE 'status_429%'
+        OR deliveries.last_error ~ '^status_5[0-9][0-9]'
+      )
+    ORDER BY deliveries.failed_at ASC NULLS FIRST
+    LIMIT ${retryLimit}
+  `;
+
+  let retried = 0;
+  let delivered = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const row of rows as unknown as PushRetryRow[]) {
+    if (!looksLikeTemporaryPushDeliveryError(row.lastError)) {
+      skipped += 1;
+      continue;
+    }
+
+    const notification = mapNotificationRow({
+      id: row.notificationId,
+      title: row.notificationTitle,
+      message: row.notificationMessage,
+      createdAt: new Date(String(row.notificationCreatedAt)).toISOString(),
+      read: Boolean(row.notificationRead),
+      tone: row.notificationTone,
+      targetType: row.targetType,
+      targetTaskId: row.targetTaskId,
+      dedupeKey: row.dedupeKey,
+      sourceScheduleId: row.sourceScheduleId,
+      kind: row.kind,
+    });
+    const payload = JSON.stringify(buildPushPayload(notification));
+    const deliveryId = await recordPushDeliveryAttempt(sql, row.userId, row.notificationId, row);
+    retried += 1;
+
+    try {
+      await client.sendNotification(
+        {
+          endpoint: row.endpoint,
+          keys: {
+            p256dh: row.p256dh,
+            auth: row.auth,
+          },
+        },
+        payload,
+        { timeout: getPushSendTimeoutMs() },
+      );
+      await updatePushDeliveryStatus(sql, deliveryId, 'delivered');
+      delivered += 1;
+    } catch (error) {
+      const deliveryError = getPushDeliveryError(error);
+      const statusCode = getPushDeliveryStatusCode(error);
+      await updatePushDeliveryStatus(sql, deliveryId, 'failed', deliveryError);
+      failed += 1;
+
+      if (statusCode === 404 || statusCode === 410) {
+        await sql`
+          DELETE FROM push_subscriptions
+          WHERE endpoint = ${row.endpoint}
+        `;
+        logWarn('push_subscription_removed_stale', {
+          userId: row.userId,
+          endpoint: row.endpoint,
+          statusCode,
+        });
+      }
+    }
+  }
+
+  if (retried > 0 || skipped > 0) {
+    logInfo('temporary_push_deliveries_retried', {
+      scanned: rows.length,
+      retried,
+      delivered,
+      failed,
+      skipped,
+    });
+  }
+
+  return {
+    scanned: rows.length,
+    retried,
+    delivered,
+    failed,
+    skipped,
+  };
 }
 
 export async function ensureNotificationsInfrastructure(sql: SqlClient) {

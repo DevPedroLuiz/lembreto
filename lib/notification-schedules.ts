@@ -16,6 +16,7 @@ import {
   getPushSendTimeoutMs,
   sendPushPayloadToUser,
 } from './notifications.js';
+import type { CategoryMessageTemplates } from './notification-preferences.js';
 import {
   buildOverdueExpiresAt,
   buildOverdueScheduleTimes,
@@ -64,6 +65,11 @@ interface TaskForScheduling {
   floatingIntervalMinutes: number | null;
   overdueReminderIntensity: OverdueReminderIntensity;
   notificationsEnabled?: boolean;
+  quietHoursEnabled?: boolean;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  mutedCategories?: string[];
+  categoryMessageTemplates?: CategoryMessageTemplates;
   stateCode: string | null;
   cityName: string | null;
   holidayRegionCode: string | null;
@@ -92,6 +98,8 @@ interface DueScheduleSample {
   status: string;
   taskId: string;
 }
+
+type NotificationHistoryEvent = 'created' | 'sent' | 'cancelled';
 
 export interface NotificationScheduleQueueItem {
   id: string;
@@ -169,6 +177,25 @@ function toIso(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function normalizeTimeString(value: unknown, fallback: string) {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value) ? value : fallback;
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeTemplates(value: unknown): CategoryMessageTemplates {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0)
+      .map(([category, template]) => [category.trim(), template.trim()]),
+  );
+}
+
 function mapTask(row: Record<string, unknown>): TaskForScheduling {
   return {
     id: String(row.id),
@@ -201,6 +228,11 @@ function mapTask(row: Record<string, unknown>): TaskForScheduling {
         ? row.overdueReminderIntensity
         : 'normal',
     notificationsEnabled: row.notificationsEnabled === undefined ? undefined : Boolean(row.notificationsEnabled),
+    quietHoursEnabled: Boolean(row.quietHoursEnabled),
+    quietHoursStart: normalizeTimeString(row.quietHoursStart, '22:00'),
+    quietHoursEnd: normalizeTimeString(row.quietHoursEnd, '07:00'),
+    mutedCategories: normalizeStringArray(row.mutedCategories),
+    categoryMessageTemplates: normalizeTemplates(row.categoryMessageTemplates),
     stateCode: typeof row.stateCode === 'string' ? row.stateCode : null,
     cityName: typeof row.cityName === 'string' ? row.cityName : null,
     holidayRegionCode: typeof row.holidayRegionCode === 'string' ? row.holidayRegionCode : null,
@@ -276,6 +308,108 @@ function withAllScheduleKinds(counts: Record<string, number>): ScheduleKindCount
   };
 }
 
+function jsonbParameter(sql: SqlClient, value: unknown) {
+  return sql.json ? sql.json(value) : JSON.stringify(value);
+}
+
+function formatScheduleKindForHistory(kind: NotificationScheduleKind) {
+  if (kind === 'pre_notice') return 'pre-aviso';
+  if (kind === 'notification') return 'aviso no horario';
+  if (kind === 'alarm') return 'alarme';
+  if (kind === 'floating_reminder') return 'aviso recorrente';
+  return 'aviso de atraso';
+}
+
+function buildNotificationHistoryEntry(input: {
+  event: NotificationHistoryEvent;
+  scheduleId: string;
+  kind: NotificationScheduleKind;
+  title?: string | null;
+  notifyAt?: string | null;
+  errorMessage?: string | null;
+}) {
+  const kindLabel = formatScheduleKindForHistory(input.kind);
+  const details = [
+    `Tipo: ${kindLabel}.`,
+    ...(input.title ? [`Titulo do aviso: ${input.title}.`] : []),
+    ...(input.notifyAt ? [`Agendado para: ${new Date(input.notifyAt).toLocaleString('pt-BR')}.`] : []),
+    ...(input.errorMessage ? [`Motivo: ${input.errorMessage}.`] : []),
+  ];
+
+  if (input.event === 'created') {
+    return {
+      id: `notification-schedule:${input.scheduleId}:created`,
+      action: 'updated',
+      title: 'Aviso criado',
+      description: `Um ${kindLabel} foi agendado para este lembrete.`,
+      createdAt: new Date().toISOString(),
+      details,
+    };
+  }
+
+  if (input.event === 'sent') {
+    return {
+      id: `notification-schedule:${input.scheduleId}:sent`,
+      action: 'updated',
+      title: 'Aviso enviado',
+      description: `Um ${kindLabel} foi enviado para este lembrete.`,
+      createdAt: new Date().toISOString(),
+      details,
+    };
+  }
+
+  return {
+    id: `notification-schedule:${input.scheduleId}:cancelled`,
+    action: 'updated',
+    title: 'Aviso cancelado',
+    description: `Um ${kindLabel} pendente foi cancelado.`,
+    createdAt: new Date().toISOString(),
+    details,
+  };
+}
+
+async function appendTaskNotificationHistory(
+  sql: SqlClient,
+  taskId: string,
+  userId: string,
+  input: {
+    event: NotificationHistoryEvent;
+    scheduleId: string;
+    kind: NotificationScheduleKind;
+    title?: string | null;
+    notifyAt?: string | null;
+    errorMessage?: string | null;
+  },
+) {
+  const entry = buildNotificationHistoryEntry(input);
+  const entryJson = jsonbParameter(sql, [entry]);
+
+  try {
+    await sql`
+      UPDATE tasks
+      SET history = CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(history, '[]'::jsonb)) AS item
+          WHERE item->>'id' = ${entry.id}
+        )
+          THEN COALESCE(history, '[]'::jsonb)
+        ELSE COALESCE(history, '[]'::jsonb) || ${entryJson}::jsonb
+      END
+      WHERE id = ${taskId}
+        AND user_id = ${userId}
+    `;
+  } catch (error) {
+    logError('notification_schedule_history_append_failed', error, {
+      userId,
+      taskId,
+      scheduleId: input.scheduleId,
+      event: input.event,
+      kind: input.kind,
+    });
+  }
+}
+
 function isSchedulableStatus(status: string): boolean {
   return status === 'pending' || status === 'overdue';
 }
@@ -304,6 +438,41 @@ function buildAlarmSnoozeDedupeKey(userId: string, taskId: string, notifyAt: Dat
   return `user:${userId}:task:${taskId}:alarm-snooze:${notifyAt.getTime()}`;
 }
 
+function getScheduleKindLabel(kind: NotificationScheduleKind) {
+  switch (kind) {
+    case 'pre_notice':
+      return 'pré-aviso';
+    case 'notification':
+      return 'no horário';
+    case 'alarm':
+      return 'alarme';
+    case 'floating_reminder':
+      return 'lembrete pendente';
+    case 'overdue_reminder':
+      return 'atrasado';
+  }
+}
+
+function formatNotifyTime(notifyAt: Date) {
+  const parts = getSaoPauloParts(notifyAt);
+  return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+}
+
+function renderCategoryMessageTemplate(task: TaskForScheduling, kind: NotificationScheduleKind, notifyAt: Date) {
+  const categoryKey = task.category.trim().toLocaleLowerCase('pt-BR');
+  const templateEntry = Object.entries(task.categoryMessageTemplates ?? {}).find(([category]) => (
+    category.trim().toLocaleLowerCase('pt-BR') === categoryKey
+  ));
+  const template = templateEntry?.[1];
+  if (!template) return null;
+
+  return template
+    .replace(/\{titulo\}/gi, task.title)
+    .replace(/\{categoria\}/gi, task.category || 'Geral')
+    .replace(/\{tipo\}/gi, getScheduleKindLabel(kind))
+    .replace(/\{horario\}/gi, formatNotifyTime(notifyAt));
+}
+
 function getSaoPauloParts(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
@@ -325,23 +494,59 @@ function getSaoPauloParts(date: Date) {
   };
 }
 
-function atSaoPauloHour(parts: ReturnType<typeof getSaoPauloParts>, hour: number) {
-  return new Date(`${parts.year}-${parts.month}-${parts.day}T${String(hour).padStart(2, '0')}:00:00${SAO_PAULO_OFFSET}`);
+function parseTimeParts(value: string) {
+  const [hour, minute] = value.split(':').map(Number);
+  return {
+    hour: Number.isFinite(hour) ? hour : 0,
+    minute: Number.isFinite(minute) ? minute : 0,
+  };
 }
 
-export function adjustScheduleForQuietHours(kind: NotificationScheduleKind, notifyAt: Date): Date {
-  if (kind !== 'floating_reminder' && kind !== 'overdue_reminder') return notifyAt;
+function atSaoPauloTime(parts: ReturnType<typeof getSaoPauloParts>, hour: number, minute = 0, dayOffset = 0) {
+  const date = new Date(`${parts.year}-${parts.month}-${parts.day}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00${SAO_PAULO_OFFSET}`);
+  return dayOffset === 0 ? date : addHours(date, dayOffset * 24);
+}
+
+function atSaoPauloHour(parts: ReturnType<typeof getSaoPauloParts>, hour: number) {
+  return atSaoPauloTime(parts, hour, 0);
+}
+
+export function adjustScheduleForQuietHours(
+  kind: NotificationScheduleKind,
+  notifyAt: Date,
+  quietHours?: { enabled: boolean; start: string; end: string },
+): Date {
+  if (kind === 'alarm') return notifyAt;
+  if (!quietHours?.enabled) return notifyAt;
 
   const parts = getSaoPauloParts(notifyAt);
-  if (parts.hour >= QUIET_START_HOUR) {
-    return addHours(atSaoPauloHour(parts, QUIET_END_HOUR), 24);
+  const start = parseTimeParts(quietHours.start);
+  const end = parseTimeParts(quietHours.end);
+  const currentMinutes = parts.hour * 60 + parts.minute;
+  const startMinutes = start.hour * 60 + start.minute;
+  const endMinutes = end.hour * 60 + end.minute;
+  if (startMinutes === endMinutes) return notifyAt;
+
+  const crossesMidnight = startMinutes > endMinutes;
+  const insideQuietHours = crossesMidnight
+    ? currentMinutes >= startMinutes || currentMinutes < endMinutes
+    : currentMinutes >= startMinutes && currentMinutes < endMinutes;
+
+  if (!insideQuietHours) return notifyAt;
+
+  if (crossesMidnight && currentMinutes >= startMinutes) {
+    return atSaoPauloTime(parts, end.hour, end.minute, 1);
   }
 
-  if (parts.hour < QUIET_END_HOUR) {
-    return atSaoPauloHour(parts, QUIET_END_HOUR);
-  }
+  return atSaoPauloTime(parts, end.hour, end.minute);
+}
 
-  return notifyAt;
+function getTaskQuietHours(task: TaskForScheduling) {
+  return {
+    enabled: Boolean(task.quietHoursEnabled),
+    start: task.quietHoursStart ?? '22:00',
+    end: task.quietHoursEnd ?? '07:00',
+  };
 }
 
 function getHolidayInfo(task: TaskForScheduling, notifyAt: Date) {
@@ -364,7 +569,7 @@ function shouldCancelHolidaySchedule(kind: NotificationScheduleKind): boolean {
 function nextAllowedAfterHoliday(task: TaskForScheduling, kind: NotificationScheduleKind, notifyAt: Date): Date {
   let cursor = atSaoPauloHour(getSaoPauloParts(addHours(notifyAt, 24)), QUIET_END_HOUR);
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    cursor = adjustScheduleForQuietHours(kind, cursor);
+    cursor = adjustScheduleForQuietHours(kind, cursor, getTaskQuietHours(task));
     if (!getHolidayInfo(task, cursor)) return cursor;
     cursor = addHours(cursor, 24);
   }
@@ -372,16 +577,24 @@ function nextAllowedAfterHoliday(task: TaskForScheduling, kind: NotificationSche
 }
 
 function applyScheduleSuppression(task: TaskForScheduling, kind: NotificationScheduleKind, notifyAt: Date) {
-  let adjusted = adjustScheduleForQuietHours(kind, notifyAt);
+  const categoryKey = task.category.trim().toLocaleLowerCase('pt-BR');
+  const categoryMuted = (task.mutedCategories ?? []).some((category) => (
+    category.trim().toLocaleLowerCase('pt-BR') === categoryKey
+  ));
+  if (categoryMuted && kind !== 'alarm') {
+    return { action: 'cancel' as const, notifyAt, holiday: null, reason: 'muted_category' as const };
+  }
+
+  let adjusted = adjustScheduleForQuietHours(kind, notifyAt, getTaskQuietHours(task));
   const holiday = kind === 'alarm' ? null : getHolidayInfo(task, adjusted);
-  if (!holiday) return { action: 'send' as const, notifyAt: adjusted, holiday: null };
+  if (!holiday) return { action: 'send' as const, notifyAt: adjusted, holiday: null, reason: null };
 
   if (shouldCancelHolidaySchedule(kind)) {
-    return { action: 'cancel' as const, notifyAt: adjusted, holiday };
+    return { action: 'cancel' as const, notifyAt: adjusted, holiday, reason: 'holiday' as const };
   }
 
   adjusted = nextAllowedAfterHoliday(task, kind, adjusted);
-  return { action: 'reschedule' as const, notifyAt: adjusted, holiday };
+  return { action: 'reschedule' as const, notifyAt: adjusted, holiday, reason: 'holiday' as const };
 }
 
 export {
@@ -396,6 +609,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
     await assertInfrastructure(sql, 'notification scheduling', {
       relations: [
         { name: 'notification_schedules' },
+        { name: 'notification_preferences' },
       ],
       columns: [
         { table: 'tasks', column: 'alarm_enabled' },
@@ -413,6 +627,11 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
         { table: 'tasks', column: 'floating_interval_minutes' },
         { table: 'tasks', column: 'pre_notice_minutes' },
         { table: 'tasks', column: 'overdue_reminder_intensity' },
+        { table: 'notification_preferences', column: 'quiet_hours_enabled' },
+        { table: 'notification_preferences', column: 'quiet_hours_start' },
+        { table: 'notification_preferences', column: 'quiet_hours_end' },
+        { table: 'notification_preferences', column: 'muted_categories' },
+        { table: 'notification_preferences', column: 'category_message_templates' },
         { table: 'notification_schedules', column: 'user_id' },
         { table: 'notification_schedules', column: 'task_id' },
         { table: 'notification_schedules', column: 'kind' },
@@ -484,11 +703,17 @@ async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: st
       tasks.floating_interval_minutes AS "floatingIntervalMinutes",
       tasks.overdue_reminder_intensity AS "overdueReminderIntensity",
       users.notifications_enabled AS "notificationsEnabled",
+      COALESCE(notification_preferences.quiet_hours_enabled, FALSE) AS "quietHoursEnabled",
+      COALESCE(notification_preferences.quiet_hours_start, '22:00') AS "quietHoursStart",
+      COALESCE(notification_preferences.quiet_hours_end, '07:00') AS "quietHoursEnd",
+      COALESCE(notification_preferences.muted_categories, ARRAY[]::TEXT[]) AS "mutedCategories",
+      COALESCE(notification_preferences.category_message_templates, '{}'::JSONB) AS "categoryMessageTemplates",
       users.state_code AS "stateCode",
       users.city_name AS "cityName",
       users.holiday_region_code AS "holidayRegionCode"
     FROM tasks
     INNER JOIN users ON users.id = tasks.user_id
+    LEFT JOIN notification_preferences ON notification_preferences.user_id = users.id
     WHERE tasks.id = ${taskId}
       AND tasks.user_id = ${userId}
     LIMIT 1
@@ -517,14 +742,26 @@ export async function cancelPendingNotificationSchedulesForTask(
         WHERE task_id = ${taskId}
           AND user_id = ${userId}
           AND status IN ('pending', 'processing')
-        RETURNING id
+        RETURNING
+          id,
+          task_id AS "taskId",
+          user_id AS "userId",
+          kind,
+          notify_at AS "notifyAt",
+          title
       `
     : await sql`
         UPDATE notification_schedules
         SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
         WHERE task_id = ${taskId}
           AND status IN ('pending', 'processing')
-        RETURNING id
+        RETURNING
+          id,
+          task_id AS "taskId",
+          user_id AS "userId",
+          kind,
+          notify_at AS "notifyAt",
+          title
       `;
   if (rows.length > 0) {
     logInfo('schedule_cancel_requested', {
@@ -535,6 +772,16 @@ export async function cancelPendingNotificationSchedulesForTask(
       taskStatus: options.taskStatus ?? null,
       scheduleCount: rows.length,
     });
+    for (const row of rows) {
+      await appendTaskNotificationHistory(sql, String(row.taskId), String(row.userId), {
+        event: 'cancelled',
+        scheduleId: String(row.id),
+        kind: String(row.kind) as NotificationScheduleKind,
+        title: typeof row.title === 'string' ? row.title : null,
+        notifyAt: toIso(row.notifyAt),
+        errorMessage: options.reason ?? null,
+      });
+    }
   }
   return rows.length;
 }
@@ -556,7 +803,13 @@ export async function cancelPendingNotificationSchedulesForUser(
     SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
     WHERE user_id = ${userId}
       AND status IN ('pending', 'processing')
-    RETURNING id
+    RETURNING
+      id,
+      task_id AS "taskId",
+      user_id AS "userId",
+      kind,
+      notify_at AS "notifyAt",
+      title
   `;
   if (rows.length > 0) {
     logInfo('schedule_cancel_requested', {
@@ -565,6 +818,16 @@ export async function cancelPendingNotificationSchedulesForUser(
       userId,
       scheduleCount: rows.length,
     });
+    for (const row of rows) {
+      await appendTaskNotificationHistory(sql, String(row.taskId), String(row.userId), {
+        event: 'cancelled',
+        scheduleId: String(row.id),
+        kind: String(row.kind) as NotificationScheduleKind,
+        title: typeof row.title === 'string' ? row.title : null,
+        notifyAt: toIso(row.notifyAt),
+        errorMessage: options.reason ?? null,
+      });
+    }
   }
   return rows.length;
 }
@@ -583,6 +846,14 @@ async function insertSchedule(
     dedupeKey?: string;
   },
 ) {
+  const dedupeKey = input.dedupeKey ?? buildDedupeKey(
+    task.userId,
+    task.id,
+    input.kind,
+    input.notifyAt,
+    input.sequenceIndex ?? undefined,
+  );
+  const message = renderCategoryMessageTemplate(task, input.kind, input.notifyAt) ?? input.message;
   const rows = await sql`
     INSERT INTO notification_schedules (
       user_id,
@@ -602,16 +873,64 @@ async function insertSchedule(
       ${input.kind},
       ${input.notifyAt},
       ${input.title},
-      ${input.message},
+      ${message},
       ${input.tone},
-      ${input.dedupeKey ?? buildDedupeKey(task.userId, task.id, input.kind, input.notifyAt, input.sequenceIndex ?? undefined)},
+      ${dedupeKey},
       ${input.sequenceIndex ?? null},
       ${input.intervalMinutes ?? null}
     )
-    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+    ON CONFLICT (user_id, dedupe_key)
+    DO UPDATE SET
+      task_id = EXCLUDED.task_id,
+      kind = EXCLUDED.kind,
+      notify_at = EXCLUDED.notify_at,
+      title = EXCLUDED.title,
+      message = EXCLUDED.message,
+      tone = EXCLUDED.tone,
+      sequence_index = EXCLUDED.sequence_index,
+      interval_minutes = EXCLUDED.interval_minutes,
+      status = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN 'pending'
+        ELSE notification_schedules.status
+      END,
+      processing_started_at = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN NULL
+        ELSE notification_schedules.processing_started_at
+      END,
+      sent_at = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN NULL
+        ELSE notification_schedules.sent_at
+      END,
+      failed_at = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN NULL
+        ELSE notification_schedules.failed_at
+      END,
+      cancelled_at = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN NULL
+        ELSE notification_schedules.cancelled_at
+      END,
+      error_message = CASE
+        WHEN notification_schedules.status IN ('cancelled', 'failed') THEN NULL
+        ELSE notification_schedules.error_message
+      END,
+      updated_at = NOW()
+    WHERE notification_schedules.status IN ('cancelled', 'failed')
     RETURNING id
   `;
-  return rows.length > 0;
+  const row = rows[0];
+  const createdOrReactivated = Boolean(row);
+
+  if (createdOrReactivated && row?.id) {
+    await appendTaskNotificationHistory(sql, task.id, task.userId, {
+      event: 'created',
+      scheduleId: String(row.id),
+      kind: input.kind,
+      title: input.title,
+      notifyAt: input.notifyAt.toISOString(),
+    });
+  }
+
+  return createdOrReactivated;
 }
 
 async function scheduleTimedTask(
@@ -931,11 +1250,18 @@ async function detectAndScheduleOverdueTasks(
       tasks.suppress_holiday_notifications AS "suppressHolidayNotifications",
       tasks.floating_interval_minutes AS "floatingIntervalMinutes",
       tasks.overdue_reminder_intensity AS "overdueReminderIntensity",
+      users.notifications_enabled AS "notificationsEnabled",
+      COALESCE(notification_preferences.quiet_hours_enabled, FALSE) AS "quietHoursEnabled",
+      COALESCE(notification_preferences.quiet_hours_start, '22:00') AS "quietHoursStart",
+      COALESCE(notification_preferences.quiet_hours_end, '07:00') AS "quietHoursEnd",
+      COALESCE(notification_preferences.muted_categories, ARRAY[]::TEXT[]) AS "mutedCategories",
+      COALESCE(notification_preferences.category_message_templates, '{}'::JSONB) AS "categoryMessageTemplates",
       users.state_code AS "stateCode",
       users.city_name AS "cityName",
       users.holiday_region_code AS "holidayRegionCode"
     FROM tasks
     INNER JOIN users ON users.id = tasks.user_id
+    LEFT JOIN notification_preferences ON notification_preferences.user_id = users.id
     WHERE tasks.deleted_at IS NULL
       AND (
         tasks.status = 'pending'
@@ -1285,7 +1611,7 @@ export async function getScheduleDiagnostics(sql: SqlClient, options: { userId?:
 }
 
 async function updateScheduleStatus(sql: SqlClient, scheduleId: string, status: NotificationScheduleStatus, errorMessage?: string) {
-  await sql`
+  const rows = await sql`
     UPDATE notification_schedules
     SET
       status = ${status},
@@ -1296,7 +1622,33 @@ async function updateScheduleStatus(sql: SqlClient, scheduleId: string, status: 
       error_message = ${errorMessage ?? null},
       updated_at = NOW()
     WHERE id = ${scheduleId}
+      AND (
+        ${status} NOT IN ('sent', 'failed')
+        OR (status = 'processing' AND cancelled_at IS NULL)
+      )
+    RETURNING
+      id,
+      task_id AS "taskId",
+      user_id AS "userId",
+      kind,
+      notify_at AS "notifyAt",
+      title
   `;
+  const row = rows[0];
+  if (!row) return false;
+
+  if (status === 'sent' || status === 'cancelled') {
+    await appendTaskNotificationHistory(sql, String(row.taskId), String(row.userId), {
+      event: status === 'sent' ? 'sent' : 'cancelled',
+      scheduleId: String(row.id),
+      kind: String(row.kind) as NotificationScheduleKind,
+      title: typeof row.title === 'string' ? row.title : null,
+      notifyAt: toIso(row.notifyAt),
+      errorMessage: errorMessage ?? null,
+    });
+  }
+
+  return true;
 }
 
 async function rescheduleSchedule(sql: SqlClient, scheduleId: string, notifyAt: Date, reason: string) {
@@ -1310,6 +1662,28 @@ async function rescheduleSchedule(sql: SqlClient, scheduleId: string, notifyAt: 
       updated_at = NOW()
     WHERE id = ${scheduleId}
   `;
+}
+
+async function discardNotificationCreatedForCancelledSchedule(
+  sql: SqlClient,
+  notificationId: string,
+  scheduleId: string,
+  userId: string,
+) {
+  try {
+    await sql`
+      DELETE FROM notifications
+      WHERE id = ${notificationId}
+        AND user_id = ${userId}
+        AND source_schedule_id = ${scheduleId}
+    `;
+  } catch (error) {
+    logError('notification_schedule_discard_notification_failed', error, {
+      userId,
+      notificationId,
+      scheduleId,
+    });
+  }
 }
 
 async function fetchTaskForSchedule(sql: SqlClient, schedule: ScheduleRow): Promise<TaskForScheduling | null> {
@@ -1419,10 +1793,21 @@ async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: Ta
       dedupeKey: schedule.dedupeKey,
       notificationId: result.notification.id,
     });
-    return false;
+    return updateScheduleStatus(sql, schedule.id, 'sent');
   }
 
-  await updateScheduleStatus(sql, schedule.id, 'sent');
+  const markedSent = await updateScheduleStatus(sql, schedule.id, 'sent');
+  if (!markedSent) {
+    await discardNotificationCreatedForCancelledSchedule(sql, result.notification.id, schedule.id, schedule.userId);
+    logWarn('notification_schedule_send_skipped_after_cancel', {
+      userId: schedule.userId,
+      taskId: schedule.taskId,
+      scheduleId: schedule.id,
+      kind: schedule.kind,
+      notificationId: result.notification.id,
+    });
+    return false;
+  }
   await sendSchedulePush(sql, schedule, task, {
     title: schedule.title,
     body: schedule.message,
@@ -1532,7 +1917,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
     task.mutedUntil &&
     new Date(task.mutedUntil) > new Date()
   ) {
-    const notifyAt = adjustScheduleForQuietHours(schedule.kind, new Date(task.mutedUntil));
+    const notifyAt = adjustScheduleForQuietHours(schedule.kind, new Date(task.mutedUntil), getTaskQuietHours(task));
     await rescheduleSchedule(sql, schedule.id, notifyAt, 'muted_until');
     return 'rescheduled' as const;
   }
@@ -1550,7 +1935,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
         holidayScope: suppression.holiday.scope,
       });
     }
-    await updateScheduleStatus(sql, schedule.id, 'cancelled', 'holiday');
+    await updateScheduleStatus(sql, schedule.id, 'cancelled', suppression.reason ?? 'suppressed');
     return 'cancelled' as const;
   }
 
@@ -1572,7 +1957,8 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   }
 
   if (schedule.kind === 'alarm') {
-    await sendAlarmSchedule(sql, schedule, task);
+    const sent = await sendAlarmSchedule(sql, schedule, task);
+    return sent ? 'sent' as const : 'cancelled' as const;
   } else {
     const result = await createNotification(sql, {
       userId: schedule.userId,
@@ -1597,7 +1983,18 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
         notificationId: result.notification.id,
       });
     } else {
-      await updateScheduleStatus(sql, schedule.id, 'sent');
+      const markedSent = await updateScheduleStatus(sql, schedule.id, 'sent');
+      if (!markedSent) {
+        await discardNotificationCreatedForCancelledSchedule(sql, result.notification.id, schedule.id, schedule.userId);
+        logWarn('notification_schedule_send_skipped_after_cancel', {
+          userId: schedule.userId,
+          taskId: schedule.taskId,
+          scheduleId: schedule.id,
+          kind: schedule.kind,
+          notificationId: result.notification.id,
+        });
+        return 'cancelled' as const;
+      }
       await sendSchedulePush(sql, schedule, task, {
         title: schedule.title,
         body: schedule.message,
@@ -1641,7 +2038,16 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
     }
   }
 
-  await updateScheduleStatus(sql, schedule.id, 'sent');
+  const markedSent = await updateScheduleStatus(sql, schedule.id, 'sent');
+  if (!markedSent) {
+    logWarn('notification_schedule_send_skipped_after_cancel', {
+      userId: schedule.userId,
+      taskId: schedule.taskId,
+      scheduleId: schedule.id,
+      kind: schedule.kind,
+    });
+    return 'cancelled' as const;
+  }
   if (schedule.kind === 'floating_reminder' || schedule.kind === 'overdue_reminder') {
     await scheduleNextIncrementalReminder(sql, schedule, task).catch((error) => {
       logError('notification_schedule_incremental_follow_up_failed', error, {
@@ -1893,11 +2299,19 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
       AND kind = 'alarm'
       AND dismissed_at IS NULL
       AND status <> 'cancelled'
-    RETURNING task_id AS "taskId", title, message, tone
+    RETURNING task_id AS "taskId", user_id AS "userId", kind, notify_at AS "notifyAt", title, message, tone
   `;
 
   const claimed = claimedRows[0];
   if (!claimed) return null;
+  await appendTaskNotificationHistory(sql, String(claimed.taskId), String(claimed.userId), {
+    event: 'sent',
+    scheduleId,
+    kind: String(claimed.kind) as NotificationScheduleKind,
+    title: typeof claimed.title === 'string' ? claimed.title : null,
+    notifyAt: toIso(claimed.notifyAt),
+    errorMessage: `adiado por ${minutes} min`,
+  });
 
   const rows = await sql`
     SELECT
@@ -1935,6 +2349,12 @@ export async function snoozeAlarmSchedule(sql: SqlClient, userId: string, schedu
     suppressHolidayNotifications: false,
     floatingIntervalMinutes: null,
     overdueReminderIntensity: 'normal',
+    notificationsEnabled: true,
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00',
+    mutedCategories: [],
+    categoryMessageTemplates: {},
     stateCode: null,
     cityName: null,
     holidayRegionCode: null,
@@ -1966,11 +2386,19 @@ export async function dismissAlarmSchedule(sql: SqlClient, userId: string, sched
       AND user_id = ${userId}
       AND kind = 'alarm'
       AND status <> 'cancelled'
-    RETURNING task_id AS "taskId", dismissed_at AS "dismissedAt"
+    RETURNING task_id AS "taskId", user_id AS "userId", kind, notify_at AS "notifyAt", title, dismissed_at AS "dismissedAt"
   `;
 
   const row = rows[0];
   if (!row) return null;
+  await appendTaskNotificationHistory(sql, String(row.taskId), String(row.userId), {
+    event: 'sent',
+    scheduleId,
+    kind: String(row.kind) as NotificationScheduleKind,
+    title: typeof row.title === 'string' ? row.title : null,
+    notifyAt: toIso(row.notifyAt),
+    errorMessage: 'alarme fechado',
+  });
 
   logInfo('alarm_dismissed', {
     userId,

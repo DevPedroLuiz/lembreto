@@ -36,6 +36,7 @@ import type {
   CalendarSyncAllResult,
   HolidayLocationSuggestion,
   HolidayRegionOption,
+  NotificationPreferences,
 } from '../types';
 
 function Toggle({
@@ -106,6 +107,8 @@ interface SettingsDrawerProps {
   onToggleShowCompleted: () => void;
   noTimeReminderMinutes: number;
   onChangeNoTimeReminderMinutes: (minutes: number) => void;
+  notificationPreferences: NotificationPreferences;
+  onChangeNotificationPreferences: (preferences: NotificationPreferences) => Promise<NotificationPreferences>;
   categories: string[];
   tags: string[];
   onCreateCategory: (name: string) => Promise<string>;
@@ -333,6 +336,8 @@ export function SettingsDrawer({
   onToggleShowCompleted,
   noTimeReminderMinutes,
   onChangeNoTimeReminderMinutes,
+  notificationPreferences,
+  onChangeNotificationPreferences,
   categories,
   tags,
   onCreateCategory,
@@ -686,6 +691,52 @@ export function SettingsDrawer({
 
   const activeViewMeta = settingsViews.find((view) => view.key === activeView) ?? settingsViews[0];
   const noTimeReminderParts = splitMinutesIntoTimeParts(noTimeReminderMinutes);
+  const [notificationPrefsDraft, setNotificationPrefsDraft] = React.useState(notificationPreferences);
+  const [isSavingNotificationPrefs, setIsSavingNotificationPrefs] = React.useState(false);
+
+  React.useEffect(() => {
+    setNotificationPrefsDraft(notificationPreferences);
+  }, [notificationPreferences]);
+
+  const updateNotificationPrefsDraft = (patch: Partial<NotificationPreferences>) => {
+    setNotificationPrefsDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const toggleMutedCategory = (category: string) => {
+    const normalizedCategory = normalizeTaxonomyValue(category);
+    if (!normalizedCategory) return;
+
+    const exists = notificationPrefsDraft.mutedCategories.some((item) => (
+      normalizeTaxonomyValue(item).toLocaleLowerCase('pt-BR') === normalizedCategory.toLocaleLowerCase('pt-BR')
+    ));
+    updateNotificationPrefsDraft({
+      mutedCategories: exists
+        ? notificationPrefsDraft.mutedCategories.filter((item) => (
+          normalizeTaxonomyValue(item).toLocaleLowerCase('pt-BR') !== normalizedCategory.toLocaleLowerCase('pt-BR')
+        ))
+        : [...notificationPrefsDraft.mutedCategories, normalizedCategory],
+    });
+  };
+
+  const updateCategoryTemplate = (category: string, template: string) => {
+    const nextTemplates = { ...notificationPrefsDraft.categoryMessageTemplates };
+    const normalizedCategory = normalizeTaxonomyValue(category);
+    if (!template.trim()) {
+      delete nextTemplates[normalizedCategory];
+    } else {
+      nextTemplates[normalizedCategory] = template;
+    }
+    updateNotificationPrefsDraft({ categoryMessageTemplates: nextTemplates });
+  };
+
+  const saveNotificationPrefs = async () => {
+    setIsSavingNotificationPrefs(true);
+    try {
+      await onChangeNotificationPreferences(notificationPrefsDraft);
+    } finally {
+      setIsSavingNotificationPrefs(false);
+    }
+  };
 
   const updateNoTimeReminderPart = (part: 'hours' | 'minutes', value: string) => {
     const parsedValue = Number.parseInt(value, 10);
@@ -1204,6 +1255,120 @@ export function SettingsDrawer({
                 description="Defina como o Lembreto chama sua atenção."
               />
               {renderToggleCards(notificationCards)}
+            </section>
+
+            <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+              <SectionHeader
+                eyebrow="Preferencias"
+                title="Horario, categorias e mensagens"
+                description="Ajustes aplicados a fila de notificacoes do seu usuario."
+              />
+
+              <div className="space-y-4">
+                <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">Horario silencioso</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                        Avisos comuns ficam pausados nesse intervalo. Alarmes sonoros continuam ativos.
+                      </p>
+                    </div>
+                    <Toggle
+                      active={notificationPrefsDraft.quietHoursEnabled}
+                      onClick={() => updateNotificationPrefsDraft({ quietHoursEnabled: !notificationPrefsDraft.quietHoursEnabled })}
+                      ariaLabel="Alternar horario silencioso"
+                    />
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Inicio</span>
+                      <input
+                        type="time"
+                        value={notificationPrefsDraft.quietHoursStart}
+                        onChange={(event) => updateNotificationPrefsDraft({ quietHoursStart: event.target.value })}
+                        className="field-control"
+                      />
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Fim</span>
+                      <input
+                        type="time"
+                        value={notificationPrefsDraft.quietHoursEnd}
+                        onChange={(event) => updateNotificationPrefsDraft({ quietHoursEnd: event.target.value })}
+                        className="field-control"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Categorias silenciadas</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Lembretes dessas categorias nao geram avisos comuns nem atrasados.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {categories.map((category) => {
+                      const active = notificationPrefsDraft.mutedCategories.some((item) => (
+                        normalizeTaxonomyValue(item).toLocaleLowerCase('pt-BR') === normalizeTaxonomyValue(category).toLocaleLowerCase('pt-BR')
+                      ));
+
+                      return (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => toggleMutedCategory(category)}
+                          aria-pressed={active}
+                          className={[
+                            'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                            active
+                              ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200'
+                              : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300',
+                          ].join(' ')}
+                        >
+                          {category}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Templates por categoria</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                    Use {'{titulo}'}, {'{categoria}'}, {'{tipo}'} e {'{horario}'} para personalizar mensagens.
+                  </p>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {categories.map((category) => (
+                      <label key={category} className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                          {category}
+                        </span>
+                        <textarea
+                          value={notificationPrefsDraft.categoryMessageTemplates[normalizeTaxonomyValue(category)] ?? ''}
+                          onChange={(event) => updateCategoryTemplate(category, event.target.value)}
+                          rows={3}
+                          maxLength={500}
+                          placeholder={`Ex.: ${category}: {titulo} as {horario}`}
+                          className="field-control min-h-[92px] resize-y"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void saveNotificationPrefs();
+                  }}
+                  disabled={isSavingNotificationPrefs}
+                  className="action-primary min-h-[48px] w-full justify-center rounded-2xl disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingNotificationPrefs ? <Loader2 size={16} className="animate-spin" /> : <BellRing size={16} />}
+                  Salvar preferencias de notificacao
+                </button>
+              </div>
             </section>
 
             <ActionPanel

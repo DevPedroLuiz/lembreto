@@ -13,6 +13,7 @@ import type {
 type NotificationVisibility = 'all' | 'unread' | 'read';
 type NotificationToneFilter = 'all' | AppNotification['tone'];
 type NotificationKindFilter = 'all' | NonNullable<AppNotification['kind']>;
+type ScheduleStatusFilter = 'all' | NotificationScheduleQueueItem['status'];
 
 interface NotificationsPageProps {
   notifications: AppNotification[];
@@ -31,8 +32,8 @@ interface NotificationsPageProps {
   scheduleQueue?: NotificationScheduleQueueItem[];
   scheduleDiagnostics?: NotificationScheduleDiagnostics | null;
   isLoadingScheduleQueue?: boolean;
-  onRefreshScheduleQueue?: () => void;
-  onProcessDueNotifications?: () => void;
+  onRefreshScheduleQueue?: (status?: NotificationScheduleQueueItem['status'] | null) => void;
+  onProcessDueNotifications?: (status?: NotificationScheduleQueueItem['status'] | null) => void;
 }
 
 function FilterButton({
@@ -88,6 +89,19 @@ function getScheduleStatusLabel(status: NotificationScheduleQueueItem['status'])
   return 'Cancelado';
 }
 
+function getScheduleStatusFilterLabel(status: ScheduleStatusFilter) {
+  if (status === 'all') return 'Todos os status';
+  return getScheduleStatusLabel(status);
+}
+
+function getScheduleStatusStyle(status: NotificationScheduleQueueItem['status']) {
+  if (status === 'pending') return 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300';
+  if (status === 'processing') return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+  if (status === 'sent') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300';
+  if (status === 'failed') return 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300';
+  return 'bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300';
+}
+
 function formatScheduleDate(value: string) {
   try {
     return new Intl.DateTimeFormat('pt-BR', {
@@ -123,6 +137,7 @@ export function NotificationsPage({
   const [visibility, setVisibility] = React.useState<NotificationVisibility>('all');
   const [toneFilter, setToneFilter] = React.useState<NotificationToneFilter>('all');
   const [kindFilter, setKindFilter] = React.useState<NotificationKindFilter>('all');
+  const [scheduleStatusFilter, setScheduleStatusFilter] = React.useState<ScheduleStatusFilter>('all');
   const [createdFrom, setCreatedFrom] = React.useState('');
   const [createdTo, setCreatedTo] = React.useState('');
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
@@ -144,6 +159,18 @@ export function NotificationsPage({
     currentFilters.createdFrom ||
     currentFilters.createdTo,
   );
+  const queueStatusCounts = React.useMemo(() => (
+    scheduleQueue.reduce<Record<NotificationScheduleQueueItem['status'], number>>((counts, schedule) => ({
+      ...counts,
+      [schedule.status]: counts[schedule.status] + 1,
+    }), {
+      pending: 0,
+      processing: 0,
+      sent: 0,
+      failed: 0,
+      cancelled: 0,
+    })
+  ), [scheduleQueue]);
 
   React.useEffect(() => {
     const timeoutId = window.setTimeout(() => onFiltersChange(currentFilters), 300);
@@ -246,7 +273,7 @@ export function NotificationsPage({
             type="button"
             onClick={() => {
               setActiveView('queue');
-              onRefreshScheduleQueue?.();
+              onRefreshScheduleQueue?.(scheduleStatusFilter === 'all' ? null : scheduleStatusFilter);
             }}
             className={[
               'rounded-xl px-4 py-2 text-sm font-semibold transition-all',
@@ -431,7 +458,7 @@ export function NotificationsPage({
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              onClick={onRefreshScheduleQueue}
+              onClick={() => onRefreshScheduleQueue?.(scheduleStatusFilter === 'all' ? null : scheduleStatusFilter)}
               disabled={isLoadingScheduleQueue}
               className="action-secondary justify-center"
             >
@@ -440,11 +467,47 @@ export function NotificationsPage({
             </button>
             <button
               type="button"
-              onClick={onProcessDueNotifications}
+              onClick={() => onProcessDueNotifications?.(scheduleStatusFilter === 'all' ? null : scheduleStatusFilter)}
               className="action-secondary justify-center"
             >
               Processar vencidos
             </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:items-end">
+          <div>
+            <label htmlFor="notification-schedule-status-filter" className="mb-2 block text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+              Status da fila
+            </label>
+            <select
+              id="notification-schedule-status-filter"
+              value={scheduleStatusFilter}
+              onChange={(event) => {
+                const next = event.target.value as ScheduleStatusFilter;
+                setScheduleStatusFilter(next);
+                onRefreshScheduleQueue?.(next === 'all' ? null : next);
+              }}
+              className="field-control"
+              data-testid="notification-schedule-status-filter"
+            >
+              <option value="all">Todos os status</option>
+              <option value="pending">Pendentes</option>
+              <option value="processing">Processando</option>
+              <option value="sent">Enviados</option>
+              <option value="cancelled">Cancelados</option>
+              <option value="failed">Com erro</option>
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(['pending', 'processing', 'sent', 'cancelled', 'failed'] as const).map((status) => (
+              <span key={status} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${getScheduleStatusStyle(status)}`}>
+                {getScheduleStatusLabel(status)}: {queueStatusCounts[status]}
+              </span>
+            ))}
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:bg-white/[0.06] dark:text-slate-300">
+              Filtro: {getScheduleStatusFilterLabel(scheduleStatusFilter)}
+            </span>
           </div>
         </div>
 

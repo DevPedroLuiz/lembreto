@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
-import type { AppNotification, NotificationTarget } from '../types';
+import type { AppNotification, NotificationPreferences, NotificationTarget } from '../types';
 
 export interface NotificationPageInfo {
   hasMore: boolean;
@@ -21,6 +21,7 @@ export interface NotificationListQuery {
 interface NotificationsResponse {
   notifications: AppNotification[];
   enabled: boolean;
+  preferences?: NotificationPreferences;
   pageInfo?: NotificationPageInfo;
   pushConfigured?: boolean;
   pushPublicKey?: string | null;
@@ -79,6 +80,13 @@ export function useNotifications(token: string | null) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pageInfo, setPageInfo] = useState<NotificationPageInfo>(DEFAULT_NOTIFICATION_PAGE_INFO);
   const [serverEnabled, setServerEnabled] = useState<boolean | null>(null);
+  const [preferences, setPreferences] = useState<NotificationPreferences>({
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00',
+    mutedCategories: [],
+    categoryMessageTemplates: {},
+  });
   const [pushConfigured, setPushConfigured] = useState(false);
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -94,6 +102,7 @@ export function useNotifications(token: string | null) {
     ));
     setPageInfo(data.pageInfo ?? DEFAULT_NOTIFICATION_PAGE_INFO);
     setServerEnabled(data.enabled);
+    if (data.preferences) setPreferences(data.preferences);
     setPushConfigured(Boolean(data.pushConfigured));
     setPushPublicKey(typeof data.pushPublicKey === 'string' ? data.pushPublicKey : null);
     setLoaded(true);
@@ -104,6 +113,13 @@ export function useNotifications(token: string | null) {
     setNotifications([]);
     setPageInfo(DEFAULT_NOTIFICATION_PAGE_INFO);
     setServerEnabled(null);
+    setPreferences({
+      quietHoursEnabled: false,
+      quietHoursStart: '22:00',
+      quietHoursEnd: '07:00',
+      mutedCategories: [],
+      categoryMessageTemplates: {},
+    });
     setPushConfigured(false);
     setPushPublicKey(null);
     setLoaded(false);
@@ -270,15 +286,33 @@ export function useNotifications(token: string | null) {
 
     requestSequenceRef.current += 1;
     setServerEnabled(enabled);
-    await apiPut<{ enabled: boolean }>('/api/notifications/settings', { enabled }, token);
+    const data = await apiPut<{ enabled: boolean; preferences?: NotificationPreferences }>('/api/notifications/settings', { enabled }, token);
     setServerEnabled(enabled);
+    if (data.preferences) setPreferences(data.preferences);
     return enabled;
+  }, [token]);
+
+  const updateNotificationPreferences = useCallback(async (nextPreferences: NotificationPreferences) => {
+    if (!token) {
+      throw new Error('Não autenticado');
+    }
+
+    setPreferences(nextPreferences);
+    const data = await apiPut<{ enabled: boolean; preferences: NotificationPreferences }>(
+      '/api/notifications/settings',
+      { preferences: nextPreferences },
+      token,
+    );
+    setServerEnabled(data.enabled);
+    setPreferences(data.preferences);
+    return data.preferences;
   }, [token]);
 
   return {
     notifications,
     pageInfo,
     serverEnabled,
+    preferences,
     pushConfigured,
     pushPublicKey,
     loaded,
@@ -292,5 +326,6 @@ export function useNotifications(token: string | null) {
     markAllRead,
     clearAll,
     updateNotificationsEnabled,
+    updateNotificationPreferences,
   };
 }

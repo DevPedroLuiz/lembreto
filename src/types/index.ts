@@ -169,6 +169,16 @@ export interface NotificationSchedulesResponse {
   diagnostics: NotificationScheduleDiagnostics;
 }
 
+export type CategoryMessageTemplates = Record<string, string>;
+
+export interface NotificationPreferences {
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  mutedCategories: string[];
+  categoryMessageTemplates: CategoryMessageTemplates;
+}
+
 export interface HolidayRegionOption {
   code: string;
   name: string;

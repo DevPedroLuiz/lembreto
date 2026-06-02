@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bell,
   BellOff,
+  BellRing,
   CalendarClock,
   CalendarDays,
   CheckCircle2,
@@ -199,12 +200,73 @@ function getScheduleStatusLabel(status: NotificationScheduleQueueItem['status'])
   return 'Cancelado';
 }
 
+function getScheduleStatusStyle(status?: NotificationScheduleQueueItem['status']) {
+  if (status === 'pending') return 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:ring-blue-500/20';
+  if (status === 'processing') return 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20';
+  if (status === 'sent') return 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20';
+  if (status === 'failed') return 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20';
+  if (status === 'cancelled') return 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-white/[0.06] dark:text-slate-300 dark:ring-white/10';
+  return 'bg-slate-100 text-slate-500 ring-slate-200 dark:bg-white/[0.04] dark:text-slate-400 dark:ring-white/10';
+}
+
 function formatScheduleDate(value: string) {
   try {
     return format(parseISO(value), "dd/MM 'às' HH:mm", { locale: ptBR });
   } catch {
     return 'Data indisponível';
   }
+}
+
+function getLatestSchedule(
+  schedules: NotificationScheduleQueueItem[],
+  kind: NotificationScheduleQueueItem['kind'],
+) {
+  return schedules
+    .filter((schedule) => schedule.kind === kind)
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0] ?? null;
+}
+
+function buildScheduleSlots(task: Task, schedules: NotificationScheduleQueueItem[]) {
+  const preNoticeMinutes = task.preNoticeMinutes ?? 15;
+  const hasTimedStart = Boolean(task.dueDate);
+  const overdueSchedule = getLatestSchedule(schedules, 'overdue_reminder');
+
+  return [
+    {
+      id: 'pre_notice',
+      icon: <Bell size={15} />,
+      label: `${preNoticeMinutes} min antes`,
+      description: 'Pré-aviso',
+      schedule: getLatestSchedule(schedules, 'pre_notice'),
+      fallback: hasTimedStart ? 'Aguardando recriação da fila' : 'Disponível só com horário',
+    },
+    {
+      id: 'notification',
+      icon: <Clock3 size={15} />,
+      label: 'No horário',
+      description: 'Aviso principal',
+      schedule: getLatestSchedule(schedules, 'notification'),
+      fallback: hasTimedStart ? 'Aguardando recriação da fila' : 'Disponível só com horário',
+    },
+    {
+      id: 'alarm',
+      icon: <BellRing size={15} />,
+      label: 'Alarme',
+      description: task.alarmEnabled ? 'Toque sonoro' : 'Desativado',
+      schedule: getLatestSchedule(schedules, 'alarm'),
+      fallback: task.alarmEnabled ? 'Aguardando recriação da fila' : 'Alarme desligado',
+    },
+    {
+      id: 'overdue_reminder',
+      icon: <AlertTriangle size={15} />,
+      label: 'Atrasado',
+      description: overdueSchedule?.sequenceIndex !== null && overdueSchedule?.sequenceIndex !== undefined
+        ? `Aviso #${overdueSchedule.sequenceIndex + 1}`
+        : 'Avisos de atraso',
+      schedule: overdueSchedule,
+      fallback: task.status === 'overdue' ? 'Aguardando próximo atraso' : 'Só aparece após vencer',
+    },
+  ];
 }
 
 export function TaskDetailsDialog({
@@ -247,6 +309,7 @@ export function TaskDetailsDialog({
   const isInactive = task.status === 'inactive';
   const isBusy = isDeleting || isToggling || isRescheduling || isSyncingCalendar || isTogglingActive;
   const historyItems = buildTaskHistory(task);
+  const scheduleSlots = buildScheduleSlots(task, notificationSchedules);
 
   return (
     <AnimatePresence>
@@ -524,31 +587,67 @@ export function TaskDetailsDialog({
                         {isLoadingNotificationSchedules && <Loader2 size={16} className="animate-spin text-slate-400" />}
                       </div>
 
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        {scheduleSlots.map((slot) => (
+                          <div
+                            key={slot.id}
+                            className="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <span className="icon-slot mt-0.5 h-8 w-8 rounded-xl bg-white text-blue-700 ring-1 ring-slate-200 dark:bg-white/[0.06] dark:text-blue-300 dark:ring-white/10">
+                                  {slot.icon}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{slot.label}</p>
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{slot.description}</p>
+                                </div>
+                              </div>
+                              <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getScheduleStatusStyle(slot.schedule?.status)}`}>
+                                {slot.schedule ? getScheduleStatusLabel(slot.schedule.status) : 'Inativo'}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              {slot.schedule
+                                ? `${formatScheduleDate(slot.schedule.notifyAt)}${slot.schedule.errorMessage ? ` - ${slot.schedule.errorMessage}` : ''}`
+                                : slot.fallback}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+
                       <div className="mt-4 grid gap-2">
                         {notificationSchedules.length === 0 && !isLoadingNotificationSchedules ? (
                           <p className="rounded-2xl bg-slate-50 px-3 py-3 text-sm text-slate-500 dark:bg-white/[0.04] dark:text-slate-400">
                             Nenhum aviso encontrado na fila para este lembrete.
                           </p>
                         ) : (
-                          notificationSchedules.map((schedule) => (
-                            <div
-                              key={schedule.id}
-                              className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03] sm:grid-cols-[1fr_auto] sm:items-center"
-                            >
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                  {getScheduleKindLabel(schedule.kind)}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                  {formatScheduleDate(schedule.notifyAt)}
-                                  {schedule.errorMessage ? ` - ${schedule.errorMessage}` : ''}
-                                </p>
-                              </div>
-                              <span className="inline-flex w-fit rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-white/[0.06] dark:text-slate-300 dark:ring-white/10">
-                                {getScheduleStatusLabel(schedule.status)}
-                              </span>
+                          <details className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                            <summary className="cursor-pointer text-sm font-semibold text-slate-700 dark:text-slate-200">
+                              Ver registros da fila ({notificationSchedules.length})
+                            </summary>
+                            <div className="mt-3 grid gap-2">
+                              {notificationSchedules.map((schedule) => (
+                                <div
+                                  key={schedule.id}
+                                  className="grid gap-2 rounded-2xl bg-white px-3 py-3 dark:bg-white/[0.04] sm:grid-cols-[1fr_auto] sm:items-center"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                      {getScheduleKindLabel(schedule.kind)}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                      {formatScheduleDate(schedule.notifyAt)}
+                                      {schedule.errorMessage ? ` - ${schedule.errorMessage}` : ''}
+                                    </p>
+                                  </div>
+                                  <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getScheduleStatusStyle(schedule.status)}`}>
+                                    {getScheduleStatusLabel(schedule.status)}
+                                  </span>
+                                </div>
+                              ))}
                             </div>
-                          ))
+                          </details>
                         )}
                       </div>
                     </div>

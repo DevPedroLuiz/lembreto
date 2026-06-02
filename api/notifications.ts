@@ -8,6 +8,7 @@ import {
   handleNotificationPushSubscriptions,
   handleNotificationSettings,
   handleNotificationProcessDue,
+  handleNotificationSchedulesQueue,
   handleNotificationsCollection,
 } from '../lib/handlers/notifications.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
@@ -38,6 +39,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'process-due') {
       return handleNotificationProcessDue({ sql, request });
+    }
+
+    if (action === 'schedules') {
+      return handleNotificationSchedulesQueue({ sql, request });
     }
 
     if (action === 'alarm-snooze') {
