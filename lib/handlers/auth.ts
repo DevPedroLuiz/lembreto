@@ -16,6 +16,7 @@ import { logError, logInfo, logWarn } from '../logger.js';
 import {
   createEmailVerificationToken,
   hashEmailVerificationToken,
+  isVerificationEmailConfigured,
   sendVerificationEmail,
 } from '../email-verification.js';
 import {
@@ -236,6 +237,14 @@ async function sendVerificationForUser(
   context: HandlerContext,
   user: Pick<UserRow, 'id' | 'name' | 'email'>,
 ) {
+  if (!isVerificationEmailConfigured()) {
+    logInfo(
+      'auth_verification_email_skipped',
+      getRequestMeta(context.request, { userId: user.id, reason: 'RESEND_API_KEY_missing' }),
+    );
+    return;
+  }
+
   await ensureAuthSecuritySchema(context.sql);
 
   await context.sql`

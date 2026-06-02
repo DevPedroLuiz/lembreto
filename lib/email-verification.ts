@@ -18,6 +18,10 @@ export function createEmailVerificationToken(): {
   };
 }
 
+export function isVerificationEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY);
+}
+
 export async function sendVerificationEmail(
   to: string,
   name: string,

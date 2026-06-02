@@ -1047,6 +1047,7 @@ test.describe('Lembreto critical flows', () => {
       await page.getByTestId('sidebar-profile-button').click();
       await page.getByTestId('profile-name-input').fill(updatedName);
       await page.getByTestId('profile-email-input').fill(updatedEmail);
+      await page.getByTestId('profile-current-password-input').fill(user.password);
       await page.getByTestId('profile-password-input').fill(updatedPassword);
       await page.getByTestId('profile-avatar-input').setInputFiles({
         name: 'avatar.png',
