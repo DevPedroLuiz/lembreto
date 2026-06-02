@@ -15,7 +15,7 @@ import {
   ensureHolidayLocationSchema,
 } from '../holidays.js';
 import { assertInfrastructure } from '../infrastructure.js';
-import { logError, logInfo } from '../logger.js';
+import { logError, logInfo, logWarn } from '../logger.js';
 import {
   cancelPendingNotificationSchedulesForTask,
   ensureNotificationSchedulingInfrastructure,
@@ -43,11 +43,13 @@ import {
   ensureTaskSideEffectsInfrastructure,
   userHasActiveExternalCalendarSync,
 } from '../task-side-effects.js';
+import { checkRateLimit } from '../../api/_rate_limit.js';
 import { verifyCalendarFeedToken } from '../jwt.js';
 import type { OverdueReminderIntensity } from '../contracts.js';
 import {
   type HandlerContext,
   type HandlerResult,
+  getRequestIp,
   getRequestMeta,
   json,
   methodNotAllowed,
@@ -676,6 +678,19 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
   }
 
   if (request.method === 'POST') {
+    const rateLimit = await checkRateLimit(getRequestIp(request), 'bulk_create');
+    if (!rateLimit.allowed) {
+      const minutes = Math.ceil((rateLimit.retryAfterSeconds ?? 60) / 60);
+      logWarn('tasks_create_rate_limited', getRequestMeta(request, {
+        userId: user.id,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      }));
+      return json(429, {
+        error: `Muitas criações em sequência. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      });
+    }
+
     const parsed = createTaskSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return json(400, { error: formatZodError(parsed.error) });

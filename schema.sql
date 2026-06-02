@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   password    TEXT        NOT NULL,
   google_id   TEXT        UNIQUE,
   avatar      TEXT,
+  email_verified_at TIMESTAMPTZ,
   notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   state_code  TEXT,
   city_name   TEXT,
@@ -272,13 +273,35 @@ CREATE INDEX IF NOT EXISTS idx_token_blacklist_user_expires
   ON token_blacklist(user_id, expires_at);
 
 -- ============================================================
+-- Sessões e dispositivos conectados
+-- ============================================================
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_jti TEXT NOT NULL UNIQUE,
+  user_agent TEXT,
+  ip TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_last_seen
+  ON auth_sessions(user_id, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_active
+  ON auth_sessions(token_jti)
+  WHERE revoked_at IS NULL;
+
+-- ============================================================
 -- Rate limiting de autenticação (login / register)
 -- ESTAVA AUSENTE — causava erro em _rate_limit.ts
 -- ============================================================
 CREATE TABLE IF NOT EXISTS auth_rate_limit (
   id           BIGSERIAL   PRIMARY KEY,
   ip           TEXT        NOT NULL,
-  route        TEXT        NOT NULL CHECK (route IN ('login', 'register', 'recover')),
+  route        TEXT        NOT NULL CHECK (route IN ('login', 'register', 'recover', 'bulk_create', 'verify_email')),
   attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -300,6 +323,25 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE INDEX IF NOT EXISTS idx_prt_token_hash ON password_reset_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_prt_user_id    ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_prt_expires_at ON password_reset_tokens(expires_at);
+
+-- ============================================================
+-- Tokens de verificação de e-mail
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_evt_token_hash ON email_verification_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_evt_user_id ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_evt_expires_at ON email_verification_tokens(expires_at);
 
 -- ============================================================
 -- Central de notificações

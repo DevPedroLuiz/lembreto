@@ -12,6 +12,7 @@ import {
 } from './lib/handlers/core.js';
 import {
   handleAuthConfig,
+  handleAuthCancelAccount,
   handleAuthGoogleCallback,
   handleAuthGoogleStart,
   handleAuthLogin,
@@ -20,7 +21,10 @@ import {
   handleAuthProfile,
   handleAuthRecover,
   handleAuthRegister,
+  handleAuthResendVerification,
   handleAuthResetPassword,
+  handleAuthSessions,
+  handleAuthVerifyEmail,
 } from './lib/handlers/auth.js';
 import {
   handleTaskById,
@@ -126,6 +130,12 @@ async function startServer() {
   app.delete('/api/auth/me', run(handleAuthMe));
   app.post('/api/auth/recover', run(handleAuthRecover));
   app.post('/api/auth/reset-password', run(handleAuthResetPassword));
+  app.get('/api/auth/verify-email', run(handleAuthVerifyEmail));
+  app.post('/api/auth/verify-email', run(handleAuthVerifyEmail));
+  app.post('/api/auth/verify-email/resend', run(handleAuthResendVerification));
+  app.get('/api/auth/sessions', run(handleAuthSessions));
+  app.delete('/api/auth/sessions', run(handleAuthSessions));
+  app.delete('/api/auth/account', run(handleAuthCancelAccount));
   app.put('/api/auth/profile', run(handleAuthProfile));
 
   app.get('/api/tasks', run(handleTasksCollection));

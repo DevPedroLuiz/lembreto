@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiPost, apiPut } from '../api/client';
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import { LS } from '../lib/storage';
 import type { User } from '../types';
+
+export interface AuthSession {
+  id: string;
+  userId: string;
+  userAgent: string | null;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  current: boolean;
+}
 
 export interface AuthState {
   currentUser: User | null;
@@ -144,6 +156,7 @@ export function useAuth() {
   const updateProfile = async (payload: {
     name?: string;
     email?: string;
+    currentPassword?: string;
     password?: string;
     avatar?: string | null;
     stateCode?: string | null;
@@ -164,6 +177,37 @@ export function useAuth() {
     return data;
   };
 
+  const resendVerificationEmail = async () => {
+    if (!token) throw new Error('Não autenticado');
+    return apiPost<{ message: string }>('/api/auth/verify-email/resend', {}, token);
+  };
+
+  const listSessions = async () => {
+    if (!token) throw new Error('Não autenticado');
+    const data = await apiGet<{ sessions: AuthSession[] }>('/api/auth/sessions', token);
+    return data.sessions;
+  };
+
+  const revokeSession = async (sessionId: string) => {
+    if (!token) throw new Error('Não autenticado');
+    const data = await apiDelete<{ revokedCurrent?: boolean }>('/api/auth/sessions', token, { sessionId });
+    if (data?.revokedCurrent) {
+      LS.clearUser();
+      setCurrentUser(null);
+      setToken(null);
+    }
+    return data;
+  };
+
+  const cancelAccount = async () => {
+    if (!token) throw new Error('Não autenticado');
+    const data = await apiDelete<{ message: string }>('/api/auth/account', token);
+    LS.clearUser();
+    setCurrentUser(null);
+    setToken(null);
+    return data;
+  };
+
   return {
     currentUser,
     token,
@@ -174,5 +218,10 @@ export function useAuth() {
     logout,
     recoverPassword,
     updateProfile,
+    restoreSession,
+    resendVerificationEmail,
+    listSessions,
+    revokeSession,
+    cancelAccount,
   };
 }

@@ -13,6 +13,7 @@ import {
   FileText,
   Loader2,
   PencilLine,
+  Power,
   Tag,
   Trash2,
 } from 'lucide-react';
@@ -20,9 +21,9 @@ import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
+import { buildDueDateFromForm, formatDateInputValue, getTaskTimeDescription, getTaskTimeLabel } from '../lib/taskDueDate';
 import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../lib/taskStatus';
-import type { Priority, Task } from '../types';
+import type { Priority, Status, Task } from '../types';
 
 function cn(...inputs: Parameters<typeof clsx>) {
   return twMerge(clsx(inputs));
@@ -46,6 +47,14 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   high: 'Alta',
 };
 
+const QUICK_STATUS_OPTIONS: Array<{ value: Status; label: string }> = [
+  { value: 'pending', label: 'Pendente' },
+  { value: 'overdue', label: 'Atrasado' },
+  { value: 'completed', label: 'Concluído' },
+  { value: 'inactive', label: 'Desativado' },
+  { value: 'cancelled', label: 'Cancelado' },
+];
+
 interface TaskItemProps {
   key?: string | number;
   task: Task;
@@ -53,6 +62,10 @@ interface TaskItemProps {
   onDelete: (id: string, e: React.MouseEvent) => void;
   onEdit: (t: Task) => void;
   onToggleActive?: (t: Task) => void;
+  onQuickUpdate?: (
+    task: Task,
+    payload: Partial<Pick<Task, 'dueDate' | 'priority' | 'status' | 'alarmEnabled'>>,
+  ) => void;
   onSelectionChange?: (task: Task, selected: boolean) => void;
   showSelectionControl?: boolean;
   showToggleControl?: boolean;
@@ -70,6 +83,7 @@ function TaskItemComponent({
   onDelete,
   onEdit,
   onToggleActive,
+  onQuickUpdate,
   onSelectionChange,
   showSelectionControl = false,
   showToggleControl = false,
@@ -143,6 +157,21 @@ function TaskItemComponent({
     } catch {
       return '--';
     }
+  };
+
+  const quickDate = date ? formatDateInputValue(date) : '';
+  const quickTime = timeLabel ?? '';
+  const canQuickEdit = Boolean(onQuickUpdate) && !isDraft && !isBusy && task.syncStatus !== 'pending';
+
+  const handleQuickTimeChange = (nextTime: string) => {
+    if (!onQuickUpdate) return;
+    if (!nextTime) {
+      onQuickUpdate(task, { dueDate: null, alarmEnabled: false });
+      return;
+    }
+
+    const dateValue = quickDate || formatDateInputValue(new Date());
+    onQuickUpdate(task, { dueDate: buildDueDateFromForm(dateValue, nextTime) });
   };
 
   React.useEffect(() => {
@@ -441,6 +470,87 @@ function TaskItemComponent({
             >
               Dia todo
             </span>
+          )}
+
+          {canQuickEdit && !compact && (
+            <div
+              data-testid="task-quick-edit"
+              className="mt-2 grid w-full gap-2 rounded-2xl border border-slate-200/70 bg-white/72 p-2 dark:border-white/10 dark:bg-white/[0.04] sm:grid-cols-[112px_116px_128px_132px_auto]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <label className="min-w-0">
+                <span className="sr-only">Horário</span>
+                <input
+                  type="time"
+                  value={quickTime}
+                  disabled={!canQuickEdit}
+                  onChange={(event) => handleQuickTimeChange(event.target.value)}
+                  className="field-control h-9 rounded-xl px-2 text-xs"
+                  data-testid="task-quick-time"
+                  title={quickTime ? 'Alterar horário' : 'Adicionar horário para hoje'}
+                />
+              </label>
+
+              <select
+                value={task.priority}
+                disabled={!canQuickEdit}
+                onChange={(event) => onQuickUpdate?.(task, { priority: event.target.value as Priority })}
+                className="field-control h-9 rounded-xl px-2 text-xs"
+                data-testid="task-quick-priority"
+                aria-label="Alterar prioridade"
+              >
+                {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={task.status}
+                disabled={!canQuickEdit}
+                onChange={(event) => onQuickUpdate?.(task, { status: event.target.value as Status })}
+                className="field-control h-9 rounded-xl px-2 text-xs"
+                data-testid="task-quick-status"
+                aria-label="Alterar status"
+              >
+                {QUICK_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <label className="inline-flex h-9 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+                <span className="inline-flex items-center gap-1">
+                  <Bell size={13} />
+                  Alarme
+                </span>
+                <input
+                  type="checkbox"
+                  checked={task.alarmEnabled}
+                  disabled={!canQuickEdit || !timeLabel}
+                  onChange={(event) => onQuickUpdate?.(task, { alarmEnabled: event.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  data-testid="task-quick-alarm"
+                  aria-label="Ativar alarme"
+                />
+              </label>
+
+              <button
+                type="button"
+                disabled={!canQuickEdit || !canToggleActive}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleActive?.(task);
+                }}
+                className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:border-blue-400/20 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+                data-testid="task-quick-active"
+              >
+                <Power size={13} />
+                {isInactive ? 'Ativar' : 'Pausar'}
+              </button>
+            </div>
           )}
 
           {isDeleting && (

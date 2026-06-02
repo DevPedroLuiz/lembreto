@@ -13,6 +13,7 @@ if (!SECRET) {
 export interface JwtPayload {
   sub: string;   // user id
   email: string;
+  jti?: string;
   iat?: number;
   exp?: number;
 }
@@ -38,7 +39,12 @@ export interface CalendarOAuthStateJwtPayload {
 
 /** Gera um JWT assinado válido por 7 dias. */
 export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-  return jwt.sign(payload, SECRET as string, { expiresIn: '7d' });
+  const { jti, ...claims } = payload;
+  return jwt.sign(
+    claims,
+    SECRET as string,
+    { expiresIn: '7d', ...(jti ? { jwtid: jti } : {}) },
+  );
 }
 
 /** Verifica e decodifica o token. Lança erro se inválido ou expirado. */

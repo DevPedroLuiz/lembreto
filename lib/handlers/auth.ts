@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import {
   buildTokenJti,
+  ensureAuthSecuritySchema,
   ensureGoogleAuthSchema,
   ensureUserProfileSchema,
   getAuthFailureResponse,
@@ -12,6 +13,11 @@ import { isTrustedRequestOrigin } from '../csrf.js';
 import { resolveHolidayLocation } from '../holidays.js';
 import { extractBearerToken, signToken, verifyToken } from '../jwt.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import {
+  createEmailVerificationToken,
+  hashEmailVerificationToken,
+  sendVerificationEmail,
+} from '../email-verification.js';
 import {
   createPasswordResetToken,
   hashPasswordResetToken,
@@ -32,7 +38,9 @@ import {
   profileUpdateSchema,
   recoverPasswordSchema,
   registerSchema,
+  revokeSessionSchema,
   resetPasswordSchema,
+  verifyEmailSchema,
 } from '../schemas.js';
 import { checkRateLimit, clearRateLimit } from '../../api/_rate_limit.js';
 import {
@@ -58,6 +66,7 @@ interface UserRow {
   id: string;
   name: string;
   email: string;
+  emailVerifiedAt: string | null;
   avatar: string | null;
   stateCode: string | null;
   cityName: string | null;
@@ -96,10 +105,23 @@ interface ProfileCurrentUserRow {
   name: string;
   email: string;
   password: string;
+  email_verified_at: string | null;
   avatar: string | null;
   state_code: string | null;
   city_name: string | null;
   holiday_region_code: string | null;
+}
+
+interface AuthSessionRow {
+  id: string;
+  userId: string;
+  userAgent: string | null;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  current: boolean;
 }
 
 export async function handleAuthConfig({ request }: HandlerContext): Promise<HandlerResult> {
@@ -139,6 +161,99 @@ function getAppBaseUrl(context: HandlerContext): string {
 
 function getGoogleRedirectUri(context: HandlerContext): string {
   return `${getAppBaseUrl(context)}/api/auth/google/callback`;
+}
+
+function buildVerificationLink(context: HandlerContext, rawToken: string): string {
+  return `${getAppBaseUrl(context)}/api/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
+}
+
+function getRequestUserAgent(request: HandlerContext['request']): string | null {
+  const userAgent = request.headers['user-agent'];
+  const value = Array.isArray(userAgent) ? userAgent[0] : userAgent;
+  return value?.slice(0, 512) || null;
+}
+
+function getTokenExpiryDate(payload: { exp?: number }): Date {
+  return new Date((payload.exp ?? Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60) * 1000);
+}
+
+async function createTrackedSession(
+  context: HandlerContext,
+  user: Pick<UserRow, 'id' | 'email'>,
+): Promise<{ token: string; tokenJti: string }> {
+  await ensureAuthSecuritySchema(context.sql);
+
+  const tokenJti = crypto.randomUUID();
+  const token = signToken({ sub: user.id, email: user.email, jti: tokenJti });
+  const payload = verifyToken(token);
+
+  await context.sql`
+    INSERT INTO auth_sessions (user_id, token_jti, user_agent, ip, expires_at)
+    VALUES (
+      ${user.id},
+      ${tokenJti},
+      ${getRequestUserAgent(context.request)},
+      ${getRequestIp(context.request)},
+      ${getTokenExpiryDate(payload)}
+    )
+  `;
+
+  return { token, tokenJti };
+}
+
+async function touchTrackedSession(
+  sql: HandlerContext['sql'],
+  payload: { sub: string; jti?: string; iat?: number },
+) {
+  await ensureAuthSecuritySchema(sql);
+
+  await sql`
+    UPDATE auth_sessions
+    SET last_seen_at = NOW()
+    WHERE token_jti = ${buildTokenJti(payload)}
+      AND user_id = ${payload.sub}
+      AND revoked_at IS NULL
+      AND expires_at > NOW()
+  `;
+}
+
+async function revokeTrackedSession(
+  sql: HandlerContext['sql'],
+  payload: { sub: string; jti?: string; iat?: number },
+) {
+  await ensureAuthSecuritySchema(sql);
+
+  await sql`
+    UPDATE auth_sessions
+    SET revoked_at = COALESCE(revoked_at, NOW())
+    WHERE token_jti = ${buildTokenJti(payload)}
+      AND user_id = ${payload.sub}
+      AND revoked_at IS NULL
+  `;
+}
+
+async function sendVerificationForUser(
+  context: HandlerContext,
+  user: Pick<UserRow, 'id' | 'name' | 'email'>,
+) {
+  await ensureAuthSecuritySchema(context.sql);
+
+  await context.sql`
+    UPDATE email_verification_tokens
+    SET used = TRUE
+    WHERE user_id = ${user.id}
+      AND email = ${user.email}
+      AND used = FALSE
+      AND expires_at > NOW()
+  `;
+
+  const { rawToken, tokenHash, expiresAt } = createEmailVerificationToken();
+  await context.sql`
+    INSERT INTO email_verification_tokens (user_id, email, token_hash, expires_at)
+    VALUES (${user.id}, ${user.email}, ${tokenHash}, ${expiresAt})
+  `;
+
+  await sendVerificationEmail(user.email, user.name, buildVerificationLink(context, rawToken));
 }
 
 function redirectToAuthError(context: HandlerContext, message: string, clearState = true): HandlerResult {
@@ -205,6 +320,7 @@ async function findOrCreateGoogleUser(
       id,
       name,
       email,
+      email_verified_at AS "emailVerifiedAt",
       avatar,
       state_code AS "stateCode",
       city_name AS "cityName",
@@ -219,12 +335,14 @@ async function findOrCreateGoogleUser(
     const updated = await sql`
       UPDATE users
       SET
-        google_id = ${profile.sub}
+        google_id = ${profile.sub},
+        email_verified_at = COALESCE(email_verified_at, NOW())
       WHERE id = ${user.id}
       RETURNING
         id,
         name,
         email,
+        email_verified_at AS "emailVerifiedAt",
         avatar,
         state_code AS "stateCode",
         city_name AS "cityName",
@@ -239,6 +357,7 @@ async function findOrCreateGoogleUser(
       id,
       name,
       email,
+      email_verified_at AS "emailVerifiedAt",
       avatar,
       state_code AS "stateCode",
       city_name AS "cityName",
@@ -252,12 +371,14 @@ async function findOrCreateGoogleUser(
     const linked = await sql`
       UPDATE users
       SET
-        google_id = ${profile.sub}
+        google_id = ${profile.sub},
+        email_verified_at = COALESCE(email_verified_at, NOW())
       WHERE id = ${user.id}
       RETURNING
         id,
         name,
         email,
+        email_verified_at AS "emailVerifiedAt",
         avatar,
         state_code AS "stateCode",
         city_name AS "cityName",
@@ -270,12 +391,13 @@ async function findOrCreateGoogleUser(
   const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
   const name = profile.name?.trim() || profile.email.split('@')[0] || 'Usuário Google';
   const rows = await sql`
-    INSERT INTO users (name, email, password, avatar, google_id)
-    VALUES (${name}, ${profile.email}, ${generatedPasswordHash}, ${null}, ${profile.sub})
+    INSERT INTO users (name, email, password, avatar, google_id, email_verified_at)
+    VALUES (${name}, ${profile.email}, ${generatedPasswordHash}, ${null}, ${profile.sub}, NOW())
     RETURNING
       id,
       name,
       email,
+      email_verified_at AS "emailVerifiedAt",
       avatar,
       state_code AS "stateCode",
       city_name AS "cityName",
@@ -348,7 +470,7 @@ export async function handleAuthGoogleCallback(context: HandlerContext): Promise
       sub: profile.sub,
       email: profile.email,
     });
-    const token = signToken({ sub: user.id, email: user.email });
+    const { token } = await createTrackedSession(context, user);
 
     logInfo('auth_google_success', getRequestMeta(request, { userId: user.id }));
     return empty(302, {
@@ -412,6 +534,7 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
         id,
         name,
         email,
+        email_verified_at AS "emailVerifiedAt",
         avatar,
         state_code AS "stateCode",
         city_name AS "cityName",
@@ -421,7 +544,10 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
     const user = rows[0] as unknown as UserRow;
     await clearRateLimit(ip, 'register');
 
-    const token = signToken({ sub: user.id, email: user.email });
+    const { token } = await createTrackedSession(context, user);
+    void sendVerificationForUser(context, user).catch((error) => {
+      logError('auth_register_verification_email_failed', error, getRequestMeta(request, { userId: user.id }));
+    });
     logInfo('auth_register_success', getRequestMeta(request, { userId: user.id, ip }));
 
     return json(201, { user, token });
@@ -462,13 +588,14 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
       if (!recaptchaOk) return json(400, { error: RECAPTCHA_ERROR });
     }
 
-    await ensureUserProfileSchema(sql);
+    await ensureAuthSecuritySchema(sql);
 
     const rows = await sql`
       SELECT
         id,
         name,
         email,
+        email_verified_at AS "emailVerifiedAt",
         avatar,
         state_code AS "stateCode",
         city_name AS "cityName",
@@ -490,8 +617,8 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
 
     await clearRateLimit(ip, 'login');
 
-      const { password_hash: _passwordHash, ...safeUser } = user;
-    const token = signToken({ sub: safeUser.id, email: safeUser.email });
+    const { password_hash: _passwordHash, ...safeUser } = user;
+    const { token } = await createTrackedSession(context, safeUser);
     logInfo('auth_login_success', getRequestMeta(request, { userId: safeUser.id, ip }));
 
     return json(200, { user: safeUser, token });
@@ -512,6 +639,7 @@ export async function handleAuthLogout(context: HandlerContext): Promise<Handler
 
   try {
     const payload = verifyToken(token);
+    await revokeTrackedSession(sql, payload);
     await sql`
       INSERT INTO token_blacklist (token_jti, user_id, expires_at)
       VALUES (
@@ -546,6 +674,9 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
         sql,
         request.headers.authorization as string | undefined,
       );
+      await touchTrackedSession(sql, payload).catch((error) => {
+        logError('auth_me_session_touch_failed', error, getRequestMeta(request, { userId: payload.sub }));
+      });
       return json(
         200,
         { ok: true, sub: payload.sub },
@@ -567,6 +698,10 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
 
     try {
       const { user } = await requireAuthFromToken(sql, token);
+      const payload = verifyToken(token);
+      await touchTrackedSession(sql, payload).catch((error) => {
+        logError('auth_me_cookie_session_touch_failed', error, getRequestMeta(request, { userId: user.id }));
+      });
       return json(200, { user, token });
     } catch (error) {
       const authFailure = getAuthFailureResponse(error);
@@ -708,6 +843,239 @@ export async function handleAuthResetPassword(context: HandlerContext): Promise<
   }
 }
 
+export async function handleAuthVerifyEmail(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+
+  const rawToken = request.method === 'GET'
+    ? getStringQueryParam(request.query?.token)
+    : (() => {
+      const parsed = verifyEmailSchema.safeParse(request.body ?? {});
+      return parsed.success ? parsed.data.token : null;
+    })();
+
+  if (!rawToken) {
+    if (request.method === 'GET') {
+      return empty(302, {
+        Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent('Link de verificação inválido.')}`,
+      });
+    }
+    return json(400, { error: 'Token obrigatório' });
+  }
+
+  const ip = getRequestIp(request);
+  const rateLimit = await checkRateLimit(ip, 'verify_email');
+  if (!rateLimit.allowed) {
+    const minutes = Math.ceil((rateLimit.retryAfterSeconds ?? 60) / 60);
+    return json(429, {
+      error: `Muitas tentativas. Tente novamente em ${minutes} minuto${minutes > 1 ? 's' : ''}.`,
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  try {
+    await ensureAuthSecuritySchema(sql);
+    const tokenHash = hashEmailVerificationToken(rawToken);
+    const rows = await sql`
+      SELECT id AS token_id, user_id, email
+      FROM email_verification_tokens
+      WHERE token_hash = ${tokenHash}
+        AND used = FALSE
+        AND expires_at > NOW()
+    `;
+
+    if (rows.length === 0) {
+      if (request.method === 'GET') {
+        return empty(302, {
+          Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent('Link de verificação inválido ou expirado.')}`,
+        });
+      }
+      return json(400, { error: 'Link de verificação inválido ou expirado.' });
+    }
+
+    const row = rows[0] as unknown as { token_id: string; user_id: string; email: string };
+    await sql`
+      UPDATE users
+      SET email_verified_at = NOW()
+      WHERE id = ${row.user_id}
+        AND email = ${row.email}
+    `;
+    await sql`UPDATE email_verification_tokens SET used = TRUE WHERE id = ${row.token_id}`;
+    await clearRateLimit(ip, 'verify_email');
+    logInfo('auth_email_verified', getRequestMeta(request, { userId: row.user_id }));
+
+    if (request.method === 'GET') {
+      return empty(302, {
+        Location: `${getAppBaseUrl(context)}/?email_verified=1`,
+      });
+    }
+
+    return json(200, { message: 'E-mail verificado com sucesso.' });
+  } catch (error) {
+    logError('auth_email_verify_failed', error, getRequestMeta(request, { ip }));
+    if (request.method === 'GET') {
+      return empty(302, {
+        Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent('Não foi possível verificar o e-mail.')}`,
+      });
+    }
+    return json(500, { error: 'Não foi possível verificar o e-mail.' });
+  }
+}
+
+export async function handleAuthResendVerification(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+  if (request.method !== 'POST') return methodNotAllowed();
+
+  let auth;
+  try {
+    auth = await requireAuthFromAuthorizationHeader(
+      sql,
+      request.headers.authorization as string | undefined,
+    );
+  } catch (error) {
+    const authFailure = getAuthFailureResponse(error);
+    if (authFailure) return json(authFailure.status, { error: authFailure.error });
+    logError('auth_resend_verify_auth_failed', error, getRequestMeta(request));
+    return json(500, { error: 'Erro interno ao autenticar' });
+  }
+
+  try {
+    await ensureAuthSecuritySchema(sql);
+    const rows = await sql`
+      SELECT id, name, email, email_verified_at AS "emailVerifiedAt"
+      FROM users
+      WHERE id = ${auth.user.id}
+    `;
+    const user = rows[0] as unknown as Pick<UserRow, 'id' | 'name' | 'email' | 'emailVerifiedAt'> | undefined;
+    if (!user) return json(404, { error: 'Usuário não encontrado' });
+    if (user.emailVerifiedAt) return json(200, { message: 'Este e-mail já está verificado.' });
+
+    await sendVerificationForUser(context, user);
+    logInfo('auth_verification_email_resent', getRequestMeta(request, { userId: user.id }));
+    return json(200, { message: 'Enviamos um novo link de verificação.' });
+  } catch (error) {
+    logError('auth_resend_verification_failed', error, getRequestMeta(request, { userId: auth.user.id }));
+    return json(500, { error: 'Não foi possível enviar a verificação agora.' });
+  }
+}
+
+export async function handleAuthSessions(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+  let auth;
+  try {
+    auth = await requireAuthFromAuthorizationHeader(
+      sql,
+      request.headers.authorization as string | undefined,
+    );
+  } catch (error) {
+    const authFailure = getAuthFailureResponse(error);
+    if (authFailure) return json(authFailure.status, { error: authFailure.error });
+    logError('auth_sessions_auth_failed', error, getRequestMeta(request));
+    return json(500, { error: 'Erro interno ao autenticar' });
+  }
+
+  try {
+    await ensureAuthSecuritySchema(sql);
+    const currentJti = buildTokenJti(auth.payload);
+
+    if (request.method === 'GET') {
+      const rows = await sql`
+        SELECT
+          id,
+          user_id AS "userId",
+          user_agent AS "userAgent",
+          ip,
+          created_at AS "createdAt",
+          last_seen_at AS "lastSeenAt",
+          expires_at AS "expiresAt",
+          revoked_at AS "revokedAt",
+          token_jti = ${currentJti} AS current
+        FROM auth_sessions
+        WHERE user_id = ${auth.user.id}
+          AND expires_at > NOW()
+        ORDER BY last_seen_at DESC
+        LIMIT 20
+      `;
+      return json(200, { sessions: rows as unknown as AuthSessionRow[] });
+    }
+
+    if (request.method === 'DELETE') {
+      const parsed = revokeSessionSchema.safeParse(request.body ?? {});
+      if (!parsed.success) return json(400, { error: formatZodError(parsed.error) });
+
+      const rows = await sql`
+        UPDATE auth_sessions
+        SET revoked_at = COALESCE(revoked_at, NOW())
+        WHERE id = ${parsed.data.sessionId}
+          AND user_id = ${auth.user.id}
+        RETURNING token_jti, expires_at
+      `;
+
+      if (rows.length === 0) return json(404, { error: 'Sessão não encontrada.' });
+      const session = rows[0] as unknown as { token_jti: string; expires_at: Date | string };
+      await sql`
+        INSERT INTO token_blacklist (token_jti, user_id, expires_at)
+        VALUES (${session.token_jti}, ${auth.user.id}, ${session.expires_at})
+        ON CONFLICT (token_jti) DO NOTHING
+      `;
+
+      const revokedCurrent = session.token_jti === currentJti;
+      logInfo('auth_session_revoked', getRequestMeta(request, { userId: auth.user.id, revokedCurrent }));
+      return json(200, { revokedCurrent });
+    }
+
+    return methodNotAllowed();
+  } catch (error) {
+    logError('auth_sessions_failed', error, getRequestMeta(request, { userId: auth.user.id }));
+    return json(500, { error: 'Não foi possível carregar as sessões.' });
+  }
+}
+
+export async function handleAuthCancelAccount(context: HandlerContext): Promise<HandlerResult> {
+  const { request, sql } = context;
+  if (request.method !== 'DELETE') return methodNotAllowed();
+
+  let auth;
+  try {
+    auth = await requireAuthFromAuthorizationHeader(
+      sql,
+      request.headers.authorization as string | undefined,
+    );
+  } catch (error) {
+    const authFailure = getAuthFailureResponse(error);
+    if (authFailure) return json(authFailure.status, { error: authFailure.error });
+    logError('auth_cancel_account_auth_failed', error, getRequestMeta(request));
+    return json(500, { error: 'Erro interno ao autenticar' });
+  }
+
+  try {
+    await ensureAuthSecuritySchema(sql);
+    await revokeTrackedSession(sql, auth.payload);
+    await sql`
+      INSERT INTO token_blacklist (token_jti, user_id, expires_at)
+      VALUES (
+        ${buildTokenJti(auth.payload)},
+        ${auth.payload.sub},
+        to_timestamp(${auth.payload.exp ?? 0})
+      )
+      ON CONFLICT (token_jti) DO NOTHING
+    `;
+    await sql`
+      DELETE FROM users
+      WHERE id = ${auth.user.id}
+    `;
+
+    logInfo('auth_account_cancelled', getRequestMeta(request, { userId: auth.user.id }));
+    return json(
+      200,
+      { message: 'Conta cancelada com sucesso.' },
+      { 'Set-Cookie': clearSessionCookie() },
+    );
+  } catch (error) {
+    logError('auth_cancel_account_failed', error, getRequestMeta(request, { userId: auth.user.id }));
+    return json(500, { error: 'Não foi possível cancelar a conta agora.' });
+  }
+}
+
 export async function handleAuthProfile(context: HandlerContext): Promise<HandlerResult> {
   const { request, sql } = context;
   if (request.method !== 'PUT') return methodNotAllowed();
@@ -734,6 +1102,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
   const {
     name,
     email,
+    currentPassword,
     password,
     avatar,
     stateCode,
@@ -759,6 +1128,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         name,
         email,
         password,
+        email_verified_at,
         avatar,
         state_code,
         city_name,
@@ -773,6 +1143,12 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
     const cur = current[0] as unknown as ProfileCurrentUserRow;
     let newPasswordHash = cur.password;
     if (password && password.trim()) {
+      const currentPasswordMatches = currentPassword
+        ? await bcrypt.compare(currentPassword, cur.password)
+        : false;
+      if (!currentPasswordMatches) {
+        return json(400, { error: 'Senha atual incorreta.' });
+      }
       newPasswordHash = await bcrypt.hash(password.trim(), 12);
     }
 
@@ -789,6 +1165,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         : cur.holiday_region_code;
 
     const nextEmail = email || cur.email;
+    const emailChanged = nextEmail !== cur.email;
     const shouldRotateToken =
       Boolean(password && password.trim()) || nextEmail !== auth.user.email;
 
@@ -797,6 +1174,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         name     = ${name || cur.name},
         email    = ${nextEmail},
         password = ${newPasswordHash},
+        email_verified_at = ${emailChanged ? null : cur.email_verified_at},
         avatar   = ${avatar !== undefined ? avatar : cur.avatar},
         state_code = ${nextStateCode},
         city_name = ${nextCityName},
@@ -806,6 +1184,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         id,
         name,
         email,
+        email_verified_at AS "emailVerifiedAt",
         avatar,
         state_code AS "stateCode",
         city_name AS "cityName",
@@ -814,7 +1193,14 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
 
     const user = rows[0] as unknown as UserRow;
 
+    if (emailChanged) {
+      void sendVerificationForUser(context, user).catch((error) => {
+        logError('auth_profile_verification_email_failed', error, getRequestMeta(request, { userId: user.id }));
+      });
+    }
+
     if (shouldRotateToken) {
+      await revokeTrackedSession(sql, auth.payload);
       await sql`
         INSERT INTO token_blacklist (token_jti, user_id, expires_at)
         VALUES (
@@ -825,7 +1211,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         ON CONFLICT (token_jti) DO NOTHING
       `;
 
-      const rotatedToken = signToken({ sub: user.id, email: user.email });
+      const { token: rotatedToken } = await createTrackedSession(context, user);
       logInfo('auth_profile_updated_with_token_rotation', getRequestMeta(request, { userId: user.id }));
       return json(200, { user, token: rotatedToken });
     }

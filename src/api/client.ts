@@ -104,7 +104,7 @@ export async function apiGet<T = unknown>(
   return data as T;
 }
 
-export async function apiDelete(path: string, token: string, body?: object): Promise<void> {
+export async function apiDelete<T = void>(path: string, token: string, body?: object): Promise<T> {
   const res = await fetchWithTimeout(path, {
     method: 'DELETE',
     headers: buildHeaders(token),
@@ -115,4 +115,7 @@ export async function apiDelete(path: string, token: string, body?: object): Pro
     const data = await parseJsonSafe(res);
     throw new ApiError(getApiErrorMessage(data, 'Erro ao deletar'), res.status);
   }
+  if (res.status === 204) return undefined as T;
+  const data = await parseJsonSafe(res);
+  return data as T;
 }

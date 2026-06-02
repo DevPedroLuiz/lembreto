@@ -236,6 +236,14 @@ function formatPreviewDate(dateValue: string): string {
   return `${day}/${month}/${year}`;
 }
 
+function getTodayInputValue(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, '0');
+  const day = `${now.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function isEditableFormElement(element: Element | null): element is HTMLElement {
   return Boolean(element?.matches('input, textarea, select'));
 }
@@ -557,6 +565,7 @@ export function TaskDrawer({
 
   const titleCount = title.trim().length;
   const hasStart = Boolean(date && time);
+  const scheduleMode = hasStart ? 'timed' : 'floating';
   const summaryDue = hasStart ? date : 'Sem início';
   const summaryTime = endTime
     ? `${time} - ${endTime}`
@@ -981,6 +990,58 @@ export function TaskDrawer({
                         />
 
                         <div className={cn('space-y-4', mobileKeyboardOpen && 'space-y-3')}>
+                          <div className="grid gap-2 sm:grid-cols-2" data-testid="task-schedule-mode">
+                            <button
+                              type="button"
+                              disabled={isSubmitting}
+                              aria-pressed={scheduleMode === 'timed'}
+                              onClick={() => {
+                                if (!date) setDate(minimumDate || getTodayInputValue());
+                                if (!time) setTime('09:00');
+                              }}
+                              className={cn(
+                                'rounded-2xl border px-4 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                                scheduleMode === 'timed'
+                                  ? 'border-blue-400 bg-blue-50 text-blue-950 shadow-[0_16px_34px_-26px_rgba(37,99,235,0.72)] dark:border-blue-400/50 dark:bg-blue-500/12 dark:text-white'
+                                  : 'border-slate-200 bg-white/80 text-slate-600 hover:border-blue-200 hover:bg-blue-50/70 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:border-blue-400/20 dark:hover:bg-blue-500/10',
+                              )}
+                            >
+                              <span className="flex items-center gap-2 text-sm font-semibold">
+                                <Clock3 size={16} />
+                                Com horário
+                              </span>
+                              <span className="mt-1 block text-xs leading-5 opacity-80">
+                                Agenda data, horário, pré-aviso e alarme.
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isSubmitting}
+                              aria-pressed={scheduleMode === 'floating'}
+                              onClick={() => {
+                                setDate('');
+                                setTime('');
+                                setEndTime('');
+                                setAlarmEnabled(false);
+                              }}
+                              className={cn(
+                                'rounded-2xl border px-4 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                                scheduleMode === 'floating'
+                                  ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-[0_16px_34px_-26px_rgba(245,158,11,0.72)] dark:border-amber-400/40 dark:bg-amber-500/12 dark:text-amber-50'
+                                  : 'border-slate-200 bg-white/80 text-slate-600 hover:border-amber-200 hover:bg-amber-50/70 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:border-amber-400/20 dark:hover:bg-amber-500/10',
+                              )}
+                            >
+                              <span className="flex items-center gap-2 text-sm font-semibold">
+                                <BellOff size={16} />
+                                Sem horário
+                              </span>
+                              <span className="mt-1 block text-xs leading-5 opacity-80">
+                                Fica como lembrete flutuante, sem alarme sonoro.
+                              </span>
+                            </button>
+                          </div>
+
                           <div>
                             <FieldLabel>Prazo</FieldLabel>
                             <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
@@ -989,7 +1050,6 @@ export function TaskDrawer({
                                 <input
                                   type="date"
                                   data-testid="task-date-input"
-                                  required
                                   min={minimumDate}
                                   value={date}
                                   disabled={isSubmitting}

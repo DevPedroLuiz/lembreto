@@ -16,6 +16,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  emailVerifiedAt?: string | null;
   avatar?: string | null;
   stateCode?: string | null;
   cityName?: string | null;

@@ -25,7 +25,7 @@ import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { apiGet, apiPost, buildHeaders } from './api/client';
-import { useAuth } from './hooks/useAuth';
+import { useAuth, type AuthSession } from './hooks/useAuth';
 import { useCalendarIntegrations } from './hooks/useCalendarIntegrations';
 import { useHolidays } from './hooks/useHolidays';
 import { useAlarmSound } from './hooks/useAlarmSound';
@@ -633,6 +633,8 @@ export default function App() {
     id: string;
     title: string;
   } | null>(null);
+  const [pendingCancelAccount, setPendingCancelAccount] = useState(false);
+  const [isCancellingAccount, setIsCancellingAccount] = useState(false);
   const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null);
   const [notificationClock, setNotificationClock] = useState(() => Date.now());
 
@@ -648,9 +650,13 @@ export default function App() {
 
   const [profName, setProfName] = useState('');
   const [profEmail, setProfEmail] = useState('');
+  const [profCurrentPassword, setProfCurrentPassword] = useState('');
   const [profPassword, setProfPassword] = useState('');
   const [profAvatar, setProfAvatar] = useState<string | null>(null);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
+  const [isSendingProfileVerification, setIsSendingProfileVerification] = useState(false);
+  const [isLoadingProfileSessions, setIsLoadingProfileSessions] = useState(false);
+  const [profileSessions, setProfileSessions] = useState<AuthSession[]>([]);
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
   const [isSavingHolidayLocation, setIsSavingHolidayLocation] = useState(false);
   const [isDetectingHolidayLocation, setIsDetectingHolidayLocation] = useState(false);
@@ -2266,7 +2272,7 @@ export default function App() {
             updated.externalCalendarSyncStatus === 'failed' ? 'Lembrete salvo com aviso' : 'Lembrete atualizado!',
             updated.externalCalendarSyncStatus === 'failed'
               ? (updated.externalCalendarLastError ?? 'O lembrete foi salvo, mas a sincronização do calendário falhou.')
-              : 'As informações do lembrete foram salvas.',
+              : 'As informações do lembrete foram salvas e os avisos foram reagendados.',
             updated.externalCalendarSyncStatus === 'failed' ? 'warning' : 'success',
             {
             target: { type: 'task', taskId: editingTask.id },
@@ -2296,7 +2302,7 @@ export default function App() {
                 ? `${offlineCount} lembrete${offlineCount === 1 ? '' : 's'} ficar${offlineCount === 1 ? 'á' : 'ão'} na fila e sincronizar${offlineCount === 1 ? 'á' : 'ão'} quando a conexão voltar.`
                 : calendarFailedCount > 0
                   ? `${calendarFailedCount} lembrete${calendarFailedCount === 1 ? '' : 's'} foi salvo, mas não sincronizou com o calendário externo.`
-                : `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}.`,
+                : `${recurringDates.length} lembretes foram adicionados até ${formRecurrenceUntil}; os avisos foram agendados.`,
               offlineCount > 0 ? 'info' : calendarFailedCount > 0 ? 'warning' : 'success',
             );
           } else {
@@ -2316,7 +2322,7 @@ export default function App() {
                 { target: { type: 'task', taskId: created.id } },
               );
             } else {
-              emitNotification('Lembrete criado!', `"${created.title}" foi adicionado.`, 'success', {
+              emitNotification('Lembrete criado!', `"${created.title}" foi adicionado e os avisos foram agendados.`, 'success', {
                 target: { type: 'task', taskId: created.id },
               });
             }
@@ -2595,6 +2601,73 @@ export default function App() {
       });
     }
   }, [emitNotification, openEditTask, promotingDraftIds, updateTask]);
+
+  const handleQuickUpdateTask = useCallback(async (
+    task: Task,
+    payload: Partial<Pick<Task, 'dueDate' | 'priority' | 'status' | 'alarmEnabled'>>,
+  ) => {
+    if (task.status === 'draft') return;
+
+    const nextDueDate = 'dueDate' in payload ? payload.dueDate ?? null : task.dueDate;
+    const nextStatus = payload.status ?? task.status;
+    const nextAlarmEnabled = payload.alarmEnabled ?? task.alarmEnabled;
+
+    if (nextAlarmEnabled && !getTaskTimeLabel(nextDueDate)) {
+      emitNotification(
+        'Horário obrigatório',
+        'Defina um horário antes de ativar o alarme neste lembrete.',
+        'warning',
+      );
+      return;
+    }
+
+    if (
+      (nextStatus === 'pending' || nextStatus === 'overdue') &&
+      isWorkCategory(task.category) &&
+      (!nextDueDate || !task.endDate)
+    ) {
+      emitNotification(
+        'Horário obrigatório',
+        'Informe início e fim antes de ativar este lembrete de Trabalho.',
+        'warning',
+      );
+      openEditTask(task);
+      return;
+    }
+
+    try {
+      const normalizedPayload = {
+        ...payload,
+        ...(payload.dueDate === null ? { alarmEnabled: false } : {}),
+      };
+      const updated = await updateTask(task.id, normalizedPayload);
+      const changedField = 'dueDate' in payload
+        ? 'Horário atualizado'
+        : 'priority' in payload
+          ? 'Prioridade atualizada'
+          : 'status' in payload
+            ? 'Status atualizado'
+            : 'Alarme atualizado';
+
+      emitNotification(
+        changedField,
+        `"${updated.title}" foi salvo e os avisos foram reagendados.`,
+        updated.externalCalendarSyncStatus === 'failed' ? 'warning' : 'success',
+        { target: { type: 'task', taskId: updated.id }, toastOnly: true },
+      );
+
+      if (auth.token) {
+        void refreshNotificationScheduleQueue();
+      }
+    } catch (error) {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível atualizar este lembrete.',
+        'error',
+        { toastOnly: true },
+      );
+    }
+  }, [auth.token, emitNotification, openEditTask, refreshNotificationScheduleQueue, updateTask]);
 
   const handleToggleActiveTask = useCallback(async (task: Task) => {
     if (task.status === 'draft' || task.status === 'completed' || togglingActiveTaskIds.has(task.id)) return;
@@ -2925,6 +2998,25 @@ export default function App() {
     }
   }, [deleteNote, editingNote?.id, emitNotification, pendingDeleteNote, resetNoteForm]);
 
+  const refreshProfileSessions = useCallback(async () => {
+    if (!auth.token) return;
+
+    try {
+      setIsLoadingProfileSessions(true);
+      const sessions = await auth.listSessions();
+      setProfileSessions(sessions);
+    } catch (error) {
+      emitNotification(
+        'Sessões indisponíveis',
+        error instanceof Error ? error.message : 'Não foi possível carregar os dispositivos conectados.',
+        'warning',
+        { toastOnly: true },
+      );
+    } finally {
+      setIsLoadingProfileSessions(false);
+    }
+  }, [auth, emitNotification]);
+
   const openProfile = useCallback(() => {
     if (profileCloseTimerRef.current) {
       window.clearTimeout(profileCloseTimerRef.current);
@@ -2933,11 +3025,13 @@ export default function App() {
     setShowNotificationsInbox(false);
     setProfName(auth.currentUser?.name || '');
     setProfEmail(auth.currentUser?.email || '');
+    setProfCurrentPassword('');
     setProfPassword('');
     setProfAvatar(auth.currentUser?.avatar || null);
     setProfileSaveSuccess(false);
     setShowProfileDrawer(true);
-  }, [auth.currentUser]);
+    void refreshProfileSessions();
+  }, [auth.currentUser, refreshProfileSessions]);
 
   const handleUpdateProfile = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2949,6 +3043,7 @@ export default function App() {
       const updatedProfile = await auth.updateProfile({
         name: profName,
         email: profEmail,
+        currentPassword: profCurrentPassword || undefined,
         password: profPassword || undefined,
         avatar: profAvatar,
       });
@@ -2956,7 +3051,10 @@ export default function App() {
         token: updatedProfile.token ?? auth.token,
         target: { type: 'profile' },
       });
+      setProfCurrentPassword('');
+      setProfPassword('');
       setProfileSaveSuccess(true);
+      void refreshProfileSessions();
       profileCloseTimerRef.current = window.setTimeout(() => {
         setShowProfileDrawer(false);
         setProfileSaveSuccess(false);
@@ -2968,7 +3066,75 @@ export default function App() {
     } finally {
       setIsProfileSubmitting(false);
     }
-  }, [auth.updateProfile, emitNotification, isProfileSubmitting, profAvatar, profEmail, profName, profPassword]);
+  }, [auth, emitNotification, isProfileSubmitting, profAvatar, profCurrentPassword, profEmail, profName, profPassword, refreshProfileSessions]);
+
+  const handleResendProfileVerification = useCallback(async () => {
+    if (isSendingProfileVerification) return;
+
+    try {
+      setIsSendingProfileVerification(true);
+      const result = await auth.resendVerificationEmail();
+      emitNotification('Verificação enviada', result.message, 'success', {
+        target: { type: 'profile' },
+        toastOnly: true,
+      });
+    } catch (error) {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível reenviar a verificação.',
+        'error',
+        { toastOnly: true },
+      );
+    } finally {
+      setIsSendingProfileVerification(false);
+    }
+  }, [auth, emitNotification, isSendingProfileVerification]);
+
+  const handleRevokeProfileSession = useCallback(async (sessionId: string) => {
+    try {
+      const result = await auth.revokeSession(sessionId);
+      if (result?.revokedCurrent) {
+        emitNotification('Sessão encerrada', 'Você saiu desta sessão.', 'info', { toastOnly: true });
+        setShowProfileDrawer(false);
+        return;
+      }
+
+      emitNotification('Sessão encerrada', 'O dispositivo selecionado foi desconectado.', 'success', {
+        target: { type: 'profile' },
+        toastOnly: true,
+      });
+      void refreshProfileSessions();
+    } catch (error) {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível encerrar esta sessão.',
+        'error',
+        { toastOnly: true },
+      );
+    }
+  }, [auth, emitNotification, refreshProfileSessions]);
+
+  const handleConfirmCancelAccount = useCallback(async () => {
+    if (isCancellingAccount) return;
+
+    try {
+      setIsCancellingAccount(true);
+      await auth.cancelAccount();
+      setPendingCancelAccount(false);
+      setShowProfileDrawer(false);
+      setProfileSessions([]);
+      emitNotification('Conta cancelada', 'Sua conta e os dados vinculados foram removidos.', 'info', { toastOnly: true });
+    } catch (error) {
+      emitNotification(
+        'Erro',
+        error instanceof Error ? error.message : 'Não foi possível cancelar a conta.',
+        'error',
+        { toastOnly: true },
+      );
+    } finally {
+      setIsCancellingAccount(false);
+    }
+  }, [auth, emitNotification, isCancellingAccount]);
 
   const derivedStatusNow = useMemo(() => new Date(notificationClock), [notificationClock]);
 
@@ -3289,6 +3455,9 @@ export default function App() {
       profileCloseTimerRef.current = null;
     }
     setProfileSaveSuccess(false);
+    setProfCurrentPassword('');
+    setProfPassword('');
+    setProfileSessions([]);
     setShowProfileDrawer(false);
   }, []);
 
@@ -3515,10 +3684,17 @@ export default function App() {
     const notificationTarget = params.get('notificationTarget');
     const connectedCalendar = params.get('calendar_connected');
     const calendarError = params.get('calendar_error');
+    const emailVerified = params.get('email_verified');
 
     if (action === 'new-task' && auth.currentUser) {
       openNewTask();
       params.delete('action');
+    } else if (emailVerified) {
+      triggerToastOnly('E-mail verificado', 'Sua conta agora está com o e-mail confirmado.');
+      if (auth.token) {
+        void auth.restoreSession();
+      }
+      params.delete('email_verified');
     } else if (connectedCalendar) {
       openSettings('organization');
       triggerToastOnly(
@@ -3606,6 +3782,7 @@ export default function App() {
   }, [
     auth.currentUser,
     auth.restoring,
+    auth.restoreSession,
     auth.token,
     locationSearch,
     handleSnoozeOverdueNotification,
@@ -3722,6 +3899,12 @@ export default function App() {
       );
 
       if (event.key === 'Escape') {
+        if (pendingCancelAccount && !isCancellingAccount) {
+          event.preventDefault();
+          setPendingCancelAccount(false);
+          return;
+        }
+
         if (pendingDeleteNote) {
           event.preventDefault();
           cancelDeleteNote();
@@ -3792,6 +3975,7 @@ export default function App() {
         Boolean(pendingDeleteTask) ||
         Boolean(pendingDeleteTaskSelection) ||
         Boolean(pendingDeleteNote) ||
+        Boolean(pendingCancelAccount) ||
         Boolean(dashboardMetricDialog);
       const canUseGlobalShortcut = Boolean(auth.currentUser && auth.token)
         && !hasOverlayOpen
@@ -3902,6 +4086,21 @@ export default function App() {
           void handleConfirmDeleteNote();
         }
       }
+
+      if (event.key === 'Enter' && pendingCancelAccount && !isCancellingAccount) {
+        const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+        const activeElement = document.activeElement;
+
+        if (
+          dialog &&
+          activeElement instanceof HTMLElement &&
+          dialog.contains(activeElement) &&
+          activeElement.tagName !== 'TEXTAREA'
+        ) {
+          event.preventDefault();
+          void handleConfirmCancelAccount();
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -3922,6 +4121,8 @@ export default function App() {
     handleConfirmDelete,
     handleConfirmDeleteSelection,
     handleConfirmDeleteNote,
+    handleConfirmCancelAccount,
+    isCancellingAccount,
     openCalendarTab,
     openDashboardTab,
     openNewTask,
@@ -3933,6 +4134,7 @@ export default function App() {
     pendingDeleteNote,
     pendingDeleteTask,
     pendingDeleteTaskSelection,
+    pendingCancelAccount,
     refreshWorkspaceFromShortcut,
     resetTaskForm,
     resetNoteForm,
@@ -4297,6 +4499,7 @@ export default function App() {
                     onDelete={handleDelete}
                     onDeleteSelected={handleDeleteSelectedTasks}
                     onEdit={openTaskDetails}
+                    onQuickUpdate={handleQuickUpdateTask}
                     drafts={draftTasks}
                     onEditDraft={openEditTask}
                     onPromoteDraft={handlePromoteDraft}
@@ -4658,10 +4861,25 @@ export default function App() {
             setName={setProfName}
             email={profEmail}
             setEmail={setProfEmail}
+            currentPassword={profCurrentPassword}
+            setCurrentPassword={setProfCurrentPassword}
             password={profPassword}
             setPassword={setProfPassword}
             avatar={profAvatar}
             setAvatar={setProfAvatar}
+            sessions={profileSessions}
+            isLoadingSessions={isLoadingProfileSessions}
+            onRefreshSessions={() => {
+              void refreshProfileSessions();
+            }}
+            onRevokeSession={(sessionId) => {
+              void handleRevokeProfileSession(sessionId);
+            }}
+            onResendVerification={() => {
+              void handleResendProfileVerification();
+            }}
+            isSendingVerification={isSendingProfileVerification}
+            onCancelAccount={() => setPendingCancelAccount(true)}
             onOpenSettings={() => {
               closeProfileDrawer();
               openSettings('account');
@@ -4758,12 +4976,14 @@ export default function App() {
       />
 
       <ConfirmDialog
-        open={Boolean(pendingDeleteTask || pendingDeleteTaskSelection || pendingDeleteNote)}
+        open={Boolean(pendingDeleteTask || pendingDeleteTaskSelection || pendingDeleteNote || pendingCancelAccount)}
         title={
           pendingDeleteTask
             ? 'Excluir lembrete?'
             : pendingDeleteTaskSelection
               ? `Excluir ${pendingDeleteTaskSelection.count} lembretes?`
+              : pendingCancelAccount
+                ? 'Cancelar conta?'
               : 'Excluir nota?'
         }
         message={
@@ -4771,6 +4991,8 @@ export default function App() {
             ? `Você está prestes a excluir "${pendingDeleteTask.title}" permanentemente.`
             : pendingDeleteTaskSelection
               ? `Você está prestes a excluir ${pendingDeleteTaskSelection.count} lembrete${pendingDeleteTaskSelection.count === 1 ? '' : 's'} permanentemente.`
+            : pendingCancelAccount
+              ? 'Você está prestes a remover sua conta e todos os dados vinculados. Esta ação não pode ser desfeita.'
             : pendingDeleteNote
               ? `Você está prestes a mover "${pendingDeleteNote.title}" para a Lixeira. A nota poderá ser reativada por 3 dias antes da exclusão permanente.`
               : ''
@@ -4780,6 +5002,8 @@ export default function App() {
             ? 'Excluir lembrete'
             : pendingDeleteTaskSelection
               ? 'Excluir lembretes'
+              : pendingCancelAccount
+                ? 'Cancelar conta'
               : 'Excluir nota'
         }
         cancelLabel={
@@ -4787,6 +5011,8 @@ export default function App() {
             ? 'Manter lembrete'
             : pendingDeleteTaskSelection
               ? 'Manter lembretes'
+              : pendingCancelAccount
+                ? 'Manter conta'
               : 'Manter nota'
         }
         isConfirming={
@@ -4794,6 +5020,8 @@ export default function App() {
             ? deletingTaskIds.has(pendingDeleteTask.id)
             : pendingDeleteTaskSelection
               ? pendingDeleteTaskSelection.ids.some((id) => deletingTaskIds.has(id))
+              : pendingCancelAccount
+                ? isCancellingAccount
               : false
         }
         onConfirm={() => {
@@ -4805,6 +5033,10 @@ export default function App() {
             void handleConfirmDeleteSelection();
             return;
           }
+          if (pendingCancelAccount) {
+            void handleConfirmCancelAccount();
+            return;
+          }
           void handleConfirmDeleteNote();
         }}
         onCancel={
@@ -4812,6 +5044,8 @@ export default function App() {
             ? cancelDelete
             : pendingDeleteTaskSelection
               ? cancelDeleteSelection
+              : pendingCancelAccount
+                ? () => setPendingCancelAccount(false)
               : cancelDeleteNote
         }
       />

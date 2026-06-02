@@ -94,15 +94,32 @@ export const resetPasswordSchema = z.object({
 export const profileUpdateSchema = z.object({
   name: nameSchema.optional(),
   email: emailSchema.optional(),
+  currentPassword: z.string().min(1, 'Senha atual obrigatória').max(72, 'Senha atual muito longa').optional(),
   password: passwordSchema.optional(),
   avatar: z.union([avatarSchema, z.null()]).optional(),
   stateCode: z.union([stateCodeSchema, z.null()]).optional(),
   cityName: z.union([cityNameSchema, z.null()]).optional(),
   holidayRegionCode: z.union([z.string().trim().max(24, 'Código regional muito longo'), z.null()]).optional(),
-}).strict().refine(
+}).strict().superRefine((value, ctx) => {
+  if (value.password && !value.currentPassword) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['currentPassword'],
+      message: 'Informe a senha atual para trocar a senha.',
+    });
+  }
+}).refine(
   (value) => Object.keys(value).length > 0,
   'Envie ao menos um campo para atualizar',
 );
+
+export const verifyEmailSchema = z.object({
+  token: z.string().trim().min(1, 'Token obrigatório'),
+}).strict();
+
+export const revokeSessionSchema = z.object({
+  sessionId: z.string().uuid('Sessão inválida'),
+}).strict();
 
 export const createTaskSchema = z.object({
   clientMutationId: clientMutationIdSchema,

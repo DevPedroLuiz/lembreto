@@ -31,6 +31,7 @@ import { FilterTag } from '../components/FilterTag';
 import { HolidaysPanel } from '../components/HolidaysPanel';
 import { TaskItem } from '../components/TaskItem';
 import { LS } from '../lib/storage';
+import { getTaskTimeLabel } from '../lib/taskDueDate';
 import { getDerivedTaskStatus, type DerivedTaskStatus } from '../lib/taskStatus';
 import type { HolidayCalendarPayload, Priority, Task } from '../types';
 
@@ -41,7 +42,7 @@ type SortMode = 'created' | 'dueDate' | 'priority' | 'category';
 type PriorityFilter = 'all' | Priority;
 type StatusFilter = 'all' | DerivedTaskStatus | 'inactive';
 type TagFilter = 'all' | string;
-type QuickTaskFilter = 'none' | 'alarm' | 'noTime';
+type QuickTaskFilter = 'none' | 'today' | 'tomorrow' | 'overdue' | 'alarm' | 'noTime';
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
 export type TasksPageView = 'agenda' | 'completed' | 'holidays' | 'drafts';
 
@@ -125,6 +126,10 @@ interface TasksPageProps {
   onDelete: (id: string, event: React.MouseEvent) => void;
   onDeleteSelected: (ids: string[]) => void;
   onEdit: (task: Task) => void;
+  onQuickUpdate: (
+    task: Task,
+    payload: Partial<Pick<Task, 'dueDate' | 'priority' | 'status' | 'alarmEnabled'>>,
+  ) => void;
   drafts: Task[];
   onEditDraft: (task: Task) => void;
   onPromoteDraft: (task: Task) => void;
@@ -301,6 +306,19 @@ function matchesDateFilter(task: Task, range: { start: string; end: string } | n
 
   const dueDateKey = formatDateKey(dueDate);
   return dueDateKey >= range.start && dueDateKey <= range.end;
+}
+
+function getTaskDateKey(task: Task): string | null {
+  if (!task.dueDate) return null;
+
+  const dueTimestamp = Date.parse(task.dueDate);
+  if (Number.isNaN(dueTimestamp)) return null;
+
+  return formatDateKey(new Date(dueTimestamp));
+}
+
+function taskHasNoTime(task: Task): boolean {
+  return !getTaskTimeLabel(task.dueDate);
 }
 
 function parseDateValue(value: string | null | undefined): number {
@@ -517,6 +535,7 @@ export function TasksPage({
   onDelete,
   onDeleteSelected,
   onEdit,
+  onQuickUpdate,
   drafts,
   onEditDraft,
   onPromoteDraft,
@@ -543,6 +562,7 @@ export function TasksPage({
   const initialStatusFilter = isStatusFilter(config.taskStatusFilter) ? config.taskStatusFilter : 'all';
   const initialTagFilter = normalizeTagFilter(config.taskTagFilter, availableTags);
   const todayKey = React.useMemo(() => formatDateKey(new Date()), []);
+  const tomorrowKey = React.useMemo(() => formatDateKey(addCalendarDays(new Date(), 1)), []);
   const initialDateFilterMode = isDateFilterMode(config.taskDateFilterMode) ? config.taskDateFilterMode : 'all';
   const initialDateFilterStart = normalizeDateKey(config.taskDateFilterStart) || todayKey;
   const initialDateFilterEnd = normalizeDateKey(config.taskDateFilterEnd);
@@ -763,14 +783,17 @@ export function TasksPage({
     () => {
       if (statusFilter === 'completed') return [];
       const quickFilteredTasks = locallyFilteredPendingTasks.filter((task) => {
+        if (quickTaskFilter === 'today') return getTaskDateKey(task) === todayKey;
+        if (quickTaskFilter === 'tomorrow') return getTaskDateKey(task) === tomorrowKey;
+        if (quickTaskFilter === 'overdue') return getDerivedTaskStatus(task) === 'overdue';
         if (quickTaskFilter === 'alarm') return task.alarmEnabled;
-        if (quickTaskFilter === 'noTime') return !task.dueDate;
+        if (quickTaskFilter === 'noTime') return taskHasNoTime(task);
         return true;
       });
       if (statusFilter === 'all') return quickFilteredTasks;
       return quickFilteredTasks.filter((task) => matchesStatusFilter(task, statusFilter));
     },
-    [locallyFilteredPendingTasks, quickTaskFilter, statusFilter],
+    [locallyFilteredPendingTasks, quickTaskFilter, statusFilter, todayKey, tomorrowKey],
   );
 
   const visibleCompletedTasks = React.useMemo(
@@ -840,11 +863,11 @@ export function TasksPage({
 
   React.useEffect(() => {
     setPendingPage(1);
-  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, search, sortMode, statusFilter, tagFilter]);
+  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, quickTaskFilter, search, sortMode, statusFilter, tagFilter]);
 
   React.useEffect(() => {
     setCompletedPage(1);
-  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, search, sortMode, statusFilter, tagFilter]);
+  }, [dateFilterEnd, dateFilterMode, dateFilterStart, filterCategory, priorityFilter, quickTaskFilter, search, sortMode, statusFilter, tagFilter]);
 
   React.useEffect(() => {
     if (pendingPage > pendingTotalPages) {
@@ -919,23 +942,22 @@ export function TasksPage({
     search.trim().length > 0,
   ].filter(Boolean).length;
   const showFiltersForCurrentView = activeView === 'agenda' || (activeView === 'completed' && showCompleted);
-  const todayOpenCount = pendingTasks.filter((task) => {
-    if (!task.dueDate) return false;
-    const dueTimestamp = Date.parse(task.dueDate);
-    if (Number.isNaN(dueTimestamp)) return false;
-    return formatDateKey(new Date(dueTimestamp)) === todayKey;
-  }).length;
-  const tomorrowKey = formatDateKey(addCalendarDays(new Date(), 1));
-  const tomorrowOpenCount = pendingTasks.filter((task) => {
-    if (!task.dueDate) return false;
-    const dueTimestamp = Date.parse(task.dueDate);
-    if (Number.isNaN(dueTimestamp)) return false;
-    return formatDateKey(new Date(dueTimestamp)) === tomorrowKey;
-  }).length;
+  const todayOpenCount = pendingTasks.filter((task) => getTaskDateKey(task) === todayKey).length;
+  const tomorrowOpenCount = pendingTasks.filter((task) => getTaskDateKey(task) === tomorrowKey).length;
   const overdueOpenCount = pendingTasks.filter((task) => getDerivedTaskStatus(task) === 'overdue').length;
   const alarmOpenCount = pendingTasks.filter((task) => task.alarmEnabled).length;
-  const noTimeOpenCount = pendingTasks.filter((task) => !task.dueDate).length;
+  const noTimeOpenCount = pendingTasks.filter((task) => taskHasNoTime(task)).length;
   const highPriorityOpenCount = pendingTasks.filter((task) => task.priority === 'high').length;
+  const applyQuickTaskFilter = React.useCallback((nextFilter: QuickTaskFilter) => {
+    onActiveViewChange('agenda');
+    setQuickTaskFilter(nextFilter);
+    handleStatusFilterChange('all');
+    handlePriorityFilterChange('all');
+    handleTagFilterChange('all');
+    setFilterCategory('Todas');
+    updateDateFilter('all', todayKey, '');
+    setFiltersOpen(false);
+  }, [handlePriorityFilterChange, handleStatusFilterChange, handleTagFilterChange, onActiveViewChange, setFilterCategory, todayKey, updateDateFilter]);
   const quickTriageCards = [
     {
       label: 'Hoje',
@@ -1042,6 +1064,17 @@ export function TasksPage({
         setFiltersOpen(false);
       },
     },
+  ];
+  const quickFilterChips: Array<{
+    label: string;
+    count: number;
+    filter: Exclude<QuickTaskFilter, 'none'>;
+  }> = [
+    { label: 'Hoje', count: todayOpenCount, filter: 'today' },
+    { label: 'Amanhã', count: tomorrowOpenCount, filter: 'tomorrow' },
+    { label: 'Atrasados', count: overdueOpenCount, filter: 'overdue' },
+    { label: 'Com alarme', count: alarmOpenCount, filter: 'alarm' },
+    { label: 'Sem horário', count: noTimeOpenCount, filter: 'noTime' },
   ];
   const pageTabs = React.useMemo<Array<{
     value: TasksPageView;
@@ -1571,6 +1604,48 @@ export function TasksPage({
             </div>
           </div>
 
+          <div className="rounded-[24px] border border-slate-200 bg-white/76 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                Filtros rápidos
+              </p>
+              {quickTaskFilter !== 'none' && (
+                <button
+                  type="button"
+                  onClick={() => setQuickTaskFilter('none')}
+                  className="rounded-full px-2 py-1 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.08] dark:hover:text-white"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+              {quickFilterChips.map((chip) => {
+                const active = quickTaskFilter === chip.filter;
+                return (
+                  <button
+                    key={chip.filter}
+                    type="button"
+                    data-testid={`task-quick-filter-${chip.filter}`}
+                    aria-pressed={active}
+                    onClick={() => applyQuickTaskFilter(chip.filter)}
+                    className={[
+                      'inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl border px-3 text-sm font-semibold transition-all',
+                      active
+                        ? 'border-blue-500 bg-blue-600 text-white shadow-[0_14px_28px_-20px_rgba(37,99,235,0.75)]'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:border-blue-400/20 dark:hover:bg-blue-500/10 dark:hover:text-blue-300',
+                    ].join(' ')}
+                  >
+                    {chip.label}
+                    <span className={active ? 'rounded-full bg-white/18 px-2 py-0.5 text-xs' : 'rounded-full bg-white px-2 py-0.5 text-xs dark:bg-white/[0.08]'}>
+                      {chip.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {quickTriageCards.map((card) => (
               <button
@@ -1818,6 +1893,7 @@ export function TasksPage({
                         onToggle={() => undefined}
                         onDelete={onDelete}
                         onEdit={onEditDraft}
+                        onQuickUpdate={onQuickUpdate}
                         isDeleting={deletingTaskIds?.has(draft.id)}
                       />
 
@@ -1893,6 +1969,7 @@ export function TasksPage({
                     onSelectionChange={handleSelectionChange}
                     showSelectionControl
                     onEdit={onEdit}
+                    onQuickUpdate={onQuickUpdate}
                     isSelected={selectedTaskIds.has(task.id)}
                     isDeleting={deletingTaskIds?.has(task.id)}
                     isToggling={togglingTaskIds?.has(task.id)}
@@ -1949,6 +2026,7 @@ export function TasksPage({
                 onSelectionChange={handleSelectionChange}
                 showSelectionControl
                 onEdit={onEdit}
+                onQuickUpdate={onQuickUpdate}
                 isSelected={selectedTaskIds.has(task.id)}
                 isCompletedSection
                 isDeleting={deletingTaskIds?.has(task.id)}

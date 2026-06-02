@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   Copy,
+  Laptop,
   Eye,
   EyeOff,
   KeyRound,
@@ -19,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import type { User as UserType } from '../types';
+import type { AuthSession } from '../hooks/useAuth';
 import { useSwipeToClose } from '../hooks/useSwipeToClose';
 import { MAX_AVATAR_BYTES, isAllowedAvatarMimeType } from '../../lib/avatar';
 
@@ -37,10 +39,19 @@ interface ProfileDrawerProps {
   setName: (value: string) => void;
   email: string;
   setEmail: (value: string) => void;
+  currentPassword: string;
+  setCurrentPassword: (value: string) => void;
   password: string;
   setPassword: (value: string) => void;
   avatar: string | null;
   setAvatar: (value: string | null) => void;
+  sessions: AuthSession[];
+  isLoadingSessions?: boolean;
+  onRefreshSessions: () => void;
+  onRevokeSession: (sessionId: string) => void;
+  onResendVerification: () => void;
+  isSendingVerification?: boolean;
+  onCancelAccount: () => void;
 }
 
 function getInitials(name: string, email: string) {
@@ -107,6 +118,37 @@ function getPasswordStrength(password: string) {
   };
 }
 
+function formatSessionDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Data indisponível';
+
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getDeviceLabel(userAgent: string | null): string {
+  if (!userAgent) return 'Dispositivo desconhecido';
+  if (/iPhone|Android.+Mobile/i.test(userAgent)) return 'Celular';
+  if (/iPad|Tablet|Android/i.test(userAgent)) return 'Tablet';
+  if (/Windows/i.test(userAgent)) return 'Windows';
+  if (/Mac OS|Macintosh/i.test(userAgent)) return 'Mac';
+  if (/Linux/i.test(userAgent)) return 'Linux';
+  return 'Navegador';
+}
+
+function getBrowserLabel(userAgent: string | null): string {
+  if (!userAgent) return 'Navegador não identificado';
+  if (/Edg\//i.test(userAgent)) return 'Microsoft Edge';
+  if (/Chrome\//i.test(userAgent)) return 'Chrome';
+  if (/Firefox\//i.test(userAgent)) return 'Firefox';
+  if (/Safari\//i.test(userAgent)) return 'Safari';
+  return 'Navegador';
+}
+
 export function ProfileDrawer({
   open,
   onClose,
@@ -120,10 +162,19 @@ export function ProfileDrawer({
   setName,
   email,
   setEmail,
+  currentPassword,
+  setCurrentPassword,
   password,
   setPassword,
   avatar,
   setAvatar,
+  sessions,
+  isLoadingSessions = false,
+  onRefreshSessions,
+  onRevokeSession,
+  onResendVerification,
+  isSendingVerification = false,
+  onCancelAccount,
 }: ProfileDrawerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarError, setAvatarError] = React.useState('');
@@ -191,6 +242,8 @@ export function ProfileDrawer({
   const initials = getInitials(name || currentUser.name, email || currentUser.email);
   const passwordStrength = getPasswordStrength(password);
   const passwordInvalid = Boolean(password && password.length < 6);
+  const passwordChangeMissingCurrent = Boolean(password && !currentPassword);
+  const emailVerified = Boolean(currentUser.emailVerifiedAt);
   const profileItems = [
     Boolean((avatar ?? currentUser.avatar)?.trim()),
     Boolean(name.trim()),
@@ -445,6 +498,29 @@ export function ProfileDrawer({
                           className="field-control field-control-with-icon"
                         />
                       </div>
+                      <div className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
+                        emailVerified
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300'
+                          : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
+                      }`}>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <span className="inline-flex items-center gap-2 font-semibold">
+                            {emailVerified ? <CheckCircle2 size={16} /> : <Mail size={16} />}
+                            {emailVerified ? 'E-mail verificado' : 'E-mail ainda não verificado'}
+                          </span>
+                          {!emailVerified && (
+                            <button
+                              type="button"
+                              onClick={onResendVerification}
+                              disabled={isSubmitting || isSendingVerification}
+                              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl bg-white px-3 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 dark:bg-white/[0.08] dark:text-amber-100 dark:hover:bg-white/[0.12]"
+                            >
+                              {isSendingVerification ? <Loader2 size={14} className="animate-spin" /> : null}
+                              Reenviar verificação
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </section>
@@ -460,6 +536,32 @@ export function ProfileDrawer({
                         Troque a senha apenas quando quiser. Se deixar em branco, a senha atual continua valendo.
                       </p>
                     </div>
+                  </div>
+
+                  <div className="grid gap-4">
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                      Senha atual
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="field-icon" size={18} />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        data-testid="profile-current-password-input"
+                        placeholder="Obrigatória para trocar a senha"
+                        value={currentPassword}
+                        disabled={isSubmitting}
+                        onChange={(event) => setCurrentPassword(event.target.value)}
+                        aria-invalid={passwordChangeMissingCurrent ? 'true' : 'false'}
+                        className={`field-control field-control-with-icon pr-12 ${passwordChangeMissingCurrent ? 'border-rose-300 bg-rose-50/70 text-rose-700 focus:border-rose-400 focus:ring-rose-500/10 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200' : ''}`}
+                      />
+                    </div>
+                    {passwordChangeMissingCurrent && (
+                      <p className="mt-2 text-sm font-medium text-rose-600 dark:text-rose-300">
+                        Informe a senha atual para confirmar a troca.
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -499,6 +601,79 @@ export function ProfileDrawer({
                       </p>
                     </div>
                   </div>
+                  </div>
+                </section>
+
+                <section className="surface-soft p-5">
+                  <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className="icon-slot h-10 w-10 rounded-2xl bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                        <Laptop size={18} />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Sessões e dispositivos</h3>
+                        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          Veja onde sua conta está conectada e encerre acessos que não reconhece.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={onRefreshSessions}
+                      disabled={isSubmitting || isLoadingSessions}
+                      className="action-secondary min-h-[40px] justify-center rounded-2xl px-3 py-0 text-sm"
+                    >
+                      {isLoadingSessions ? <Loader2 size={15} className="animate-spin" /> : null}
+                      Atualizar
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {isLoadingSessions && sessions.length === 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+                        Carregando sessões...
+                      </div>
+                    ) : sessions.length === 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+                        Nenhuma sessão registrada ainda.
+                      </div>
+                    ) : sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/76 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04] sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                            {getDeviceLabel(session.userAgent)} - {getBrowserLabel(session.userAgent)}
+                            {session.current && (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                Atual
+                              </span>
+                            )}
+                            {session.revokedAt && (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-white/[0.08] dark:text-slate-400">
+                                Encerrada
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                            Último uso: {formatSessionDate(session.lastSeenAt)}
+                            {session.ip ? ` · IP ${session.ip}` : ''}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => onRevokeSession(session.id)}
+                          disabled={isSubmitting || Boolean(session.revokedAt)}
+                          className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300"
+                        >
+                          Encerrar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </section>
 
                 <section className="surface-soft p-5">
@@ -528,6 +703,33 @@ export function ProfileDrawer({
                     )}
                   </div>
                 </section>
+
+                <section className="rounded-[28px] border border-rose-200 bg-rose-50/70 p-5 dark:border-rose-500/20 dark:bg-rose-500/10">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className="icon-slot h-10 w-10 rounded-2xl bg-white text-rose-700 dark:bg-white/[0.08] dark:text-rose-300">
+                        <Trash2 size={18} />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-semibold text-rose-950 dark:text-rose-100">Cancelar conta</h3>
+                        <p className="mt-1 text-sm leading-6 text-rose-700/85 dark:text-rose-200/80">
+                          Remove sua conta e todos os dados vinculados. Esta ação não pode ser desfeita.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={onCancelAccount}
+                      disabled={isSubmitting}
+                      data-testid="profile-cancel-account-button"
+                      className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 text-sm font-semibold text-white transition-all hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Trash2 size={16} />
+                      Cancelar conta
+                    </button>
+                  </div>
+                </section>
               </form>
             </div>
 
@@ -537,7 +739,7 @@ export function ProfileDrawer({
                   form="profile-form"
                   type="submit"
                   data-testid="profile-submit-button"
-                  disabled={isSubmitting || saveSuccess || passwordInvalid}
+                  disabled={isSubmitting || saveSuccess || passwordInvalid || passwordChangeMissingCurrent}
                   className="action-primary w-full rounded-2xl py-4 disabled:cursor-wait disabled:opacity-70"
                 >
                   {isSubmitting ? (

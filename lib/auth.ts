@@ -6,6 +6,7 @@ export interface SafeUser {
   id: string;
   name: string;
   email: string;
+  emailVerifiedAt?: string | null;
   avatar?: string | null;
   stateCode?: string | null;
   cityName?: string | null;
@@ -29,6 +30,7 @@ export class AuthError extends Error {
 
 let ensureUserProfileSchemaPromise: Promise<void> | null = null;
 let ensureGoogleAuthSchemaPromise: Promise<void> | null = null;
+let ensureAuthSecuritySchemaPromise: Promise<void> | null = null;
 
 export async function ensureUserProfileSchema(sql: SqlClient) {
   if (!ensureUserProfileSchemaPromise) {
@@ -38,6 +40,7 @@ export async function ensureUserProfileSchema(sql: SqlClient) {
           { table: 'users', column: 'state_code' },
           { table: 'users', column: 'city_name' },
           { table: 'users', column: 'holiday_region_code' },
+          { table: 'users', column: 'email_verified_at' },
         ],
       });
     })().catch((error) => {
@@ -47,6 +50,43 @@ export async function ensureUserProfileSchema(sql: SqlClient) {
   }
 
   await ensureUserProfileSchemaPromise;
+}
+
+export async function ensureAuthSecuritySchema(sql: SqlClient) {
+  if (!ensureAuthSecuritySchemaPromise) {
+    ensureAuthSecuritySchemaPromise = (async () => {
+      await ensureUserProfileSchema(sql);
+      await assertInfrastructure(sql, 'auth security', {
+        relations: [
+          { name: 'auth_sessions' },
+          { name: 'email_verification_tokens' },
+        ],
+        columns: [
+          { table: 'auth_sessions', column: 'token_jti' },
+          { table: 'auth_sessions', column: 'last_seen_at' },
+          { table: 'auth_sessions', column: 'revoked_at' },
+          { table: 'email_verification_tokens', column: 'token_hash' },
+          { table: 'email_verification_tokens', column: 'email' },
+        ],
+        indexes: [
+          { name: 'idx_auth_sessions_user_last_seen' },
+          { name: 'idx_evt_token_hash' },
+        ],
+        constraints: [
+          {
+            table: 'auth_rate_limit',
+            name: 'auth_rate_limit_route_check',
+            contains: ['bulk_create', 'verify_email'],
+          },
+        ],
+      });
+    })().catch((error) => {
+      ensureAuthSecuritySchemaPromise = null;
+      throw error;
+    });
+  }
+
+  await ensureAuthSecuritySchemaPromise;
 }
 
 export async function ensureGoogleAuthSchema(sql: SqlClient) {
@@ -70,7 +110,8 @@ export async function ensureGoogleAuthSchema(sql: SqlClient) {
   await ensureGoogleAuthSchemaPromise;
 }
 
-export function buildTokenJti(payload: Pick<JwtPayload, 'sub' | 'iat'>): string {
+export function buildTokenJti(payload: Pick<JwtPayload, 'sub' | 'iat'> & { jti?: string }): string {
+  if (payload.jti) return payload.jti;
   return `${payload.sub}_${payload.iat ?? 0}`;
 }
 
@@ -96,6 +137,7 @@ export async function getSafeUserById(sql: SqlClient, userId: string): Promise<S
       id,
       name,
       email,
+      email_verified_at AS "emailVerifiedAt",
       avatar,
       state_code AS "stateCode",
       city_name AS "cityName",
