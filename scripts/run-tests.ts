@@ -639,6 +639,13 @@ function createNotificationScheduleSqlMock(options?: {
 
     if (query.includes('UPDATE notification_schedules') && query.includes('sent_at = CASE')) {
       const status = String(values[0]);
+      const scheduleId = String(values[6] ?? '');
+      const canUpdate = schedule.id === scheduleId && (
+        !['sent', 'failed'].includes(status) ||
+        (schedule.status === 'processing' && schedule.cancelledAt === null)
+      );
+      if (!canUpdate) return [];
+
       schedule.status = status;
       schedule.sentAt = status === 'sent' ? now.toISOString() : schedule.sentAt;
       schedule.failedAt = status === 'failed' ? now.toISOString() : schedule.failedAt;
@@ -646,10 +653,10 @@ function createNotificationScheduleSqlMock(options?: {
       schedule.processingStartedAt = null;
       schedule.errorMessage = values.includes('notifications_disabled')
         ? 'notifications_disabled'
-        : typeof values[4] === 'string'
-          ? values[4]
+        : typeof values[5] === 'string'
+          ? values[5]
           : null;
-      return [];
+      return [rowForSchedule()];
     }
 
     if (query.includes('information_schema.columns') || query.includes('to_regclass')) {
@@ -705,19 +712,32 @@ function createPushDeliverySqlMock() {
     }
 
     if (query.includes('INSERT INTO notification_deliveries')) {
-      const delivery = {
-        id: crypto.randomUUID(),
-        notificationId: values[0],
-        userId: values[1],
-        pushSubscriptionId: values[2],
-        endpointHash: values[3],
-        endpoint: values[4],
-        userAgent: values[5],
-        status: 'attempted',
-        attemptCount: 1,
-        lastError: null,
-      };
-      deliveries.push(delivery);
+      let delivery = deliveries.find((item) => (
+        item.notificationId === values[0] &&
+        item.endpointHash === values[3]
+      ));
+      if (!delivery) {
+        delivery = {
+          id: crypto.randomUUID(),
+          notificationId: values[0],
+          userId: values[1],
+          pushSubscriptionId: values[2],
+          endpointHash: values[3],
+          endpoint: values[4],
+          userAgent: values[5],
+          status: 'attempted',
+          attemptCount: 1,
+          lastError: null,
+        };
+        deliveries.push(delivery);
+      } else {
+        delivery.pushSubscriptionId = values[2];
+        delivery.endpoint = values[4];
+        delivery.userAgent = values[5];
+        delivery.status = 'attempted';
+        delivery.attemptCount = Number(delivery.attemptCount ?? 0) + 1;
+        delivery.lastError = null;
+      }
       return [{ id: delivery.id }];
     }
 
@@ -1434,16 +1454,20 @@ function createCronPostSideEffectScheduleSqlMock() {
 
     if (query.includes('UPDATE notification_schedules') && query.includes('sent_at = CASE')) {
       const status = String(values[0]);
-      const scheduleId = values[6];
+      const scheduleId = String(values[6] ?? '');
       const schedule = schedules.find((item) => item.id === scheduleId);
-      if (schedule) {
-        schedule.status = status;
-        schedule.sentAt = status === 'sent' ? dbNow.toISOString() : schedule.sentAt;
-        schedule.failedAt = status === 'failed' ? dbNow.toISOString() : schedule.failedAt;
-        schedule.cancelledAt = status === 'cancelled' ? dbNow.toISOString() : schedule.cancelledAt;
-        schedule.processingStartedAt = null;
-      }
-      return [];
+      const canUpdate = schedule && (
+        !['sent', 'failed'].includes(status) ||
+        (schedule.status === 'processing' && schedule.cancelledAt === null)
+      );
+      if (!schedule || !canUpdate) return [];
+
+      schedule.status = status;
+      schedule.sentAt = status === 'sent' ? dbNow.toISOString() : schedule.sentAt;
+      schedule.failedAt = status === 'failed' ? dbNow.toISOString() : schedule.failedAt;
+      schedule.cancelledAt = status === 'cancelled' ? dbNow.toISOString() : schedule.cancelledAt;
+      schedule.processingStartedAt = null;
+      return [scheduleRow(schedule)];
     }
 
     if (query.includes('FROM pg_stat_activity')) return [{ longRunningActive: 0, waitingOnLock: 0 }];
@@ -3478,12 +3502,15 @@ async function main() {
       const body = response.body as {
         scheduleDiagnostics?: { duePendingCount?: number };
         sideEffectDiagnostics?: { duePendingCount?: number };
-        backfill?: { skippedReason?: string };
+        backfill?: {
+          skippedReason?: string;
+          backfillDiagnostics?: { skippedReasons?: Record<string, number> };
+        };
         calendarSync?: { skippedReason?: string };
       };
       assert.equal(body.scheduleDiagnostics?.duePendingCount, 1);
       assert.equal(body.sideEffectDiagnostics?.duePendingCount, 1);
-      assert.equal(body.backfill?.skippedReason, 'disabled_in_notification_cron');
+      assert.equal(body.backfill?.backfillDiagnostics?.skippedReasons?.no_schedule_created, 1);
       assert.equal(body.calendarSync?.skippedReason, 'no_external_calendar_side_effects_due');
     } finally {
       if (previousSecret === undefined) delete process.env.CRON_SECRET;
