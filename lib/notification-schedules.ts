@@ -1315,13 +1315,16 @@ async function backfillMissingPendingTaskSchedules(
   limit: number,
   startedAt: number,
   maxDurationMs = MAX_CRON_DURATION_MS,
+  options: { userId?: string } = {},
 ) {
+  const userId = options.userId ?? null;
   const rows = await sql`
     SELECT
       tasks.id,
       tasks.user_id AS "userId"
     FROM tasks
     WHERE tasks.deleted_at IS NULL
+      AND (${userId}::uuid IS NULL OR tasks.user_id = ${userId}::uuid)
       AND tasks.status = 'pending'
       AND (
         tasks.due_date IS NULL
@@ -2239,13 +2242,15 @@ export async function backfillMissingNotificationSchedules(
   sql: SqlClient,
   limit = MISSING_SCHEDULE_TASK_SCAN_LIMIT,
   maxDurationMs = BACKFILL_DURATION_MS,
-  options: { ensureInfrastructure?: boolean } = {},
+  options: { ensureInfrastructure?: boolean; userId?: string } = {},
 ) {
   const startedAt = Date.now();
   if (options.ensureInfrastructure !== false) {
     await ensureNotificationSchedulingInfrastructure(sql);
   }
-  const backfill = await backfillMissingPendingTaskSchedules(sql, limit, startedAt, maxDurationMs);
+  const backfill = await backfillMissingPendingTaskSchedules(sql, limit, startedAt, maxDurationMs, {
+    userId: options.userId,
+  });
   return {
     backfilledSchedules: backfill.backfilled,
     durationMs: Date.now() - startedAt,

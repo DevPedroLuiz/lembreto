@@ -573,6 +573,10 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
         userId: user.id,
       },
     );
+    const backfill = await backfillMissingNotificationSchedules(sql, BACKFILL_LIMIT, BACKFILL_DURATION_MS, {
+      ensureInfrastructure: false,
+      userId: user.id,
+    });
     const schedules = await processDueNotificationSchedules(sql, USER_DUE_SCHEDULE_LIMIT, USER_DUE_SCHEDULE_DURATION_MS, {
       ensureInfrastructure: false,
       reclaimStuckProcessing: false,
@@ -606,6 +610,7 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       failed: schedules.failedSchedules,
       sideEffectsProcessed: sideEffects.processed,
       sideEffectsDone: sideEffects.done,
+      backfilledSchedules: backfill.backfilledSchedules,
       pushRetries,
       durationMs: schedules.durationMs,
     }));
@@ -614,6 +619,7 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
       ok: true,
       schedules,
       sideEffects,
+      backfill,
       pushRetries,
       notifications: page.notifications,
       pageInfo: page.pageInfo,

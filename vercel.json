@@ -8,6 +8,7 @@
     }
   },
   "crons": [
+    { "path": "/api/cron/notifications", "schedule": "* * * * *" },
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
   ],
   "rewrites": [
