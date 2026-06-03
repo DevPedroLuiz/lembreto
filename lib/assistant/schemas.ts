@@ -47,6 +47,17 @@ export const assistantMessageSchema = z.object({
   conversationId: z.string().uuid('Conversa invalida').nullable().optional(),
 }).strict();
 
+export const assistantScreenshotSchema = z.object({
+  imageDataUrl: z.string().trim().regex(
+    /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/,
+    'Imagem invalida. Envie uma captura PNG, JPEG ou WebP em base64.',
+  ).max(7_500_000, 'Imagem muito grande. Tente capturar uma area menor.'),
+  pageTitle: z.string().trim().max(200).optional(),
+  pageUrl: z.string().trim().max(2048).optional(),
+  instruction: z.string().trim().max(500).optional(),
+  conversationId: z.string().uuid('Conversa invalida').nullable().optional(),
+}).strict();
+
 const recurrenceSchema = z.object({
   type: recurrenceTypeSchema,
   interval: z.number().int().min(1).max(365).optional(),
@@ -190,5 +201,6 @@ export const assistantResponseSchema = z.object({
 }).strict();
 
 export type AssistantMessage = z.infer<typeof assistantMessageSchema>;
+export type AssistantScreenshot = z.infer<typeof assistantScreenshotSchema>;
 export type AssistantAction = z.infer<typeof assistantActionSchema>;
 export type AssistantResponse = z.infer<typeof assistantResponseSchema>;

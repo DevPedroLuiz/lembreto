@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { AssistantMemoryContext } from './memory.js';
-import { assistantActionSchema, type AssistantAction } from './schemas.js';
+import { assistantActionSchema, type AssistantAction, type AssistantScreenshot } from './schemas.js';
 
 export const ASSISTANT_TIMEZONE = 'America/Fortaleza';
 
@@ -400,6 +400,15 @@ function parseAssistantAction(text: string): AssistantAction | null {
   }
 }
 
+function parseImageDataUrl(imageDataUrl: string) {
+  const match = imageDataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1],
+    data: match[2],
+  };
+}
+
 function withModelTimeout<T>(model: string, promise: Promise<T>, controller: AbortController): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -563,6 +572,89 @@ export async function interpretAssistantMessage(
     } catch (error) {
       if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
         console.warn('[assistant] model request failed', {
+          model,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      lastError = error;
+    }
+  }
+
+  if (receivedInvalidModelResponse) throw new AssistantInvalidModelResponseError();
+  throw new AssistantModelRequestError(lastError);
+}
+
+export async function interpretAssistantScreenshot(
+  input: AssistantScreenshot,
+  memoryContext?: AssistantMemoryContext,
+): Promise<AssistantAction> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw new AssistantUnavailableError();
+
+  const image = parseImageDataUrl(input.imageDataUrl);
+  if (!image) throw new AssistantInvalidModelResponseError();
+
+  const configuredModel = process.env.GEMINI_MODEL?.trim();
+  const models = Array.from(new Set([configuredModel, FALLBACK_MODEL].filter(Boolean))) as string[];
+  const ai = new GoogleGenAI({ apiKey });
+  const instruction = [
+    'Analise a captura de tela do navegador e crie uma acao do Lembreto.',
+    'Prioridade: transformar informacoes visiveis em um lembrete util para o usuario.',
+    'Se houver uma data, horario, prazo, reuniao, pagamento, compromisso, entrega ou follow-up visivel, extraia esses dados.',
+    'Se nao houver data clara, voce pode criar um lembrete sem prazo quando o item ainda for acionavel.',
+    'Inclua no description um resumo curto do que foi lido na captura e, se existir, a URL da pagina.',
+    'Se a imagem nao tiver informacao suficiente para um lembrete, retorne needs_confirmation com uma pergunta objetiva.',
+    'Nunca invente dados que nao aparecem na captura ou no contexto enviado.',
+  ].join('\n');
+  const metadata = {
+    pageTitle: input.pageTitle ?? '',
+    pageUrl: input.pageUrl ?? '',
+    userInstruction: input.instruction ?? '',
+    memory: memoryContext ?? {
+      recentMessages: [],
+      recentActions: [],
+      contextRefs: {},
+    },
+  };
+
+  let receivedInvalidModelResponse = false;
+  let lastError: unknown;
+  for (const model of models) {
+    try {
+      const controller = new AbortController();
+      const response = await withModelTimeout(
+        model,
+        ai.models.generateContent({
+          model,
+          contents: [
+            { text: `${instruction}\n\nContexto:\n${JSON.stringify(metadata)}` },
+            { inlineData: image },
+          ],
+          config: {
+            abortSignal: controller.signal,
+            httpOptions: { timeout: MODEL_REQUEST_TIMEOUT_MS },
+            systemInstruction: buildSystemPrompt(),
+            temperature: 0.15,
+            maxOutputTokens: MAX_MODEL_OUTPUT_TOKENS,
+            responseMimeType: 'application/json',
+          },
+        }),
+        controller,
+      );
+      if (!response.text) {
+        receivedInvalidModelResponse = true;
+        continue;
+      }
+
+      const action = parseAssistantAction(response.text);
+      if (action) return action;
+      if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
+        console.warn('[assistant] invalid screenshot response from model', { model });
+      }
+      receivedInvalidModelResponse = true;
+    } catch (error) {
+      if (process.env.ASSISTANT_DEBUG_MODEL_RESPONSE === 'true') {
+        console.warn('[assistant] screenshot model request failed', {
           model,
           error: error instanceof Error ? error.message : String(error),
         });

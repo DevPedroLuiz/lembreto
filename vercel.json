@@ -42,6 +42,7 @@
     { "source": "/api/notifications/alarms/:id/dismiss", "destination": "/api/notifications?action=alarm-dismiss&id=:id" },
     { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
     { "source": "/api/assistant/message", "destination": "/api/assistant?action=message" },
+    { "source": "/api/assistant/screenshot", "destination": "/api/assistant?action=screenshot" },
     { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }

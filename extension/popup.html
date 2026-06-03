@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lembreto</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="icons/icon-192.png" alt="" />
+          <div>
+            <strong>Lembreto</strong>
+            <span id="sessionLabel">Verificando sessao</span>
+          </div>
+        </div>
+        <button id="openAppButton" class="iconButton" type="button" title="Abrir Lembreto">Abrir</button>
+      </header>
+
+      <section class="status" id="statusBox" role="status" aria-live="polite"></section>
+
+      <section id="settingsPanel" class="panel">
+        <label for="appOrigin">Endereco do Lembreto</label>
+        <div class="inline">
+          <input id="appOrigin" type="url" placeholder="http://localhost:3001" />
+          <button id="saveSettingsButton" type="button">Salvar</button>
+        </div>
+      </section>
+
+      <section id="loginPanel" class="panel hidden">
+        <label for="email">E-mail</label>
+        <input id="email" type="email" autocomplete="email" placeholder="voce@email.com" />
+        <label for="password">Senha</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" />
+        <div class="actions">
+          <button id="loginButton" type="button">Entrar</button>
+          <button id="syncSessionButton" class="secondary" type="button">Usar sessao do site</button>
+        </div>
+      </section>
+
+      <section id="quickPanel" class="panel hidden">
+        <div class="tabs" role="tablist" aria-label="Modo de criacao">
+          <button id="manualTab" class="tab active" type="button">Manual</button>
+          <button id="captureTab" class="tab" type="button">Print IA</button>
+        </div>
+
+        <form id="taskForm" class="form">
+          <label for="title">Titulo</label>
+          <input id="title" name="title" maxlength="140" required placeholder="Ex: Pagar boleto" />
+
+          <label for="description">Descricao</label>
+          <textarea id="description" name="description" maxlength="1200" rows="3" placeholder="Detalhes rapidos"></textarea>
+
+          <div class="grid">
+            <label>
+              Data
+              <input id="date" name="date" type="date" />
+            </label>
+            <label>
+              Hora
+              <input id="time" name="time" type="time" />
+            </label>
+          </div>
+
+          <div class="grid">
+            <label>
+              Prioridade
+              <select id="priority" name="priority">
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+                <option value="low">Baixa</option>
+              </select>
+            </label>
+            <label>
+              Categoria
+              <input id="category" name="category" maxlength="40" value="Geral" />
+            </label>
+          </div>
+
+          <button id="createButton" class="primary" type="submit">Criar lembrete</button>
+        </form>
+
+        <div id="capturePanel" class="form hidden">
+          <label for="captureInstruction">Instrucao opcional</label>
+          <textarea id="captureInstruction" rows="3" maxlength="500" placeholder="Ex: crie um lembrete para responder esse e-mail amanha"></textarea>
+          <button id="captureButton" class="primary" type="button">Printar aba e criar</button>
+          <p class="hint">A IA le apenas a parte visivel da aba atual.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

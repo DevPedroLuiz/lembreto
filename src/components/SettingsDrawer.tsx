@@ -4,6 +4,7 @@ import {
   ArrowRight,
   BellRing,
   CalendarDays,
+  Camera,
   CheckCircle2,
   Clock3,
   Compass,
@@ -16,6 +17,7 @@ import {
   Moon,
   Plug,
   Plus,
+  Puzzle,
   RefreshCw,
   Settings,
   ShieldAlert,
@@ -198,6 +200,21 @@ const settingsViews: Array<{
     icon: UserCircle2,
   },
 ];
+
+const LEMBRETO_EXTENSION_APP_SOURCE = 'lembreto-app';
+const LEMBRETO_EXTENSION_SOURCE = 'lembreto-extension';
+const LEMBRETO_EXTENSION_PING = 'LEMBRETO_EXTENSION_PING';
+const LEMBRETO_EXTENSION_ENABLE = 'LEMBRETO_EXTENSION_ENABLE';
+const LEMBRETO_EXTENSION_RESPONSE = 'LEMBRETO_EXTENSION_RESPONSE';
+
+type BrowserExtensionStatus = 'checking' | 'missing' | 'installed' | 'active';
+
+type BrowserExtensionResponse = {
+  installed?: boolean;
+  active?: boolean;
+  appOrigin?: string;
+  error?: string;
+};
 
 const settingCards: Array<{
   key: SettingToggleKey;
@@ -389,6 +406,9 @@ export function SettingsDrawer({
     installHelpText,
     promptInstall,
   } = usePwaInstall();
+  const [browserExtensionStatus, setBrowserExtensionStatus] = React.useState<BrowserExtensionStatus>('checking');
+  const [browserExtensionFeedback, setBrowserExtensionFeedback] = React.useState('');
+  const [isActivatingBrowserExtension, setIsActivatingBrowserExtension] = React.useState(false);
 
   const swipe = useSwipeToClose({
     enabled: open,
@@ -415,6 +435,96 @@ export function SettingsDrawer({
     if (!open) return;
     setActiveView(initialView);
   }, [initialView, open]);
+
+  const requestBrowserExtension = React.useCallback((type: typeof LEMBRETO_EXTENSION_PING | typeof LEMBRETO_EXTENSION_ENABLE) => (
+    new Promise<BrowserExtensionResponse>((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve({ installed: false, active: false });
+        return;
+      }
+
+      const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', handleMessage);
+        resolve({ installed: false, active: false });
+      }, 900);
+
+      function handleMessage(event: MessageEvent) {
+        if (event.source !== window || event.origin !== window.location.origin) return;
+        const data = event.data as {
+          source?: unknown;
+          type?: unknown;
+          requestId?: unknown;
+          payload?: unknown;
+        };
+
+        if (
+          data?.source !== LEMBRETO_EXTENSION_SOURCE ||
+          data.type !== LEMBRETO_EXTENSION_RESPONSE ||
+          data.requestId !== requestId
+        ) {
+          return;
+        }
+
+        window.clearTimeout(timeout);
+        window.removeEventListener('message', handleMessage);
+        resolve((data.payload && typeof data.payload === 'object'
+          ? data.payload
+          : { installed: true, active: false }) as BrowserExtensionResponse);
+      }
+
+      window.addEventListener('message', handleMessage);
+      window.postMessage({
+        source: LEMBRETO_EXTENSION_APP_SOURCE,
+        type,
+        requestId,
+      }, window.location.origin);
+    })
+  ), []);
+
+  const checkBrowserExtension = React.useCallback(async () => {
+    setBrowserExtensionStatus('checking');
+    const response = await requestBrowserExtension(LEMBRETO_EXTENSION_PING);
+    setBrowserExtensionStatus(
+      response.active ? 'active' : response.installed ? 'installed' : 'missing',
+    );
+  }, [requestBrowserExtension]);
+
+  React.useEffect(() => {
+    if (!open || activeView !== 'integrations') return;
+    void checkBrowserExtension();
+  }, [activeView, checkBrowserExtension, open]);
+
+  const handleActivateBrowserExtension = React.useCallback(async () => {
+    if (isActivatingBrowserExtension) return;
+
+    try {
+      setIsActivatingBrowserExtension(true);
+      setBrowserExtensionFeedback('');
+      const response = await requestBrowserExtension(LEMBRETO_EXTENSION_ENABLE);
+
+      if (!response.installed) {
+        setBrowserExtensionStatus('missing');
+        setBrowserExtensionFeedback('Extensao nao detectada neste navegador. Instale a pasta extension e tente novamente.');
+        return;
+      }
+
+      if (response.error) {
+        setBrowserExtensionStatus('installed');
+        setBrowserExtensionFeedback(response.error);
+        return;
+      }
+
+      setBrowserExtensionStatus(response.active ? 'active' : 'installed');
+      setBrowserExtensionFeedback(response.active
+        ? 'Extensao ativada para este endereco do Lembreto.'
+        : 'Extensao encontrada, mas ainda nao confirmou a ativacao.');
+    } finally {
+      setIsActivatingBrowserExtension(false);
+    }
+  }, [isActivatingBrowserExtension, requestBrowserExtension]);
 
   const handleCreateCategory = React.useCallback(async () => {
     const normalized = normalizeTaxonomyValue(categoryDraft);
@@ -1046,6 +1156,115 @@ export function SettingsDrawer({
     </section>
   );
 
+  const renderBrowserExtensionPanel = () => {
+    const statusLabel = browserExtensionStatus === 'checking'
+      ? 'Verificando'
+      : browserExtensionStatus === 'active'
+        ? 'Ativada'
+        : browserExtensionStatus === 'installed'
+          ? 'Instalada'
+          : 'Nao instalada';
+    const statusHint = browserExtensionStatus === 'active'
+      ? 'O popup do navegador esta vinculado a este Lembreto.'
+      : browserExtensionStatus === 'installed'
+        ? 'A extensao foi encontrada neste navegador.'
+        : browserExtensionStatus === 'checking'
+          ? 'Procurando a extensao carregada no navegador.'
+          : 'Carregue a pasta extension no navegador para ativar.';
+
+    return (
+      <section className="rounded-[28px] border border-teal-100 bg-teal-50/60 p-5 dark:border-teal-500/20 dark:bg-teal-500/10">
+        <SectionHeader
+          eyebrow="Navegador"
+          title="Extensao Lembreto"
+          description="Ative o acesso rapido para criar lembretes pelo popup do navegador e usar print com IA."
+        />
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="rounded-[26px] border border-teal-100 bg-white/90 p-5 dark:border-teal-400/20 dark:bg-slate-950/40">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-teal-100 bg-teal-50 text-teal-700 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-300">
+                <Puzzle size={19} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-teal-600 dark:text-teal-300">
+                  {statusLabel}
+                </p>
+                <h3 className="mt-1 text-base font-semibold text-slate-950 dark:text-white">
+                  Atalho do Lembreto no navegador
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {statusHint}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-teal-100 bg-teal-50/70 px-4 py-3 dark:border-teal-400/20 dark:bg-teal-500/10">
+                <div className="flex items-center gap-2 text-sm font-semibold text-teal-800 dark:text-teal-200">
+                  <Camera size={16} />
+                  Print IA
+                </div>
+                <p className="mt-1 text-xs leading-5 text-teal-700 dark:text-teal-200/80">
+                  Captura a aba visivel e cria um lembrete com contexto.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-teal-100 bg-teal-50/70 px-4 py-3 dark:border-teal-400/20 dark:bg-teal-500/10">
+                <div className="flex items-center gap-2 text-sm font-semibold text-teal-800 dark:text-teal-200">
+                  <MonitorSmartphone size={16} />
+                  Popup rapido
+                </div>
+                <p className="mt-1 text-xs leading-5 text-teal-700 dark:text-teal-200/80">
+                  Cria lembretes sem abrir uma nova tela do app.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[26px] border border-teal-100 bg-white/90 p-4 dark:border-teal-400/20 dark:bg-slate-950/40">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]">
+              <div>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{statusLabel}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {browserExtensionStatus === 'active' ? 'Pronto para usar.' : 'Ative neste endereco.'}
+                </p>
+              </div>
+              <Toggle
+                active={browserExtensionStatus === 'active'}
+                onClick={() => {
+                  void handleActivateBrowserExtension();
+                }}
+                ariaLabel="Ativar extensao do Lembreto"
+                disabled={isActivatingBrowserExtension || browserExtensionStatus === 'checking'}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                void handleActivateBrowserExtension();
+              }}
+              disabled={isActivatingBrowserExtension || browserExtensionStatus === 'checking'}
+              className="action-primary mt-3 min-h-[48px] w-full justify-center rounded-2xl disabled:cursor-not-allowed disabled:opacity-60"
+              data-testid="settings-enable-browser-extension"
+            >
+              {isActivatingBrowserExtension || browserExtensionStatus === 'checking'
+                ? <Loader2 size={16} className="animate-spin" />
+                : <Puzzle size={16} />}
+              {browserExtensionStatus === 'active' ? 'Reativar extensao' : 'Ativar extensao'}
+            </button>
+
+            {browserExtensionFeedback && (
+              <p className="mt-3 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-700 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-200">
+                {browserExtensionFeedback}
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   const renderConnectedCalendarsPanel = () => {
     const providers: Array<{
       provider: CalendarIntegrationProvider;
@@ -1640,6 +1859,8 @@ export function SettingsDrawer({
                 </div>
               </div>
             </section>
+
+            {renderBrowserExtensionPanel()}
 
             {renderConnectedCalendarsPanel()}
 

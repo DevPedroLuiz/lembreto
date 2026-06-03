@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
-import { handleAssistantMessage } from '../lib/handlers/assistant.js';
+import { handleAssistantMessage, handleAssistantScreenshot } from '../lib/handlers/assistant.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveAction(req: VercelRequest): string | null {
@@ -16,10 +16,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const result = action === 'message'
     ? await handleAssistantMessage({ sql, request })
-    : {
-      status: 404,
-      body: { error: 'Rota do assistente nao encontrada' },
-    };
+    : action === 'screenshot'
+      ? await handleAssistantScreenshot({ sql, request })
+      : {
+        status: 404,
+        body: { error: 'Rota do assistente nao encontrada' },
+      };
 
   return sendHandlerResult(res, result);
 }
