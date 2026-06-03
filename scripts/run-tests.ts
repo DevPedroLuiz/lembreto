@@ -3397,8 +3397,11 @@ async function main() {
 
   await run('task creation enqueues notification schedule side effect before calendar sync', () => {
     const taskHandler = readFileSync(new URL('../lib/handlers/tasks.ts', import.meta.url), 'utf8');
-    const scheduleIndex = taskHandler.indexOf('await enqueueScheduleSync(sql, user.id, taskId)');
-    const calendarIndex = taskHandler.indexOf('await enqueueCalendarSync(sql, user.id, taskId)');
+    const createStart = taskHandler.indexOf("if (request.method === 'POST')");
+    const createEnd = taskHandler.indexOf('return methodNotAllowed();', createStart);
+    const createTaskHandler = taskHandler.slice(createStart, createEnd);
+    const scheduleIndex = createTaskHandler.indexOf("'sync_notification_schedules'");
+    const calendarIndex = createTaskHandler.indexOf("'sync_external_calendar'");
 
     assert.ok(scheduleIndex >= 0);
     assert.ok(calendarIndex >= 0);
