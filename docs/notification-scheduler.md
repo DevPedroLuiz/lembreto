@@ -56,6 +56,11 @@ npm run scheduler:notifications
 - Health check path: `/health`
 - Variaveis: `SCHEDULER_TARGET_URL`, `CRON_SECRET`, `SCHEDULER_INTERVAL_MS`
 
+No Railway, o arquivo `railway.json` na raiz ja define o start command,
+healthcheck e restart policy. Se o deploy aparecer como `Crashed`, confira
+primeiro se as variaveis `SCHEDULER_TARGET_URL` e `CRON_SECRET` existem no
+ambiente `production`.
+
 ### Docker
 
 Use `scheduler/Dockerfile` com contexto na pasta `scheduler`.
