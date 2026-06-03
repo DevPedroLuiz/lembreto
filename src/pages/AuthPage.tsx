@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Lock, Mail, ShieldCheck, Target, User as UserIcon } from 'lucide-react';
+import { Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
 import { LS } from '../lib/storage';
 import { RecaptchaCheckbox } from '../components/RecaptchaCheckbox';
+import { BrandMark } from '../components/BrandLogo';
 
 interface AuthPageProps {
   auth: ReturnType<typeof useAuth>;
@@ -249,8 +250,8 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               Organização com clareza
             </span>
             <div className="mt-6 flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)]">
-                <Target size={28} />
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-950 shadow-[0_20px_44px_-28px_rgba(14,165,255,0.8)] ring-1 ring-cyan-300/20 dark:bg-black">
+                <BrandMark className="h-10 w-10" />
               </div>
               <div>
                 <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -296,8 +297,8 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
         <section className="min-w-0 p-4 sm:p-8 lg:p-10">
           <div className="mx-auto w-full min-w-0 max-w-md">
             <div className="mb-5 text-center sm:mb-8 lg:text-left">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)] sm:mb-4 sm:h-14 sm:w-14 sm:rounded-3xl lg:mx-0 lg:hidden">
-                <Target size={24} className="sm:h-7 sm:w-7" />
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 shadow-[0_18px_36px_-22px_rgba(14,165,255,0.7)] ring-1 ring-cyan-300/20 sm:mb-4 sm:h-14 sm:w-14 sm:rounded-3xl lg:mx-0 lg:hidden">
+                <BrandMark className="h-9 w-9 sm:h-10 sm:w-10" />
               </div>
               <span className="section-eyebrow">
                 {isRecovering ? 'Acesso' : isLogin ? 'Entrar' : 'Criar conta'}

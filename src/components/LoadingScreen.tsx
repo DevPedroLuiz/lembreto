@@ -1,12 +1,13 @@
 import React from 'react';
-import { Loader2, Target } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { BrandMark } from './BrandLogo';
 
 export function LoadingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="surface-panel flex w-full max-w-sm flex-col items-center gap-4 p-8 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-[28px] bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)]">
-          <Target size={30} />
+        <div className="flex h-16 w-16 items-center justify-center rounded-[28px] bg-slate-950 shadow-[0_18px_38px_-22px_rgba(14,165,255,0.72)] ring-1 ring-cyan-300/20">
+          <BrandMark className="h-12 w-12" />
         </div>
         <div>
           <p className="font-semibold text-slate-950 dark:text-white">Preparando sua área de trabalho</p>

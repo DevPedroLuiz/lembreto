@@ -116,7 +116,11 @@ export function useAssistant(
       ]);
 
       if (response.action.status === 'success' && ['create_task', 'update_task', 'create_note'].includes(response.action.type)) {
-        await onActionComplete?.(response.action);
+        Promise.resolve(onActionComplete?.(response.action)).catch((actionError) => {
+          if (typeof console !== 'undefined') {
+            console.error('[assistant] follow-up refresh failed', actionError);
+          }
+        });
       }
     } catch (requestError) {
       if (typeof console !== 'undefined') {

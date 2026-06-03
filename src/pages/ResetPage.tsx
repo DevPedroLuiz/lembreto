@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Lock, ShieldCheck } from 'lucide-react';
 import { apiPost } from '../api/client';
+import { BrandMark } from '../components/BrandLogo';
 
 interface ResetPageProps {
   onBackToLogin: () => void;
@@ -47,8 +48,8 @@ export function ResetPage({ onBackToLogin }: ResetPageProps) {
 
       <div className="relative w-full max-w-xl overflow-hidden rounded-[36px] border border-slate-200/80 bg-white/92 p-6 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/80 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] sm:p-8">
         <div className="text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[28px] bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.65)]">
-            <Lock size={30} />
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[28px] bg-slate-950 shadow-[0_18px_36px_-22px_rgba(14,165,255,0.72)] ring-1 ring-cyan-300/20">
+            <BrandMark className="h-12 w-12" />
           </div>
           <span className="section-eyebrow mt-6">
             <ShieldCheck size={14} />

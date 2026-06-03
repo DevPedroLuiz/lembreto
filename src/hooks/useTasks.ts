@@ -33,8 +33,9 @@ type InFlightRequest<T> = {
   promise: Promise<T>;
 };
 
-const SYNC_REFRESH_DEBOUNCE_MS = 3000;
-const TASK_FETCH_PAGE_SIZE = 100;
+const SYNC_REFRESH_DEBOUNCE_MS = 15000;
+const TASK_FOREGROUND_REFRESH_MIN_INTERVAL_MS = 60000;
+const TASK_FETCH_PAGE_SIZE = 250;
 
 function normalizeTaxonomy(data: TaskTaxonomy): TaskTaxonomy {
   return {
@@ -120,6 +121,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
   const offlineSyncInFlightRef = useRef<InFlightRequest<number> | null>(null);
   const listenerSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastListenerSyncAtRef = useRef(0);
+  const lastFullRefreshAtRef = useRef(0);
   const tasksMutationVersionRef = useRef(0);
   const taxonomyMutationVersionRef = useRef(0);
 
@@ -243,6 +245,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
       setTags(mergedTaxonomy.tags);
     }
     setPendingOfflineTaskCount(offlineCreates.length);
+    lastFullRefreshAtRef.current = Date.now();
   }, [applyCachedState, fetchServerTasks, fetchServerTaxonomy, token, userId]);
 
   const syncOfflineTasks = useCallback(async (requestToken = token, requestUserId = userId) => {
@@ -329,6 +332,7 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
     const syncedTasks = await fetchServerTasks(requestToken, userId);
     saveTaskCache(userId, syncedTasks);
     setTasks(mergeTasksWithOfflineCreates(syncedTasks, loadOfflineTaskCreates(userId)));
+    lastFullRefreshAtRef.current = Date.now();
   }, [fetchServerTasks, token, userId]);
 
   const refreshTaxonomy = useCallback(async (requestToken = token) => {
@@ -410,7 +414,9 @@ export function useTasks(token: string | null, currentUser: User | null = null) 
         lastListenerSyncAtRef.current = Date.now();
         void (async () => {
           await syncOfflineTasks(token, userId);
-          await refreshTasksAndTaxonomy(token, userId);
+          if (Date.now() - lastFullRefreshAtRef.current >= TASK_FOREGROUND_REFRESH_MIN_INTERVAL_MS) {
+            await refreshTasksAndTaxonomy(token, userId);
+          }
         })().catch(() => {
           // Keep the current local state if the foreground refresh cannot reach the server.
         });

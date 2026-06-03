@@ -21,6 +21,123 @@ function getFortalezaNow() {
   }).format(new Date());
 }
 
+function getFortalezaDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ASSISTANT_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+
+  return {
+    year: Number(get('year')),
+    month: Number(get('month')),
+    day: Number(get('day')),
+    hour: Number(get('hour')),
+    minute: Number(get('minute')),
+  };
+}
+
+function addFortalezaDays(days: number) {
+  const current = getFortalezaDateParts();
+  const date = new Date(Date.UTC(current.year, current.month - 1, current.day + days, 12, 0, 0));
+  return getFortalezaDateParts(date);
+}
+
+function fortalezaIso(year: number, month: number, day: number, time: string) {
+  const [hour = '09', minute = '00'] = time.split(':');
+  const date = new Date(
+    `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00-03:00`,
+  );
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseLocalTime(normalized: string): string | null {
+  const match = normalized.match(/\b(?:as|a|para|pra)\s+(\d{1,2})(?:h(\d{2})?|:(\d{2}))?\b|\b(\d{1,2})(?:h(\d{2})?|:(\d{2}))\b/);
+  if (!match) return null;
+
+  const hour = Number(match[1] ?? match[4]);
+  const minute = match[2] || match[3] || match[5] || match[6]
+    ? Number(match[2] ?? match[3] ?? match[5] ?? match[6])
+    : 0;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function parseLocalDueDate(normalized: string): string | null | undefined {
+  const time = parseLocalTime(normalized);
+  let parts: ReturnType<typeof getFortalezaDateParts> | null = null;
+
+  if (/\bdepois de amanha\b/.test(normalized)) {
+    parts = addFortalezaDays(2);
+  } else if (/\bamanha\b/.test(normalized)) {
+    parts = addFortalezaDays(1);
+  } else if (/\bhoje\b/.test(normalized)) {
+    parts = getFortalezaDateParts();
+  } else {
+    const dateMatch = normalized.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+    if (dateMatch) {
+      const now = getFortalezaDateParts();
+      const day = Number(dateMatch[1]);
+      const month = Number(dateMatch[2]);
+      const rawYear = dateMatch[3] ? Number(dateMatch[3]) : now.year;
+      const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+      parts = { ...now, year, month, day };
+    }
+  }
+
+  if (!parts && time) {
+    const now = getFortalezaDateParts();
+    const candidate = fortalezaIso(now.year, now.month, now.day, time);
+    if (candidate && Date.parse(candidate) > Date.now()) return candidate;
+    parts = addFortalezaDays(1);
+  }
+
+  if (!parts) return undefined;
+  return fortalezaIso(parts.year, parts.month, parts.day, time ?? '09:00') ?? undefined;
+}
+
+function trimTaskTitle(value: string) {
+  return value
+    .replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, '')
+    .replace(/^(de|para)\s+/i, '')
+    .trim();
+}
+
+function inferPriority(normalized: string) {
+  if (/\bprioridade\s+alta\b|\burgente\b/.test(normalized)) return 'high' as const;
+  if (/\bprioridade\s+baixa\b/.test(normalized)) return 'low' as const;
+  if (/\bprioridade\s+media\b/.test(normalized)) return 'medium' as const;
+  return undefined;
+}
+
+function extractCreateTaskTitle(message: string) {
+  const cleanupTitle = (value: string) => trimTaskTitle(value
+    .replace(/(hoje|amanh[ãa]|depois de amanh[ãa])/gi, '')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, '')
+    .replace(/(?:\b(?:as|a|para|pra)|[àá]s|Ã s)\s+\d{1,2}(?:h\d{0,2}|:\d{2})?\b/gi, '')
+    .replace(/\bprioridade\s+(alta|m[eé]dia|baixa)\b/gi, '')
+    .replace(/\burgente\b/gi, ''));
+  const explicitTitle = message.match(/\bt[ií]tulo\s+(.+)$/i)?.[1];
+  if (explicitTitle) return cleanupTitle(explicitTitle);
+
+  return cleanupTitle(message
+    .replace(/^(?:por favor[, ]*)?(?:me\s+)?(?:lembre|lembra|crie|criar|adicione|adicionar|coloque|agenda|agendar)\s+(?:um\s+)?(?:lembrete\s+)?(?:de|para)?\s*/i, '')
+    .replace(/^(?:para\s+)?(?:eu|voce|você)\s+/i, ''));
+}
+
+function extractCompleteTaskSearch(message: string) {
+  return trimTaskTitle(message
+    .replace(/^(?:por favor[, ]*)?/i, '')
+    .replace(/\b(concluir|conclui|conclua|finalizar|finaliza|marcar|marca|feito)\b/gi, '')
+    .replace(/\b(como\s+)?conclu[ií]do\b/gi, '')
+    .replace(/\b(lembrete|tarefa|esse|essa|este|esta|ultimo|ultima|primeiro|primeira)\b/gi, ''));
+}
+
 function buildSystemPrompt() {
   return [
     'Voce e a Lumi, assistente pessoal inteligente do sistema Lembreto.',
@@ -309,6 +426,24 @@ export function interpretLocalAssistantMessage(message: string): AssistantAction
   const normalized = normalizeTextForIntent(message);
 
   const action = (() => {
+    if (/\b(listar|lista|mostrar|mostra|ver|consultar|consulta)\b/.test(normalized)) {
+      if (/\b(concluid[oa]s?|finalizad[oa]s?)\b/.test(normalized)) {
+        return {
+          type: 'list_tasks',
+          payload: { status: 'completed' },
+          confirmationMessage: 'Consultei seus lembretes concluidos.',
+        };
+      }
+
+      if (/\b(pendente|pendentes|aberto|abertos)\b/.test(normalized)) {
+        return {
+          type: 'list_tasks',
+          payload: { status: 'pending' },
+          confirmationMessage: 'Consultei seus lembretes pendentes.',
+        };
+      }
+    }
+
     if (/\b(atrasad[oa]s?|vencid[oa]s?)\b/.test(normalized)) {
       return {
         type: 'assistant_brief',
@@ -334,6 +469,38 @@ export function interpretLocalAssistantMessage(message: string): AssistantAction
         payload: { mode: 'today' },
         confirmationMessage: 'Preparei um plano para hoje.',
       };
+    }
+
+    if (/\b(concluir|conclui|conclua|finalizar|finaliza|marcar como concluido|feito)\b/.test(normalized)) {
+      const shouldUseContext = /\b(esse|essa|este|esta|ultimo|ultima|ele|ela)\b/.test(normalized);
+      const search = extractCompleteTaskSearch(message);
+      return {
+        type: 'update_task',
+        payload: {
+          ...(shouldUseContext || !search ? { contextRef: 'last_relevant_task' as const } : { search }),
+          updates: { status: 'completed' as const },
+        },
+        confirmationMessage: 'Pronto, marquei o lembrete como concluido.',
+      };
+    }
+
+    if (/\b(lembre|lembra|crie|criar|adicione|adicionar|coloque|agenda|agendar)\b/.test(normalized)) {
+      const title = extractCreateTaskTitle(message);
+      if (title) {
+        const dueDate = parseLocalDueDate(normalized);
+        const priority = inferPriority(normalized);
+
+        return {
+          type: 'create_task',
+          payload: {
+            title,
+            ...(dueDate !== undefined ? { dueDate } : {}),
+            ...(priority ? { priority } : {}),
+            alarmEnabled: Boolean(dueDate && parseLocalTime(normalized)),
+          },
+          confirmationMessage: `Pronto, criei o lembrete "${title}".`,
+        };
+      }
     }
 
     return null;

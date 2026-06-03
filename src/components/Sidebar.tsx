@@ -8,11 +8,11 @@ import {
   NotebookPen,
   PanelLeftClose,
   Settings,
-  Target,
   Wrench,
   User as UserIcon,
 } from 'lucide-react';
 import { SidebarItem } from './SidebarItem';
+import { BrandMark } from './BrandLogo';
 import type { User } from '../types';
 
 interface SidebarProps {
@@ -49,8 +49,8 @@ export function Sidebar({
       <div className="surface-panel flex h-full flex-col p-5 xl:p-5">
         <div className="mb-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_40px_-24px_rgba(37,99,235,0.7)]">
-              <Target size={24} />
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 shadow-[0_18px_40px_-24px_rgba(14,165,255,0.78)] ring-1 ring-cyan-300/20">
+              <BrandMark className="h-9 w-9" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">

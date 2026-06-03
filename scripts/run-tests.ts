@@ -1648,12 +1648,38 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'Me lembre de estudar amanhã' },
+          body: { message: 'Como posso manter foco no trabalho?' },
         },
       });
 
       assert.equal(response.status, 503);
       assert.match(String((response.body as { error?: string }).error), /GEMINI_API_KEY/);
+    } finally {
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+    }
+  });
+
+  await run('assistant local create_task works without Gemini key', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const previousKey = process.env.GEMINI_API_KEY;
+
+    try {
+      delete process.env.GEMINI_API_KEY;
+      const response = await handleAssistantMessage({
+        sql: createAssistantSqlMock().sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Me lembre de estudar amanha as 08:00 prioridade alta' },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const body = response.body as { action?: { type?: string; status?: string; entityTitle?: string } };
+      assert.equal(body.action?.type, 'create_task');
+      assert.equal(body.action?.status, 'success');
+      assert.equal(body.action?.entityTitle, 'estudar');
     } finally {
       if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = previousKey;
@@ -1676,7 +1702,7 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'Me lembre de estudar amanhã' },
+          body: { message: 'Como posso manter foco no trabalho?' },
         },
       });
 
@@ -1723,7 +1749,7 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'Crie um lembrete para eu estudar JavaScript amanhã às 20h.' },
+          body: { message: 'Transforme meu plano de estudos em um lembrete.' },
         },
       });
 
@@ -1757,7 +1783,7 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'crie um lembrete para hoje as 23:59 com o titulo teste de IA' },
+          body: { message: 'Registre isto como tarefa no Lembreto.' },
         },
       });
 
@@ -1885,7 +1911,7 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'Me lembre de pagar o aluguel dia 5 às 9h.' },
+          body: { message: 'Transforme a cobrança do aluguel em um lembrete.' },
         },
       });
 
@@ -1923,7 +1949,7 @@ async function main() {
         request: {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
-          body: { message: 'Cria um lembrete para estudar JavaScript amanhã às 20h.' },
+          body: { message: 'Transforme meu plano de estudar JavaScript em um lembrete.' },
         },
       });
       conversationId = String((response.body as { conversationId?: string }).conversationId);

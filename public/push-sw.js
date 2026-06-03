@@ -1,4 +1,4 @@
-self.__LEMBRETO_SW_VERSION = '2026-05-27-1';
+self.__LEMBRETO_SW_VERSION = '2026-06-03-1';
 const recentPushKeys = new Map();
 const PUSH_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -9,6 +9,9 @@ const APP_SHELL_URLS = [
   '/index.html',
   '/manifest.webmanifest',
   '/icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/logo-mark.svg',
 ];
 
 self.addEventListener('install', (event) => {

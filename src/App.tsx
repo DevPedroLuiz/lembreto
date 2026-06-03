@@ -78,6 +78,7 @@ import {
 } from './types';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Sidebar } from './components/Sidebar';
+import { BrandMark } from './components/BrandLogo';
 import type { SettingsView } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -4154,13 +4155,13 @@ export default function App() {
     setLocationSearch(window.location.search);
   }, []);
 
-  const handleAssistantActionComplete = useCallback(async (action: AssistantActionResult) => {
+  const handleAssistantActionComplete = useCallback((action: AssistantActionResult) => {
     if (!auth.token) return;
     if (action.type === 'create_task' || action.type === 'update_task') {
-      await refreshTasks(auth.token);
+      void refreshTasks(auth.token).catch(() => undefined);
     }
     if (action.type === 'create_note') {
-      await refreshNotes(auth.token);
+      void refreshNotes(auth.token).catch(() => undefined);
     }
   }, [auth.token, refreshNotes, refreshTasks]);
 
@@ -4170,18 +4171,18 @@ export default function App() {
     try {
       if (action.entityType === 'task') {
         const task = await apiGet<Task>(`/api/tasks/${action.entityId}`, auth.token);
-        await refreshTasks(auth.token).catch(() => undefined);
         setTasksPageView('agenda');
         setActiveTab('tasks');
         openTaskDetails(task);
+        void refreshTasks(auth.token).catch(() => undefined);
         return;
       }
 
       const note = await apiGet<Note>(`/api/tasks/notes/${action.entityId}`, auth.token);
-      await refreshNotes(auth.token).catch(() => undefined);
       setTasksPageView('notes');
       setActiveTab('tasks');
       openEditNote(note);
+      void refreshNotes(auth.token).catch(() => undefined);
     } catch (error) {
       triggerToastOnly(
         'Nao consegui abrir',
@@ -4310,8 +4311,8 @@ export default function App() {
 
         <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-white/88 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/86 sm:p-4 lg:hidden">
           <div className="flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_18px_30px_-22px_rgba(37,99,235,0.8)]">
-              <Sparkles size={18} />
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 shadow-[0_18px_30px_-22px_rgba(14,165,255,0.82)] ring-1 ring-cyan-300/20">
+              <BrandMark className="h-8 w-8" />
             </div>
             <div className="min-w-0">
               <p className="truncate text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">

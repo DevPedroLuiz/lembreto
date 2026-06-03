@@ -64,7 +64,7 @@ interface TaskHistoryEntry {
 }
 
 const TASK_LIST_DEFAULT_LIMIT = 50;
-const TASK_LIST_MAX_LIMIT = 100;
+const TASK_LIST_MAX_LIMIT = 250;
 
 type TaskListStatusFilter = 'pending' | 'overdue' | 'completed' | 'inactive' | 'cancelled';
 type TaskListPriorityFilter = 'low' | 'medium' | 'high';
@@ -788,22 +788,27 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
 
       const taskId = String(rows[0].id);
       const enqueueStartedAt = Date.now();
-      await enqueueTaskMutationSideEffectBestEffort(
-        context,
-        user.id,
-        taskId,
-        'sync_notification_schedules',
-        'handleTasksCollection:create',
-      );
-      if (effectiveDueDate && status === 'pending') {
-        await enqueueTaskMutationSideEffectBestEffort(
+      const sideEffects = [
+        enqueueTaskMutationSideEffectBestEffort(
           context,
           user.id,
           taskId,
-          'sync_external_calendar',
+          'sync_notification_schedules',
           'handleTasksCollection:create',
+        ),
+      ];
+      if (effectiveDueDate && status === 'pending') {
+        sideEffects.push(
+          enqueueTaskMutationSideEffectBestEffort(
+            context,
+            user.id,
+            taskId,
+            'sync_external_calendar',
+            'handleTasksCollection:create',
+          ),
         );
       }
+      await Promise.all(sideEffects);
       const enqueueMs = Date.now() - enqueueStartedAt;
 
       void syncTaskTaxonomyBestEffort(context, user.id, taskId, category, tags);
@@ -1094,44 +1099,41 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         ? cur.external_calendar_event_id
         : null;
 
-      if (shouldCancelSchedules) {
-        await enqueueTaskMutationSideEffectBestEffort(
+      const sideEffects = [
+        enqueueTaskMutationSideEffectBestEffort(
           context,
           user.id,
           taskId,
-          'cancel_notification_schedules',
+          shouldCancelSchedules ? 'cancel_notification_schedules' : 'sync_notification_schedules',
           'handleTaskById:update',
-        );
-      } else {
-        await enqueueTaskMutationSideEffectBestEffort(
-          context,
-          user.id,
-          taskId,
-          'sync_notification_schedules',
-          'handleTaskById:update',
-        );
-      }
+        ),
+      ];
 
       if (shouldCancelSchedules && existingExternalEventId) {
-        await enqueueTaskMutationSideEffectBestEffort(
-          context,
-          user.id,
-          taskId,
-          'delete_external_calendar_event',
-          'handleTaskById:update',
+        sideEffects.push(
+          enqueueTaskMutationSideEffectBestEffort(
+            context,
+            user.id,
+            taskId,
+            'delete_external_calendar_event',
+            'handleTaskById:update',
+          ),
         );
       } else if (
         nextStatus === 'pending' &&
         nextValues.dueDate
       ) {
-        await enqueueTaskMutationSideEffectBestEffort(
-          context,
-          user.id,
-          taskId,
-          'sync_external_calendar',
-          'handleTaskById:update',
+        sideEffects.push(
+          enqueueTaskMutationSideEffectBestEffort(
+            context,
+            user.id,
+            taskId,
+            'sync_external_calendar',
+            'handleTaskById:update',
+          ),
         );
       }
+      await Promise.all(sideEffects);
 
       void syncTaskTaxonomyBestEffort(context, user.id, taskId, categoryValue, tagsValue);
       const totalMs = Date.now() - totalStartedAt;
@@ -1167,22 +1169,27 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_event_id AS "externalCalendarEventId"
       `;
       if (rows[0]) {
-        await enqueueTaskMutationSideEffectBestEffort(
-          context,
-          user.id,
-          id,
-          'cancel_notification_schedules',
-          'handleTaskById:delete',
-        );
-        if (typeof rows[0].externalCalendarEventId === 'string') {
-          await enqueueTaskMutationSideEffectBestEffort(
+        const sideEffects = [
+          enqueueTaskMutationSideEffectBestEffort(
             context,
             user.id,
             id,
-            'delete_external_calendar_event',
+            'cancel_notification_schedules',
             'handleTaskById:delete',
+          ),
+        ];
+        if (typeof rows[0].externalCalendarEventId === 'string') {
+          sideEffects.push(
+            enqueueTaskMutationSideEffectBestEffort(
+              context,
+              user.id,
+              id,
+              'delete_external_calendar_event',
+              'handleTaskById:delete',
+            ),
           );
         }
+        await Promise.all(sideEffects);
       }
       logInfo('tasks:delete:total-ms', getRequestMeta(request, {
         userId: user.id,
