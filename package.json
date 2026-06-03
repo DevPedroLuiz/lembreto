@@ -13,6 +13,8 @@
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
+    "scheduler:notifications": "node scheduler/notification-scheduler.mjs",
+    "scheduler:check": "node --check scheduler/notification-scheduler.mjs",
     "setup:test-db": "tsx scripts/setup-test-db.ts",
     "test": "tsx --env-file=.env.local scripts/run-tests.ts",
     "test:e2e": "playwright test",

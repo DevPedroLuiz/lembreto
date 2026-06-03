@@ -112,10 +112,19 @@ npm run dev
 npm run build
 npm run migrate
 npm run lint
+npm run scheduler:notifications
 npm run test
 npm run test:e2e
 npm run cleanup:db
 ```
+
+## Agendador de notificacoes
+
+Para notificacoes em horario proximo do real fora do limite de cron da Vercel Hobby,
+rode o scheduler separado em Railway, Render, Fly.io ou VPS. Ele nao acessa o banco:
+apenas chama `/api/cron/notifications` com `CRON_SECRET`.
+
+Veja [docs/notification-scheduler.md](docs/notification-scheduler.md).
 
 ## Testes
 
