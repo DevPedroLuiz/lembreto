@@ -507,7 +507,14 @@ export function SettingsDrawer({
 
       if (!response.installed) {
         setBrowserExtensionStatus('missing');
-        setBrowserExtensionFeedback('Extensao nao detectada neste navegador. Instale a pasta extension e tente novamente.');
+        const downloadLink = document.createElement('a');
+        downloadLink.href = '/lembreto-extension.zip';
+        downloadLink.download = 'lembreto-extension.zip';
+        downloadLink.rel = 'noopener';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        setBrowserExtensionFeedback('Baixei o pacote da extensao. Extraia o ZIP, carregue a pasta no navegador e volte aqui para ativar.');
         return;
       }
 
@@ -1170,7 +1177,10 @@ export function SettingsDrawer({
         ? 'A extensao foi encontrada neste navegador.'
         : browserExtensionStatus === 'checking'
           ? 'Procurando a extensao carregada no navegador.'
-          : 'Carregue a pasta extension no navegador para ativar.';
+          : 'Baixe o pacote, extraia o ZIP e carregue a pasta extraida no navegador.';
+    const extensionManagerUrl = typeof navigator !== 'undefined' && /OPR|Opera/i.test(navigator.userAgent)
+      ? 'opera://extensions'
+      : 'chrome://extensions';
 
     return (
       <section className="rounded-[28px] border border-teal-100 bg-teal-50/60 p-5 dark:border-teal-500/20 dark:bg-teal-500/10">
@@ -1251,8 +1261,37 @@ export function SettingsDrawer({
               {isActivatingBrowserExtension || browserExtensionStatus === 'checking'
                 ? <Loader2 size={16} className="animate-spin" />
                 : <Puzzle size={16} />}
-              {browserExtensionStatus === 'active' ? 'Reativar extensao' : 'Ativar extensao'}
+              {browserExtensionStatus === 'active'
+                ? 'Reativar extensao'
+                : browserExtensionStatus === 'missing'
+                  ? 'Baixar extensao'
+                  : 'Ativar extensao'}
             </button>
+
+            {browserExtensionStatus !== 'active' && (
+              <div className="mt-3 space-y-3">
+                <a
+                  href="/lembreto-extension.zip"
+                  download
+                  className="action-secondary min-h-[48px] w-full justify-center rounded-2xl"
+                  data-testid="settings-download-browser-extension"
+                >
+                  <Download size={16} />
+                  Baixar extensao
+                </a>
+
+                <div className="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm leading-6 text-teal-800 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-100">
+                  <p className="font-semibold">Instalacao manual</p>
+                  <p className="mt-1">
+                    1. Baixe e extraia o ZIP.
+                    <br />
+                    2. Abra <span className="font-semibold">{extensionManagerUrl}</span>.
+                    <br />
+                    3. Ative o modo desenvolvedor e escolha a pasta extraida.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {browserExtensionFeedback && (
               <p className="mt-3 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-700 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-200">

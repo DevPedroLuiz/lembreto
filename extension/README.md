@@ -4,10 +4,12 @@ Extensao Manifest V3 para criar lembretes rapidamente pelo navegador.
 
 ## Instalar em modo desenvolvedor
 
-1. Abra `chrome://extensions` ou `edge://extensions`.
+1. Abra `opera://extensions`, `chrome://extensions` ou `edge://extensions`.
 2. Ative o modo desenvolvedor.
 3. Clique em `Carregar sem compactacao`.
 4. Selecione a pasta `extension` deste projeto.
+
+Em producao, baixe `lembreto-extension.zip` pelo painel `Configuracoes > Integracoes > Extensao Lembreto`, extraia o arquivo e selecione a pasta extraida.
 
 ## Configurar
 
