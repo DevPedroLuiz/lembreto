@@ -30,9 +30,26 @@ import { getDerivedTaskStatus, getDerivedTaskStatusLabel } from '../src/lib/task
 
 process.env.JWT_SECRET ||= 'test-secret-with-at-least-thirty-two-characters';
 
-function getInfrastructureCheckRows(query: string) {
+function parseInfrastructurePayload(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) return value as Array<Record<string, unknown>>;
+  if (typeof value !== 'string') return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getInfrastructureCheckRows(query: string, values: unknown[]) {
+  const requiredRows = parseInfrastructurePayload(values[0]);
+
   if (query.includes('pg_catalog.pg_constraint')) {
-    return [{
+    return requiredRows.map((row) => ({
+      schema: row.schema ?? 'public',
+      tableName: row.tableName,
+      name: row.name,
       definition: [
         'pending',
         'overdue',
@@ -46,11 +63,22 @@ function getInfrastructureCheckRows(query: string) {
         'manual',
         'expired',
       ].join(' '),
-    }];
+    }));
   }
 
-  if (query.includes('pg_catalog.pg_class') || query.includes('pg_catalog.pg_attribute')) {
-    return [{ exists: 1 }];
+  if (query.includes('pg_catalog.pg_attribute')) {
+    return requiredRows.map((row) => ({
+      schema: row.schema ?? 'public',
+      tableName: row.tableName,
+      columnName: row.columnName,
+    }));
+  }
+
+  if (query.includes('pg_catalog.pg_class')) {
+    return requiredRows.map((row) => ({
+      schema: row.schema ?? 'public',
+      name: row.name,
+    }));
   }
 
   return null;
@@ -59,7 +87,7 @@ function getInfrastructureCheckRows(query: string) {
 function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean }) {
   return async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) {
@@ -140,7 +168,7 @@ function createAssistantSqlMock() {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) return [];
@@ -510,7 +538,7 @@ function createNotificationScheduleSqlMock(options?: {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) {
@@ -896,7 +924,7 @@ function createTaskSideEffectsSqlMock(options?: {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('SELECT NOW() AS "postgresNow"')) {
@@ -1129,9 +1157,9 @@ function createCronHealthSqlMock(options?: {
   overdueCandidates?: number;
 }) {
   const now = new Date('2026-05-14T21:30:00.000Z');
-  const sql = (async (strings: TemplateStringsArray) => {
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('SELECT NOW() AS now')) {
@@ -1295,7 +1323,7 @@ function createCronPostSideEffectScheduleSqlMock() {
 
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
-    const infrastructureRows = getInfrastructureCheckRows(query);
+    const infrastructureRows = getInfrastructureCheckRows(query, values);
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('SELECT NOW() AS now')) return [{ now: dbNow.toISOString() }];
@@ -2201,7 +2229,7 @@ async function main() {
 
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
@@ -2253,9 +2281,9 @@ async function main() {
       jti: 'token-1',
     });
 
-    const sql = (async (strings: TemplateStringsArray) => {
+    const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM calendar_feeds')) return [];
@@ -2437,7 +2465,7 @@ async function main() {
     const selectedValues: unknown[][] = [];
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
@@ -2563,7 +2591,7 @@ async function main() {
     const calls: unknown[][] = [];
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
       if (query.includes('FROM notifications') && query.includes('ORDER BY created_at DESC')) {
         calls.push(values);
@@ -2601,7 +2629,7 @@ async function main() {
     let deleteValues: unknown[] | null = null;
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
       if (query.includes('DELETE FROM notifications')) {
         deleteValues = values;
@@ -2637,7 +2665,7 @@ async function main() {
     let deleteValues: unknown[] | null = null;
     const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const query = strings.join(' ');
-      const infrastructureRows = getInfrastructureCheckRows(query);
+      const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
       if (query.includes('FROM token_blacklist')) return [];
       if (query.includes('FROM users')) {

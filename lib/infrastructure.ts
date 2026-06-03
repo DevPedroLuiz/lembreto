@@ -45,65 +45,127 @@ export class InfrastructureMissingError extends Error {
   }
 }
 
-async function relationExists(sql: SqlClient, relation: RequiredRelation) {
-  const rows = await sql`
-    SELECT 1
-    FROM pg_catalog.pg_class c
-    INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = ${relation.schema ?? 'public'}
-      AND c.relname = ${relation.name}
-      AND c.relkind IN ('r', 'p', 'v', 'm')
-    LIMIT 1
-  `;
-
-  return rows.length > 0;
+function jsonParameter(sql: SqlClient, value: unknown) {
+  return sql.json ? sql.json(value) : JSON.stringify(value);
 }
 
-async function columnExists(sql: SqlClient, column: RequiredColumn) {
+function relationKey(relation: RequiredRelation) {
+  return `${relation.schema ?? 'public'}.${relation.name}`;
+}
+
+function columnKey(column: RequiredColumn) {
+  return `${column.schema ?? 'public'}.${column.table}.${column.column}`;
+}
+
+function indexKey(index: RequiredIndex) {
+  return `${index.schema ?? 'public'}.${index.name}`;
+}
+
+function constraintKey(constraint: RequiredConstraint) {
+  return `${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name}`;
+}
+
+async function existingRelations(sql: SqlClient, relations: RequiredRelation[]) {
+  if (relations.length === 0) return new Set<string>();
+
   const rows = await sql`
-    SELECT 1
-    FROM pg_catalog.pg_attribute a
-    INNER JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-    INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = ${column.schema ?? 'public'}
-      AND c.relname = ${column.table}
-      AND a.attname = ${column.column}
+    WITH required AS (
+      SELECT *
+      FROM jsonb_to_recordset(${jsonParameter(sql, relations.map((relation) => ({
+        schema: relation.schema ?? 'public',
+        name: relation.name,
+      })))}::jsonb) AS r(schema text, name text)
+    )
+    SELECT DISTINCT r.schema, r.name
+    FROM required r
+    INNER JOIN pg_catalog.pg_namespace n ON n.nspname = r.schema
+    INNER JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+      AND c.relname = r.name
+      AND c.relkind IN ('r', 'p', 'v', 'm')
+  `;
+
+  return new Set(rows.map((row) => `${String(row.schema)}.${String(row.name)}`));
+}
+
+async function existingColumns(sql: SqlClient, columns: RequiredColumn[]) {
+  if (columns.length === 0) return new Set<string>();
+
+  const rows = await sql`
+    WITH required AS (
+      SELECT *
+      FROM jsonb_to_recordset(${jsonParameter(sql, columns.map((column) => ({
+        schema: column.schema ?? 'public',
+        tableName: column.table,
+        columnName: column.column,
+      })))}::jsonb) AS r(schema text, "tableName" text, "columnName" text)
+    )
+    SELECT DISTINCT r.schema, r."tableName", r."columnName"
+    FROM required r
+    INNER JOIN pg_catalog.pg_namespace n ON n.nspname = r.schema
+    INNER JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+      AND c.relname = r."tableName"
+    INNER JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+      AND a.attname = r."columnName"
       AND a.attnum > 0
       AND NOT a.attisdropped
-    LIMIT 1
   `;
 
-  return rows.length > 0;
+  return new Set(rows.map((row) => (
+    `${String(row.schema)}.${String(row.tableName)}.${String(row.columnName)}`
+  )));
 }
 
-async function indexExists(sql: SqlClient, index: RequiredIndex) {
+async function existingIndexes(sql: SqlClient, indexes: RequiredIndex[]) {
+  if (indexes.length === 0) return new Set<string>();
+
   const rows = await sql`
-    SELECT 1
-    FROM pg_catalog.pg_class c
-    INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = ${index.schema ?? 'public'}
-      AND c.relname = ${index.name}
+    WITH required AS (
+      SELECT *
+      FROM jsonb_to_recordset(${jsonParameter(sql, indexes.map((index) => ({
+        schema: index.schema ?? 'public',
+        name: index.name,
+      })))}::jsonb) AS r(schema text, name text)
+    )
+    SELECT DISTINCT r.schema, r.name
+    FROM required r
+    INNER JOIN pg_catalog.pg_namespace n ON n.nspname = r.schema
+    INNER JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+      AND c.relname = r.name
       AND c.relkind = 'i'
-    LIMIT 1
   `;
 
-  return rows.length > 0;
+  return new Set(rows.map((row) => `${String(row.schema)}.${String(row.name)}`));
 }
 
-async function constraintDefinition(sql: SqlClient, constraint: RequiredConstraint) {
+async function constraintDefinitions(sql: SqlClient, constraints: RequiredConstraint[]) {
+  if (constraints.length === 0) return new Map<string, string>();
+
   const rows = await sql`
-    SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition
-    FROM pg_catalog.pg_constraint con
-    INNER JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
-    INNER JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = ${constraint.schema ?? 'public'}
-      AND c.relname = ${constraint.table}
-      AND con.conname = ${constraint.name}
-    LIMIT 1
+    WITH required AS (
+      SELECT *
+      FROM jsonb_to_recordset(${jsonParameter(sql, constraints.map((constraint) => ({
+        schema: constraint.schema ?? 'public',
+        tableName: constraint.table,
+        name: constraint.name,
+      })))}::jsonb) AS r(schema text, "tableName" text, name text)
+    )
+    SELECT DISTINCT
+      r.schema,
+      r."tableName",
+      r.name,
+      pg_catalog.pg_get_constraintdef(con.oid) AS definition
+    FROM required r
+    INNER JOIN pg_catalog.pg_namespace n ON n.nspname = r.schema
+    INNER JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+      AND c.relname = r."tableName"
+    INNER JOIN pg_catalog.pg_constraint con ON con.conrelid = c.oid
+      AND con.conname = r.name
   `;
 
-  const definition = rows[0]?.definition;
-  return typeof definition === 'string' ? definition : null;
+  return new Map(rows.map((row) => [
+    `${String(row.schema)}.${String(row.tableName)}.${String(row.name)}`,
+    typeof row.definition === 'string' ? row.definition : '',
+  ]));
 }
 
 export async function assertInfrastructure(
@@ -112,46 +174,51 @@ export async function assertInfrastructure(
   required: RequiredInfrastructure,
 ) {
   const missing: string[] = [];
+  const relations = required.relations ?? [];
+  const columns = required.columns ?? [];
+  const indexes = required.indexes ?? [];
+  const constraints = required.constraints ?? [];
 
-  const relationChecks = (required.relations ?? []).map(async (relation) => (
-    await relationExists(sql, relation)
-      ? null
-      : `relation ${relation.schema ?? 'public'}.${relation.name}`
-  ));
+  const [
+    presentRelations,
+    presentColumns,
+    presentIndexes,
+    presentConstraintDefinitions,
+  ] = await Promise.all([
+    existingRelations(sql, relations),
+    existingColumns(sql, columns),
+    existingIndexes(sql, indexes),
+    constraintDefinitions(sql, constraints),
+  ]);
 
-  const columnChecks = (required.columns ?? []).map(async (column) => (
-    await columnExists(sql, column)
-      ? null
-      : `column ${column.schema ?? 'public'}.${column.table}.${column.column}`
-  ));
+  missing.push(...relations
+    .filter((relation) => !presentRelations.has(relationKey(relation)))
+    .map((relation) => `relation ${relation.schema ?? 'public'}.${relation.name}`));
 
-  const indexChecks = (required.indexes ?? []).map(async (index) => (
-    await indexExists(sql, index)
-      ? null
-      : `index ${index.schema ?? 'public'}.${index.name}`
-  ));
+  missing.push(...columns
+    .filter((column) => !presentColumns.has(columnKey(column)))
+    .map((column) => `column ${column.schema ?? 'public'}.${column.table}.${column.column}`));
 
-  const constraintChecks = (required.constraints ?? []).map(async (constraint) => {
-    const definition = await constraintDefinition(sql, constraint);
+  missing.push(...indexes
+    .filter((index) => !presentIndexes.has(indexKey(index)))
+    .map((index) => `index ${index.schema ?? 'public'}.${index.name}`));
+
+  for (const constraint of constraints) {
+    const definition = presentConstraintDefinitions.get(constraintKey(constraint));
     if (!definition) {
-      return `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name}`;
+      missing.push(`constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name}`);
+      continue;
     }
 
     const normalizedDefinition = definition.toLowerCase();
     const missingTerms = (constraint.contains ?? [])
       .filter((term) => !normalizedDefinition.includes(term.toLowerCase()));
-    if (missingTerms.length === 0) return null;
-
-    return `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name} missing ${missingTerms.join('/')}`;
-  });
-
-  const results = await Promise.all([
-    ...relationChecks,
-    ...columnChecks,
-    ...indexChecks,
-    ...constraintChecks,
-  ]);
-  missing.push(...results.filter((item): item is string => typeof item === 'string'));
+    if (missingTerms.length > 0) {
+      missing.push(
+        `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name} missing ${missingTerms.join('/')}`,
+      );
+    }
+  }
 
   if (missing.length > 0) {
     throw new InfrastructureMissingError(feature, missing);
