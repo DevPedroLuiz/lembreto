@@ -6,6 +6,7 @@ import {
   AssistantInvalidModelResponseError,
   AssistantModelRequestError,
   AssistantUnavailableError,
+  interpretLocalAssistantMessage,
   interpretAssistantMessage,
 } from '../assistant/gemini.js';
 import {
@@ -111,7 +112,8 @@ export async function handleAssistantMessage(context: HandlerContext): Promise<H
           return EMPTY_ASSISTANT_MEMORY;
         })
       : EMPTY_ASSISTANT_MEMORY;
-    const action = await interpretAssistantMessage(parsed.data.message, memoryContext);
+    const action = interpretLocalAssistantMessage(parsed.data.message)
+      ?? await interpretAssistantMessage(parsed.data.message, memoryContext);
     const execution = await executeAssistantAction(context, action, {
       ...(memoryEnabled
         ? {
@@ -171,6 +173,11 @@ export async function handleAssistantMessage(context: HandlerContext): Promise<H
       error instanceof AssistantInvalidModelResponseError ||
       error instanceof AssistantModelRequestError
     ) {
+      logWarn('assistant_model_failed', getRequestMeta(context.request, {
+        userId: auth.user.id,
+        errorName: error.name,
+        errorMessage: error.message,
+      }));
       return json(503, { error: error.message });
     }
 

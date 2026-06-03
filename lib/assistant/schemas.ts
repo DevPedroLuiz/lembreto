@@ -5,6 +5,7 @@ const taskStatusSchema = z.enum(['pending', 'completed', 'inactive', 'cancelled'
 const listTaskStatusSchema = z.enum(['pending', 'overdue', 'completed']);
 const notificationReadFilterSchema = z.enum(['unread', 'read', 'all']);
 const notificationKindSchema = z.enum(['pre_notice', 'notification', 'alarm', 'floating_reminder', 'overdue_reminder']);
+const assistantBriefModeSchema = z.enum(['overdue', 'today', 'week']);
 const manageNotificationsActionSchema = z.enum([
   'process_due',
   'mark_all_read',
@@ -133,6 +134,14 @@ const manageNotificationsActionObjectSchema = z.object({
   confirmationMessage: z.string().trim().min(1).max(500),
 }).strict();
 
+const assistantBriefActionSchema = z.object({
+  type: z.literal('assistant_brief'),
+  payload: z.object({
+    mode: assistantBriefModeSchema,
+  }).strict(),
+  confirmationMessage: z.string().trim().min(1).max(500),
+}).strict();
+
 const answerOnlyActionSchema = z.object({
   type: z.literal('answer_only'),
   payload: z.object({
@@ -156,6 +165,7 @@ export const assistantActionSchema = z.discriminatedUnion('type', [
   updateTaskActionSchema,
   listNotificationsActionSchema,
   manageNotificationsActionObjectSchema,
+  assistantBriefActionSchema,
   createNoteActionSchema,
   answerOnlyActionSchema,
   needsConfirmationActionSchema,

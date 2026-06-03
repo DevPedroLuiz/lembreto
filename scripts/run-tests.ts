@@ -100,6 +100,44 @@ function createAssistantSqlMock() {
     return value ?? {};
   };
 
+  const filterAssistantTasks = (values: unknown[]) => {
+    const statusFilter = values.includes('overdue')
+      ? 'overdue'
+      : values.includes('pending')
+        ? 'pending'
+        : values.includes('completed')
+          ? 'completed'
+          : null;
+    const pattern = values.find((value) => typeof value === 'string' && String(value).startsWith('%'));
+    const search = typeof pattern === 'string' ? pattern.replace(/%/g, '') : null;
+    const dates = values
+      .filter((value): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value))
+      .map((value) => Date.parse(value))
+      .filter((value) => Number.isFinite(value));
+    const dueStart = dates[0];
+    const dueEnd = dates[1];
+    const now = Date.now();
+
+    return tasks.filter((task) => {
+      if (task.deletedAt) return false;
+      if (task.status === 'cancelled') return false;
+
+      const dueTime = typeof task.dueDate === 'string' && task.dueDate
+        ? Date.parse(task.dueDate)
+        : Number.NaN;
+      const hasDueTime = Number.isFinite(dueTime);
+      if (statusFilter === 'completed' && task.status !== 'completed') return false;
+      if (statusFilter === 'overdue' && !(task.status === 'pending' || task.status === 'overdue')) return false;
+      if (statusFilter === 'overdue' && (!hasDueTime || dueTime >= now)) return false;
+      if (statusFilter === 'pending' && !(task.status === 'pending' || task.status === 'overdue')) return false;
+      if (statusFilter === 'pending' && hasDueTime && dueTime < now) return false;
+      if (dueStart !== undefined && (!hasDueTime || dueTime < dueStart)) return false;
+      if (dueEnd !== undefined && (!hasDueTime || dueTime > dueEnd)) return false;
+      if (search && !String(task.title).toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  };
+
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join(' ');
     const infrastructureRows = getInfrastructureCheckRows(query);
@@ -278,16 +316,11 @@ function createAssistantSqlMock() {
     }
 
     if (query.includes('SELECT COUNT(*) AS total') && query.includes('FROM tasks')) {
-      return [{ total: tasks.length }];
+      return [{ total: filterAssistantTasks(values).length }];
     }
 
     if (query.includes('FROM tasks') && query.includes('ORDER BY')) {
-      const pattern = values.find((value) => typeof value === 'string' && String(value).startsWith('%'));
-      const search = typeof pattern === 'string' ? pattern.replace(/%/g, '') : null;
-      const filtered = typeof search === 'string'
-        ? tasks.filter((task) => String(task.title).toLowerCase().includes(search.toLowerCase()))
-        : tasks;
-      return filtered;
+      return filterAssistantTasks(values);
     }
 
     if (query.includes('FROM tasks') && query.includes('WHERE id')) {
@@ -1736,6 +1769,103 @@ async function main() {
     });
   });
 
+  await run('assistant local overdue brief works without Gemini and keeps first task context', async () => {
+    const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
+    const previousKey = process.env.GEMINI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    const store = createAssistantSqlMock();
+    store.tasks.push(
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        userId: 'user-1',
+        title: 'Resolver boleto atrasado',
+        description: '',
+        dueDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        endDate: null,
+        priority: 'high',
+        category: 'Financeiro',
+        tags: [],
+        status: 'pending',
+        alarmEnabled: false,
+      },
+      {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        userId: 'user-1',
+        title: 'Comprar material',
+        description: '',
+        dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        endDate: null,
+        priority: 'medium',
+        category: 'Geral',
+        tags: [],
+        status: 'pending',
+        alarmEnabled: false,
+      },
+    );
+
+    try {
+      delete process.env.GEMINI_API_KEY;
+      globalThis.fetch = (async () => {
+        throw new Error('Gemini nao deveria ser chamado para brief local.');
+      }) as typeof fetch;
+
+      const briefResponse = await handleAssistantMessage({
+        sql: store.sql,
+        request: {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: { message: 'Ver atrasados' },
+        },
+      });
+
+      const briefBody = briefResponse.body as {
+        conversationId?: string;
+        message?: string;
+        action?: { type?: string; status?: string };
+      };
+      assert.equal(briefResponse.status, 200);
+      assert.equal(briefBody.action?.type, 'assistant_brief');
+      assert.equal(briefBody.action?.status, 'success');
+      assert.match(String(briefBody.message), /Resolver boleto atrasado/);
+      assert.equal(store.contextRefs.some((ref) => (
+        ref.refKey === 'last_listed_tasks' &&
+        JSON.stringify(ref.metadata).includes('Resolver boleto atrasado')
+      )), true);
+
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+      globalThis.fetch = previousFetch;
+
+      await withMockedGeminiResponse({
+        type: 'update_task',
+        payload: {
+          contextRef: 'last_listed_task_first',
+          updates: { status: 'completed' },
+        },
+        confirmationMessage: 'Pronto, conclui o primeiro atrasado.',
+      }, async () => {
+        const updateResponse = await handleAssistantMessage({
+          sql: store.sql,
+          request: {
+            method: 'POST',
+            headers: { authorization: `Bearer ${token}` },
+            body: {
+              message: 'Marca o primeiro como concluido',
+              conversationId: briefBody.conversationId,
+            },
+          },
+        });
+
+        assert.equal(updateResponse.status, 200);
+        assert.equal(store.tasks.find((task) => task.id === 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')?.status, 'completed');
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousKey;
+    }
+  });
+
   await run('assistant creates conversation, messages, event and last_created_task ref', async () => {
     const token = signToken({ sub: 'user-1', email: 'pedro@example.com' });
     const store = createAssistantSqlMock();
@@ -1874,7 +2004,7 @@ async function main() {
         userId: 'user-1',
         title: 'Pagar energia',
         description: '',
-        dueDate: '2026-05-27T12:00:00.000Z',
+        dueDate: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         endDate: null,
         priority: 'medium',
         category: 'Financeiro',
@@ -1887,7 +2017,7 @@ async function main() {
         userId: 'user-1',
         title: 'Comprar pão',
         description: '',
-        dueDate: '2026-05-27T13:00:00.000Z',
+        dueDate: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
         endDate: null,
         priority: 'medium',
         category: 'Geral',

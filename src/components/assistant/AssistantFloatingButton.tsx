@@ -1,13 +1,16 @@
 import { Sparkles, User as UserIcon } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/cn';
+import type { AssistantActionResult } from '../../lib/assistantApi';
 import type { User } from '../../types';
 import { AssistantChat } from './AssistantChat';
+import type { AssistantMessageAction } from './AssistantMessage';
 
 interface AssistantFloatingButtonProps {
   currentUser: User;
   token: string | null;
-  onActionComplete?: (actionType: string) => void | Promise<void>;
+  onActionComplete?: (action: AssistantActionResult) => void | Promise<void>;
+  onOpenAction?: (action: AssistantMessageAction) => void | Promise<void>;
 }
 
 function getInitials(name: string) {
@@ -20,6 +23,7 @@ export function AssistantFloatingButton({
   currentUser,
   token,
   onActionComplete,
+  onOpenAction,
 }: AssistantFloatingButtonProps) {
   const [open, setOpen] = useState(false);
   const initials = getInitials(currentUser.name);
@@ -31,6 +35,7 @@ export function AssistantFloatingButton({
         token={token}
         onClose={() => setOpen(false)}
         onActionComplete={onActionComplete}
+        onOpenAction={onOpenAction}
         storageKey={`lembreto.lumi.conversation.${currentUser.id}`}
       />
       <button

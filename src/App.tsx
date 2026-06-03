@@ -82,6 +82,8 @@ import type { SettingsView } from './components/SettingsDrawer';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AssistantFloatingButton } from './components/assistant/AssistantFloatingButton';
+import type { AssistantMessageAction } from './components/assistant/AssistantMessage';
+import type { AssistantActionResult } from './lib/assistantApi';
 import type { QuickStartTemplate } from './pages/DashboardPage';
 import type { TasksPageView } from './pages/TasksPage';
 
@@ -4152,15 +4154,41 @@ export default function App() {
     setLocationSearch(window.location.search);
   }, []);
 
-  const handleAssistantActionComplete = useCallback(async (actionType: string) => {
+  const handleAssistantActionComplete = useCallback(async (action: AssistantActionResult) => {
     if (!auth.token) return;
-    if (actionType === 'create_task' || actionType === 'update_task') {
+    if (action.type === 'create_task' || action.type === 'update_task') {
       await refreshTasks(auth.token);
     }
-    if (actionType === 'create_note') {
+    if (action.type === 'create_note') {
       await refreshNotes(auth.token);
     }
   }, [auth.token, refreshNotes, refreshTasks]);
+
+  const handleAssistantOpenAction = useCallback(async (action: AssistantMessageAction) => {
+    if (!auth.token) return;
+
+    try {
+      if (action.entityType === 'task') {
+        const task = await apiGet<Task>(`/api/tasks/${action.entityId}`, auth.token);
+        await refreshTasks(auth.token).catch(() => undefined);
+        setTasksPageView('agenda');
+        setActiveTab('tasks');
+        openTaskDetails(task);
+        return;
+      }
+
+      const note = await apiGet<Note>(`/api/tasks/notes/${action.entityId}`, auth.token);
+      await refreshNotes(auth.token).catch(() => undefined);
+      setTasksPageView('notes');
+      setActiveTab('tasks');
+      openEditNote(note);
+    } catch (error) {
+      triggerToastOnly(
+        'Nao consegui abrir',
+        error instanceof Error ? error.message : 'Atualize a lista e tente novamente.',
+      );
+    }
+  }, [auth.token, openEditNote, openTaskDetails, refreshNotes, refreshTasks, triggerToastOnly]);
 
   if (isResetPasswordRoute) {
     return (
@@ -4972,6 +5000,7 @@ export default function App() {
         currentUser={auth.currentUser}
         token={auth.token}
         onActionComplete={handleAssistantActionComplete}
+        onOpenAction={handleAssistantOpenAction}
       />
 
       <ConfirmDialog

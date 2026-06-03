@@ -21,6 +21,8 @@ type TaskListBody = {
   items?: Array<Record<string, unknown>>;
 };
 
+type AssistantBriefMode = Extract<AssistantAction, { type: 'assistant_brief' }>['payload']['mode'];
+
 export interface AssistantExecutedAction {
   type: string;
   status: AssistantActionStatus;
@@ -132,6 +134,12 @@ function fortalezaIso(year: number, month: number, day: number, time: string) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function addDaysInFortaleza(year: number, month: number, day: number, days: number) {
+  const date = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  const parts = getFortalezaDateParts(date);
+  return { year: parts.year, month: parts.month, day: parts.day };
+}
+
 function daysInMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
@@ -233,6 +241,105 @@ function buildTaskSummary(tasks: Array<Record<string, unknown>>) {
 
   const extra = tasks.length > 8 ? `\nE mais ${tasks.length - 8} lembrete(s).` : '';
   return `Encontrei ${tasks.length} lembrete(s):\n${lines.join('\n')}${extra}`;
+}
+
+function getTaskPriorityWeight(task: Record<string, unknown>) {
+  const priority = String(task.priority ?? 'medium');
+  if (priority === 'high') return 0;
+  if (priority === 'medium') return 1;
+  return 2;
+}
+
+function getTaskDueTime(task: Record<string, unknown>) {
+  const dueDate = typeof task.dueDate === 'string' ? Date.parse(task.dueDate) : Number.NaN;
+  return Number.isNaN(dueDate) ? Number.MAX_SAFE_INTEGER : dueDate;
+}
+
+function sortTasksForAttention(tasks: Array<Record<string, unknown>>) {
+  return [...tasks].sort((left, right) => {
+    const priorityDelta = getTaskPriorityWeight(left) - getTaskPriorityWeight(right);
+    if (priorityDelta !== 0) return priorityDelta;
+    return getTaskDueTime(left) - getTaskDueTime(right);
+  });
+}
+
+function formatTaskLine(task: Record<string, unknown>, index: number) {
+  const title = String(task.title ?? 'Sem titulo');
+  const priority = String(task.priority ?? 'medium');
+  const category = String(task.category ?? 'Geral');
+  const dueDate = typeof task.dueDate === 'string' && task.dueDate
+    ? new Intl.DateTimeFormat('pt-BR', {
+      timeZone: ASSISTANT_TIMEZONE,
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(task.dueDate))
+    : 'sem horario';
+  const priorityLabel = priority === 'high' ? 'alta' : priority === 'medium' ? 'media' : 'baixa';
+  return `${index + 1}. ${title} (${priorityLabel}, ${category}, ${dueDate})`;
+}
+
+function buildAutonomousBriefMessage(input: {
+  mode: AssistantBriefMode;
+  overdueTasks: Array<Record<string, unknown>>;
+  todayTasks: Array<Record<string, unknown>>;
+  weekTasks: Array<Record<string, unknown>>;
+}) {
+  const overdue = sortTasksForAttention(input.overdueTasks);
+  const today = sortTasksForAttention(input.todayTasks);
+  const week = sortTasksForAttention(input.weekTasks);
+  const highPriorityCount = [...overdue, ...today, ...week].filter((task) => String(task.priority ?? '') === 'high').length;
+
+  if (input.mode === 'overdue') {
+    if (overdue.length === 0) {
+      return 'Boa noticia: nao encontrei lembretes atrasados. O melhor proximo passo e revisar o que vence hoje para manter o ritmo.';
+    }
+
+    const lines = overdue.slice(0, 5).map(formatTaskLine).join('\n');
+    const extra = overdue.length > 5 ? `\nE mais ${overdue.length - 5} atrasado(s).` : '';
+    return [
+      `Encontrei ${overdue.length} lembrete(s) atrasado(s). Priorize assim:`,
+      lines,
+      extra,
+      'Sugestao: resolva o primeiro item de alta prioridade, depois reagende o que nao cabe hoje para tirar pressao da lista.',
+    ].filter(Boolean).join('\n');
+  }
+
+  if (input.mode === 'week') {
+    const lines = week.slice(0, 6).map(formatTaskLine).join('\n');
+    const pressure = overdue.length > 0
+      ? `${overdue.length} atrasado(s) precisam entrar antes dos proximos prazos.`
+      : 'Sem atraso bloqueando a semana.';
+    if (week.length === 0 && overdue.length === 0) {
+      return 'Sua semana esta leve no Lembreto: nao encontrei prazos pendentes nos proximos 7 dias. Vale criar 1 ou 2 prioridades para manter direcao.';
+    }
+
+    return [
+      `Resumo da semana: ${week.length} prazo(s) nos proximos 7 dias, ${highPriorityCount} de alta prioridade.`,
+      pressure,
+      lines ? `Sequencia recomendada:\n${lines}` : 'Nao ha prazos futuros listados; foque primeiro nos atrasados.',
+    ].join('\n');
+  }
+
+  if (today.length === 0 && overdue.length === 0) {
+    return 'Hoje esta livre de prazos e atrasos no Lembreto. Sugestao: escolha uma tarefa importante sem data ou crie um lembrete de foco para manter o dia intencional.';
+  }
+
+  const firstBlock = overdue.length > 0
+    ? `Comece recuperando ${Math.min(overdue.length, 2)} atrasado(s):\n${overdue.slice(0, 2).map(formatTaskLine).join('\n')}`
+    : 'Comece pelo item com maior prioridade de hoje.';
+  const todayBlock = today.length > 0
+    ? `Depois siga com hoje:\n${today.slice(0, 4).map(formatTaskLine).join('\n')}`
+    : 'Nao encontrei prazos para hoje depois dos atrasados.';
+  const closing = highPriorityCount > 0
+    ? 'Regra de decisao: alta prioridade primeiro, depois menor prazo.'
+    : 'Regra de decisao: menor prazo primeiro, sem tentar abracar tudo de uma vez.';
+
+  return [
+    `Plano de hoje: ${today.length} item(ns) para hoje e ${overdue.length} atrasado(s).`,
+    firstBlock,
+    todayBlock,
+    closing,
+  ].join('\n');
 }
 
 function buildNotificationSummary(notifications: Array<Record<string, unknown>>) {
@@ -453,6 +560,56 @@ async function listTasks(
   }));
   assertSuccessfulResult(result, 'Nao consegui consultar seus lembretes agora.');
   return result.body as TaskListBody;
+}
+
+async function executeAssistantBrief(
+  context: HandlerContext,
+  action: Extract<AssistantAction, { type: 'assistant_brief' }>,
+): Promise<AssistantExecutionResult> {
+  const today = getFortalezaDateParts();
+  const weekEnd = addDaysInFortaleza(today.year, today.month, today.day, 6);
+  const todayStart = fortalezaIso(today.year, today.month, today.day, '00:00');
+  const todayEnd = fortalezaIso(today.year, today.month, today.day, '23:59');
+  const weekEndIso = fortalezaIso(weekEnd.year, weekEnd.month, weekEnd.day, '23:59');
+
+  const [overdueResult, todayResult, weekResult] = await Promise.all([
+    listTasks(context, { status: 'overdue' }),
+    todayStart && todayEnd
+      ? listTasks(context, { status: 'pending', from: todayStart, to: todayEnd })
+      : Promise.resolve({ items: [] }),
+    todayStart && weekEndIso
+      ? listTasks(context, { status: 'pending', from: todayStart, to: weekEndIso })
+      : Promise.resolve({ items: [] }),
+  ]);
+
+  const overdueTasks = Array.isArray(overdueResult.items) ? overdueResult.items : [];
+  const todayTasks = Array.isArray(todayResult.items) ? todayResult.items : [];
+  const weekTasks = Array.isArray(weekResult.items) ? weekResult.items : [];
+  const message = buildAutonomousBriefMessage({
+    mode: action.payload.mode,
+    overdueTasks,
+    todayTasks,
+    weekTasks,
+  });
+
+  return {
+    message,
+    action: {
+      type: action.type,
+      status: 'success',
+      summary: `Brief autonomo ${action.payload.mode}: ${overdueTasks.length} atrasados, ${todayTasks.length} hoje, ${weekTasks.length} semana.`,
+    },
+    data: {
+      items: action.payload.mode === 'overdue'
+        ? overdueTasks
+        : action.payload.mode === 'week'
+          ? weekTasks
+          : [...overdueTasks, ...todayTasks],
+      overdueTasks,
+      todayTasks,
+      weekTasks,
+    },
+  };
 }
 
 async function executeCreateTask(
@@ -779,7 +936,7 @@ async function persistExecutionOutcome(
     });
   }
 
-  if (result.action.type === 'list_tasks' && result.action.status === 'success') {
+  if ((result.action.type === 'list_tasks' || result.action.type === 'assistant_brief') && result.action.status === 'success') {
     const taskItems = result.data && typeof result.data === 'object' && Array.isArray((result.data as TaskListBody).items)
       ? (result.data as TaskListBody).items ?? []
       : [];
@@ -888,6 +1045,10 @@ export async function executeAssistantAction(
     }
     if (action.type === 'manage_notifications') {
       result = await executeManageNotifications(context, action);
+      return persistExecutionOutcome(context, result, action, options);
+    }
+    if (action.type === 'assistant_brief') {
+      result = await executeAssistantBrief(context, action);
       return persistExecutionOutcome(context, result, action, options);
     }
     if (action.type === 'create_note') {

@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Loader2, Mic, Plus, Send, X } from 'lucide-react';
+import { AlarmClock, CalendarCheck2, ClockAlert, Loader2, Mic, Plus, Send, Sparkles, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../lib/cn';
-import { AssistantMessage } from './AssistantMessage';
+import type { AssistantActionResult } from '../../lib/assistantApi';
+import { AssistantMessage, type AssistantMessageAction } from './AssistantMessage';
 import { useAssistant } from './useAssistant';
 
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
@@ -38,7 +39,8 @@ interface AssistantChatProps {
   open: boolean;
   token: string | null;
   onClose: () => void;
-  onActionComplete?: (actionType: string) => void | Promise<void>;
+  onActionComplete?: (action: AssistantActionResult) => void | Promise<void>;
+  onOpenAction?: (action: AssistantMessageAction) => void | Promise<void>;
   storageKey?: string;
 }
 
@@ -51,7 +53,21 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   return candidate.SpeechRecognition ?? candidate.webkitSpeechRecognition ?? null;
 }
 
-export function AssistantChat({ open, token, onClose, onActionComplete, storageKey }: AssistantChatProps) {
+const quickReplies = [
+  { label: 'Ver atrasados', message: 'Ver meus lembretes atrasados', icon: ClockAlert },
+  { label: 'Planejar hoje', message: 'Planeje meu dia de hoje com os lembretes mais importantes', icon: CalendarCheck2 },
+  { label: 'Criar alarme', message: 'Crie um lembrete com alarme', icon: AlarmClock },
+  { label: 'Resumir semana', message: 'Resuma minha semana no Lembreto', icon: Sparkles },
+];
+
+export function AssistantChat({
+  open,
+  token,
+  onClose,
+  onActionComplete,
+  onOpenAction,
+  storageKey,
+}: AssistantChatProps) {
   const [input, setInput] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -59,7 +75,7 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
   const voiceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalTranscriptRef = useRef('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const { messages, isLoading, error, sendMessage, startNewConversation } = useAssistant(token, onActionComplete, storageKey);
+  const { messages, isLoading, progressLabel, error, sendMessage, startNewConversation } = useAssistant(token, onActionComplete, storageKey);
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +93,13 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
     if (!nextMessage) return;
     setInput('');
     await sendMessage(nextMessage);
+  };
+
+  const sendQuickReply = async (message: string) => {
+    if (isLoading) return;
+    setInput('');
+    setVoiceError('');
+    await sendMessage(message);
   };
 
   const startVoiceInput = () => {
@@ -191,18 +214,39 @@ export function AssistantChat({ open, token, onClose, onActionComplete, storageK
 
           <div className="no-scrollbar flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {messages.map((message) => (
-              <AssistantMessage key={message.id} message={message} />
+              <AssistantMessage key={message.id} message={message} onOpenAction={onOpenAction} />
             ))}
             {isLoading && (
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-                <Loader2 className="animate-spin" size={16} />
-                Pensando...
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-500 shadow-sm dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300">
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.2s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.1s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500" />
+                </span>
+                {progressLabel || 'Interpretando pedido'}
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           <div className="border-t border-slate-200/80 p-3 dark:border-white/10">
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              {quickReplies.map((reply) => {
+                const Icon = reply.icon;
+                return (
+                  <button
+                    key={reply.label}
+                    type="button"
+                    onClick={() => void sendQuickReply(reply.message)}
+                    disabled={isLoading}
+                    className="flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-200"
+                  >
+                    <Icon size={15} />
+                    <span className="truncate">{reply.label}</span>
+                  </button>
+                );
+              })}
+            </div>
             {(voiceError || error || isListening) && (
               <p
                 className={cn(

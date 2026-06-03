@@ -55,6 +55,7 @@ function buildSystemPrompt() {
     '  Para referencias contextuais em update_task, use payload.contextRef com last_created_task, last_updated_task, last_relevant_task, last_listed_task_first ou last_listed_task_last.',
     '- list_notifications: consulta notificacoes recentes, pendentes ou lidas.',
     '- manage_notifications: processa notificacoes vencidas, marca como lidas, limpa a central ou ativa/desativa notificacoes.',
+    '- assistant_brief: gera plano autonomo do dia, resumo de atrasados ou resumo semanal com base nos dados reais do Lembreto.',
     '- create_note: cria nota.',
     '- answer_only: responde orientacoes de rotina sem executar acao.',
     '- needs_confirmation: pede dado essencial que esta faltando.',
@@ -122,6 +123,10 @@ function normalizeActionType(value: unknown) {
     list_notifications: 'list_notifications',
     manage_alerts: 'manage_notifications',
     manage_notifications: 'manage_notifications',
+    plan_day: 'assistant_brief',
+    daily_plan: 'assistant_brief',
+    weekly_summary: 'assistant_brief',
+    overdue_summary: 'assistant_brief',
   };
   return aliases[normalized] ?? normalized;
 }
@@ -134,6 +139,7 @@ function defaultConfirmationMessage(type: string, payload: Record<string, unknow
   if (type === 'create_note') return `Pronto, criei a nota "${title}".`;
   if (type === 'list_notifications') return 'Consultei suas notificacoes.';
   if (type === 'manage_notifications') return 'Pronto, organizei suas notificacoes.';
+  if (type === 'assistant_brief') return 'Preparei uma visao inteligente para voce.';
   if (type === 'needs_confirmation') return pickString(payload.question) ?? 'Preciso de mais uma informacao para continuar.';
   return pickString(payload.answer) ?? 'Certo, vou te ajudar com isso.';
 }
@@ -197,6 +203,17 @@ function normalizePayload(type: string, payload: Record<string, unknown>) {
     return {
       action: pickString(payload.action) ?? pickString(payload.operation) ?? 'process_due',
     };
+  }
+
+  if (type === 'assistant_brief') {
+    const rawMode = pickString(payload.mode) ?? pickString(payload.period) ?? pickString(payload.view);
+    const normalizedMode = rawMode?.toLowerCase().replace(/[\s-]+/g, '_');
+    const mode = normalizedMode === 'week' || normalizedMode === 'weekly' || normalizedMode === 'semana'
+      ? 'week'
+      : normalizedMode === 'overdue' || normalizedMode === 'atrasados'
+        ? 'overdue'
+        : 'today';
+    return { mode };
   }
 
   if (type === 'needs_confirmation') {
@@ -278,6 +295,52 @@ function withModelTimeout<T>(model: string, promise: Promise<T>, controller: Abo
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
   });
+}
+
+function normalizeTextForIntent(value: string) {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+export function interpretLocalAssistantMessage(message: string): AssistantAction | null {
+  const normalized = normalizeTextForIntent(message);
+
+  const action = (() => {
+    if (/\b(atrasad[oa]s?|vencid[oa]s?)\b/.test(normalized)) {
+      return {
+        type: 'assistant_brief',
+        payload: { mode: 'overdue' },
+        confirmationMessage: 'Revisei seus lembretes atrasados.',
+      };
+    }
+
+    if (/\b(resum[aoir]*|balanco|relatorio)\b/.test(normalized) && /\b(semana|semanal|7 dias)\b/.test(normalized)) {
+      return {
+        type: 'assistant_brief',
+        payload: { mode: 'week' },
+        confirmationMessage: 'Preparei um resumo da sua semana.',
+      };
+    }
+
+    if (
+      /\b(planej[aeio]|organiza|prioriza|agenda)\b/.test(normalized) &&
+      /\b(hoje|dia|rotina)\b/.test(normalized)
+    ) {
+      return {
+        type: 'assistant_brief',
+        payload: { mode: 'today' },
+        confirmationMessage: 'Preparei um plano para hoje.',
+      };
+    }
+
+    return null;
+  })();
+
+  if (!action) return null;
+  return assistantActionSchema.parse(action);
 }
 
 export async function interpretAssistantMessage(

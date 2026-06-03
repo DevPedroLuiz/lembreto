@@ -306,6 +306,43 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
     return json(400, { error: 'Nota não encontrada' });
   }
 
+  if (request.method === 'GET') {
+    try {
+      const rows = await sql`
+        SELECT
+          id,
+          user_id AS "userId",
+          task_id AS "taskId",
+          title,
+          content,
+          priority,
+          category,
+          tags,
+          mode,
+          expires_at AS "expiresAt",
+          deleted_at AS "deletedAt",
+          delete_after AS "deleteAfter",
+          deletion_reason AS "deletionReason",
+          expired_notification_sent_at AS "expiredNotificationSentAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM notes
+        WHERE id = ${id}
+          AND user_id = ${user.id}
+          AND deleted_at IS NULL
+      `;
+
+      if (rows.length === 0) {
+        return json(404, { error: 'Nota nÃ£o encontrada' });
+      }
+
+      return json(200, rows[0]);
+    } catch (error) {
+      logError('note_get_failed', error, getRequestMeta(request, { userId: user.id, noteId: id }));
+      return json(500, { error: 'Erro ao buscar nota' });
+    }
+  }
+
   if (request.method === 'PUT') {
     const parsed = updateNoteSchema.safeParse(request.body ?? {});
     if (!parsed.success) {

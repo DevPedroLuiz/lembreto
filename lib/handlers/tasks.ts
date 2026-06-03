@@ -836,6 +836,59 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
     return json(400, { error: 'Tarefa não encontrada' });
   }
 
+  if (request.method === 'GET') {
+    try {
+      const rows = await sql`
+        SELECT
+          id,
+          user_id     AS "userId",
+          client_mutation_id AS "clientMutationId",
+          title,
+          description,
+          due_date    AS "dueDate",
+          end_date    AS "endDate",
+          priority,
+          category,
+          tags,
+          suppress_holiday_notifications AS "suppressHolidayNotifications",
+          overdue_reminder_intensity AS "overdueReminderIntensity",
+          alarm_enabled AS "alarmEnabled",
+          pre_notice_minutes AS "preNoticeMinutes",
+          reminder_mode AS "reminderMode",
+          expires_at AS "expiresAt",
+          overdue_since AS "overdueSince",
+          overdue_expires_at AS "overdueExpiresAt",
+          deleted_at AS "deletedAt",
+          completed_at AS "completedAt",
+          completion_source AS "completionSource",
+          auto_deleted_reason AS "autoDeletedReason",
+          auto_deleted_at AS "autoDeletedAt",
+          muted_until AS "mutedUntil",
+          status,
+          history,
+          created_at  AS "createdAt",
+          external_calendar_provider AS "externalCalendarProvider",
+          external_calendar_event_id AS "externalCalendarEventId",
+          external_calendar_sync_status AS "externalCalendarSyncStatus",
+          external_calendar_last_error AS "externalCalendarLastError",
+          external_calendar_synced_at AS "externalCalendarSyncedAt"
+        FROM tasks
+        WHERE id = ${id}
+          AND user_id = ${user.id}
+          AND deleted_at IS NULL
+      `;
+
+      if (rows.length === 0) {
+        return json(404, { error: 'Tarefa nÃ£o encontrada' });
+      }
+
+      return json(200, rows[0]);
+    } catch (error) {
+      logError('task_get_failed', error, getRequestMeta(request, { userId: user.id, taskId: id }));
+      return json(500, { error: 'Erro ao buscar tarefa' });
+    }
+  }
+
   if (request.method === 'PUT') {
     const parsed = updateTaskSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
