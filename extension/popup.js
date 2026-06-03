@@ -6,7 +6,9 @@ const els = {
   statusBox: document.getElementById('statusBox'),
   settingsPanel: document.getElementById('settingsPanel'),
   loginPanel: document.getElementById('loginPanel'),
+  loginFields: document.getElementById('loginFields'),
   quickPanel: document.getElementById('quickPanel'),
+  authHint: document.getElementById('authHint'),
   appOrigin: document.getElementById('appOrigin'),
   saveSettingsButton: document.getElementById('saveSettingsButton'),
   openAppButton: document.getElementById('openAppButton'),
@@ -33,6 +35,7 @@ let state = {
   appOrigin: DEFAULT_APP_ORIGIN,
   token: null,
   user: null,
+  recaptchaRequired: true,
 };
 
 function storageGet(keys) {
@@ -67,10 +70,15 @@ function setBusy(isBusy) {
 function updateSessionUi() {
   const signedIn = Boolean(state.token);
   els.loginPanel.classList.toggle('hidden', signedIn);
+  els.loginPanel.classList.toggle('loginPanelRecaptcha', state.recaptchaRequired);
   els.quickPanel.classList.toggle('hidden', !signedIn);
   els.sessionLabel.textContent = signedIn
     ? state.user?.email || 'Sessao ativa'
     : 'Entre para criar lembretes';
+  els.authHint.textContent = state.recaptchaRequired
+    ? 'Por seguranca, entre no site e sincronize sua sessao aqui.'
+    : 'Entre por senha ou use a sessao aberta no site.';
+  els.loginButton.textContent = state.recaptchaRequired ? 'Entrar pelo site' : 'Entrar';
 }
 
 function buildUrl(path) {
@@ -102,12 +110,27 @@ async function apiRequest(path, options = {}) {
   return data;
 }
 
+async function refreshAuthConfig() {
+  try {
+    const response = await fetch(buildUrl('/api/auth/config'), {
+      cache: 'no-store',
+      credentials: 'include',
+    });
+    const data = await response.json().catch(() => ({}));
+    state.recaptchaRequired = data.recaptchaRequired !== false;
+  } catch {
+    state.recaptchaRequired = true;
+  }
+  updateSessionUi();
+}
+
 async function saveSettings() {
   try {
     const appOrigin = normalizeOrigin(els.appOrigin.value);
     state.appOrigin = appOrigin;
     els.appOrigin.value = appOrigin;
     await storageSet({ appOrigin });
+    await refreshAuthConfig();
     setStatus('Endereco salvo.', 'success');
   } catch {
     setStatus('Informe um endereco valido, como http://localhost:3001.', 'error');
@@ -135,6 +158,12 @@ async function restoreFromSiteSession() {
 }
 
 async function login() {
+  if (state.recaptchaRequired) {
+    await openApp();
+    setStatus('Entre pelo site do Lembreto e depois clique em "Usar sessao do site".');
+    return;
+  }
+
   const email = els.email.value.trim();
   const password = els.password.value;
   if (!email || !password) {
@@ -142,10 +171,21 @@ async function login() {
     return;
   }
 
-  const data = await apiRequest('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
+  let data;
+  try {
+    data = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (message.toLocaleLowerCase('pt-BR').includes('robo') || message.toLocaleLowerCase('pt-BR').includes('robô')) {
+      state.recaptchaRequired = true;
+      updateSessionUi();
+      throw new Error('Entre pelo site do Lembreto e depois use "Usar sessao do site".');
+    }
+    throw error;
+  }
   state.token = data.token;
   state.user = data.user;
   await storageSet({ token: state.token, user: state.user });
@@ -264,13 +304,14 @@ async function init() {
   };
   els.appOrigin.value = state.appOrigin;
   updateSessionUi();
+  await refreshAuthConfig();
 
   if (!state.token) {
     await runWithBusy(async () => {
       try {
         await restoreFromSiteSession();
       } catch {
-        setStatus('Entre pela extensao ou abra o site e sincronize a sessao.');
+        setStatus('Entre pelo site e clique em "Usar sessao do site".');
       }
     });
   } else {

@@ -30,13 +30,19 @@
       </section>
 
       <section id="loginPanel" class="panel hidden">
-        <label for="email">E-mail</label>
-        <input id="email" type="email" autocomplete="email" placeholder="voce@email.com" />
-        <label for="password">Senha</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" />
+        <div class="authHeader">
+          <strong>Acesso do navegador</strong>
+          <span id="authHint">Entre pelo site e sincronize sua sessão aqui.</span>
+        </div>
+        <div id="loginFields" class="loginFields">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" autocomplete="email" placeholder="voce@email.com" />
+          <label for="password">Senha</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" />
+        </div>
         <div class="actions">
-          <button id="loginButton" type="button">Entrar</button>
-          <button id="syncSessionButton" class="secondary" type="button">Usar sessao do site</button>
+          <button id="syncSessionButton" class="primary" type="button">Usar sessão do site</button>
+          <button id="loginButton" class="secondary" type="button">Entrar pelo site</button>
         </div>
       </section>
 
