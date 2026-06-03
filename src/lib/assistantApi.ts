@@ -1,5 +1,7 @@
 import { apiPost } from '../api/client';
 
+const ASSISTANT_REQUEST_TIMEOUT_MS = 45000;
+
 export interface AssistantResponse {
   conversationId: string;
   message: string;
@@ -30,5 +32,6 @@ export async function sendAssistantMessage(input: {
       conversationId: input.conversationId ?? null,
     },
     input.token,
+    { timeoutMs: ASSISTANT_REQUEST_TIMEOUT_MS },
   );
 }

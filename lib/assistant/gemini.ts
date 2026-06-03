@@ -5,6 +5,8 @@ import { assistantActionSchema, type AssistantAction } from './schemas.js';
 export const ASSISTANT_TIMEZONE = 'America/Fortaleza';
 
 const FALLBACK_MODEL = 'gemini-2.5-flash';
+const MODEL_REQUEST_TIMEOUT_MS = 18000;
+const MAX_MODEL_OUTPUT_TOKENS = 700;
 
 function getFortalezaNow() {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -264,6 +266,20 @@ function parseAssistantAction(text: string): AssistantAction | null {
   }
 }
 
+function withModelTimeout<T>(model: string, promise: Promise<T>, controller: AbortController): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`assistant_model_timeout:${model}`));
+    }, MODEL_REQUEST_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
 export async function interpretAssistantMessage(
   message: string,
   memoryContext?: AssistantMemoryContext,
@@ -279,22 +295,30 @@ export async function interpretAssistantMessage(
   let lastError: unknown;
   for (const model of models) {
     try {
-      const response = await ai.models.generateContent({
+      const controller = new AbortController();
+      const response = await withModelTimeout(
         model,
-        contents: JSON.stringify({
-          currentMessage: message,
-          memory: memoryContext ?? {
-            recentMessages: [],
-            recentActions: [],
-            contextRefs: {},
+        ai.models.generateContent({
+          model,
+          contents: JSON.stringify({
+            currentMessage: message,
+            memory: memoryContext ?? {
+              recentMessages: [],
+              recentActions: [],
+              contextRefs: {},
+            },
+          }),
+          config: {
+            abortSignal: controller.signal,
+            httpOptions: { timeout: MODEL_REQUEST_TIMEOUT_MS },
+            systemInstruction: buildSystemPrompt(),
+            temperature: 0.2,
+            maxOutputTokens: MAX_MODEL_OUTPUT_TOKENS,
+            responseMimeType: 'application/json',
           },
         }),
-        config: {
-          systemInstruction: buildSystemPrompt(),
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-        },
-      });
+        controller,
+      );
       if (!response.text) {
         receivedInvalidModelResponse = true;
         continue;

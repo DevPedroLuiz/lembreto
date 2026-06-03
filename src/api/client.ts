@@ -16,6 +16,10 @@ export class ApiError extends Error {
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15000;
 
+interface ApiRequestOptions {
+  timeoutMs?: number;
+}
+
 function emitUnauthorizedIfNeeded(status: number, token?: string) {
   if (status !== 401 || !token || typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, { detail: { token } }));
@@ -64,13 +68,14 @@ async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs 
 export async function apiPost<T = unknown>(
   path: string,
   body: object,
-  token?: string
+  token?: string,
+  options: ApiRequestOptions = {},
 ): Promise<T> {
   const res = await fetchWithTimeout(path, {
     method: 'POST',
     headers: buildHeaders(token),
     body: JSON.stringify(body),
-  });
+  }, options.timeoutMs);
   const data = await parseJsonSafe(res);
   emitUnauthorizedIfNeeded(res.status, token);
   if (!res.ok) throw new ApiError(getApiErrorMessage(data, 'Erro desconhecido'), res.status);

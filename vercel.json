@@ -2,6 +2,11 @@
   "version": 2,
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/assistant.ts": {
+      "maxDuration": 45
+    }
+  },
   "crons": [
     { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
   ],
