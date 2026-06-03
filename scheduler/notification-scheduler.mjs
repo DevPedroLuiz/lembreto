@@ -111,7 +111,24 @@ function loadConfig() {
   };
 }
 
-const config = loadConfig();
+let config = null;
+let configError = null;
+
+function configureScheduler() {
+  try {
+    config = loadConfig();
+    configError = null;
+    state.lastError = null;
+    return true;
+  } catch (error) {
+    config = null;
+    configError = error instanceof Error ? error.message : String(error);
+    state.lastError = configError;
+    state.lastFailureAt = new Date().toISOString();
+    log('error', 'scheduler_configuration_failed', { error: configError });
+    return false;
+  }
+}
 
 function delay(ms) {
   return new Promise((resolve) => {
@@ -125,6 +142,7 @@ function jitter(ms) {
 }
 
 function getRetryDelay(attempt) {
+  if (!config) return DEFAULT_RETRY_BASE_DELAY_MS;
   const exponential = config.retryBaseDelayMs * 2 ** Math.max(0, attempt - 1);
   return jitter(Math.min(config.retryMaxDelayMs, exponential));
 }
@@ -138,6 +156,8 @@ function isTransientError(error) {
 }
 
 async function invokeCron() {
+  if (!config) throw new Error(configError ?? 'scheduler_not_configured');
+
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
@@ -195,6 +215,8 @@ function summarizeResponse(body) {
 }
 
 async function runCronWithRetry() {
+  if (!config) throw new Error(configError ?? 'scheduler_not_configured');
+
   let lastError = null;
 
   for (let attempt = 1; attempt <= config.retryAttempts; attempt += 1) {
@@ -222,6 +244,11 @@ async function runCronWithRetry() {
 }
 
 async function runCycle(reason) {
+  if (!config) {
+    log('warn', 'cron_cycle_skipped_unconfigured', { reason, error: configError });
+    return DEFAULT_INTERVAL_MS;
+  }
+
   if (running) {
     log('warn', 'cron_cycle_skipped_overlap', { reason });
     return config.intervalMs;
@@ -304,28 +331,37 @@ function scheduleNext(delayMs, reason = 'interval') {
 function getHealthStatus() {
   const now = Date.now();
   const lastSuccessMs = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : null;
+  const staleAfterMs = config?.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
   const stale = lastSuccessMs === null
     ? state.runCount > 0
-    : now - lastSuccessMs > config.staleAfterMs;
+    : now - lastSuccessMs > staleAfterMs;
 
   return {
-    ok: !stale && state.consecutiveFailures === 0,
+    ok: Boolean(config) && !stale && state.consecutiveFailures === 0,
+    configured: Boolean(config),
+    configError,
     stale,
     running,
     uptimeSeconds: Math.floor(process.uptime()),
-    config: {
+    config: config ? {
       targetUrl: config.targetUrl,
       intervalMs: config.intervalMs,
       backlogIntervalMs: config.backlogIntervalMs,
       requestTimeoutMs: config.requestTimeoutMs,
       retryAttempts: config.retryAttempts,
-    },
+    } : null,
     state,
   };
 }
 
 function startHealthServer() {
-  if (!config.healthEnabled) return;
+  const healthEnabled = parseBoolean('SCHEDULER_HEALTH_ENABLED', true);
+  if (!healthEnabled) return;
+
+  const healthPort = parsePositiveInteger(
+    'PORT',
+    parsePositiveInteger('SCHEDULER_HEALTH_PORT', DEFAULT_HEALTH_PORT),
+  );
 
   healthServer = http.createServer((request, response) => {
     if (request.url !== '/health' && request.url !== '/ready') {
@@ -339,8 +375,8 @@ function startHealthServer() {
     response.end(JSON.stringify(health));
   });
 
-  healthServer.listen(config.healthPort, () => {
-    log('info', 'health_server_started', { port: config.healthPort });
+  healthServer.listen(healthPort, () => {
+    log('info', 'health_server_started', { port: healthPort });
   });
 }
 
@@ -377,17 +413,21 @@ process.on('unhandledRejection', (error) => {
   log('error', 'unhandled_rejection', { error: error instanceof Error ? error.stack : String(error) });
 });
 
-log('info', 'scheduler_started', {
-  targetUrl: config.targetUrl,
-  intervalMs: config.intervalMs,
-  backlogIntervalMs: config.backlogIntervalMs,
-});
-
 startHealthServer();
 
-if (config.runOnStart) {
-  const nextDelay = await runCycle('startup');
-  scheduleNext(nextDelay, 'interval');
+if (configureScheduler() && config) {
+  log('info', 'scheduler_started', {
+    targetUrl: config.targetUrl,
+    intervalMs: config.intervalMs,
+    backlogIntervalMs: config.backlogIntervalMs,
+  });
+
+  if (config.runOnStart) {
+    const nextDelay = await runCycle('startup');
+    scheduleNext(nextDelay, 'interval');
+  } else {
+    scheduleNext(config.intervalMs, 'interval');
+  }
 } else {
-  scheduleNext(config.intervalMs, 'interval');
+  log('warn', 'scheduler_waiting_for_valid_configuration');
 }
