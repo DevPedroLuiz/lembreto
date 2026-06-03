@@ -175,7 +175,7 @@ export function AssistantChat({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 18, scale: 0.98 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-x-3 bottom-24 z-[90] mx-auto flex max-h-[calc(100dvh-8rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/95 shadow-[0_34px_90px_-34px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95 sm:inset-x-auto sm:right-6 sm:bottom-24 sm:h-[620px] sm:w-[420px]"
+          className="fixed inset-x-3 bottom-24 z-[90] mx-auto flex max-h-[calc(100dvh-8rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/95 shadow-[0_34px_90px_-34px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95 sm:inset-x-auto sm:right-6 sm:bottom-[7.5rem] sm:h-[620px] sm:w-[420px]"
           data-testid="assistant-chat"
           role="dialog"
           aria-label="Assistente do Lembreto"

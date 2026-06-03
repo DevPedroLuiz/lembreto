@@ -1,4 +1,3 @@
-import { Sparkles, User as UserIcon } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/cn';
 import type { AssistantActionResult } from '../../lib/assistantApi';
@@ -13,11 +12,7 @@ interface AssistantFloatingButtonProps {
   onOpenAction?: (action: AssistantMessageAction) => void | Promise<void>;
 }
 
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '';
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
-}
+const assistantAvatarSrc = '/assistente-lembreto.png';
 
 export function AssistantFloatingButton({
   currentUser,
@@ -26,7 +21,6 @@ export function AssistantFloatingButton({
   onOpenAction,
 }: AssistantFloatingButtonProps) {
   const [open, setOpen] = useState(false);
-  const initials = getInitials(currentUser.name);
 
   return (
     <>
@@ -41,27 +35,25 @@ export function AssistantFloatingButton({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        aria-label="Abrir assistente pessoal"
-        title="Abrir assistente pessoal"
+        aria-label="Abrir assistente IA do Lembreto"
+        title="Abrir assistente IA do Lembreto"
         className={cn(
-          'group fixed bottom-24 right-4 z-[60] h-16 w-16 rounded-full border border-white/80 bg-white p-1 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.65)] transition-all hover:-translate-y-1 hover:shadow-[0_30px_72px_-28px_rgba(37,99,235,0.8)] dark:border-white/10 dark:bg-slate-950 sm:bottom-6 sm:right-6',
-          open && 'translate-y-0 shadow-[0_30px_72px_-28px_rgba(37,99,235,0.8)]',
+          'group fixed bottom-24 right-4 z-[60] h-[76px] w-[76px] overflow-visible rounded-[28px] border border-cyan-200/40 bg-slate-950/88 p-[3px] shadow-[0_18px_48px_-20px_rgba(14,165,233,0.95),0_10px_26px_-22px_rgba(0,0,0,0.9)] backdrop-blur-md transition-all duration-200 hover:-translate-y-1 hover:scale-[1.03] hover:border-cyan-100/70 hover:shadow-[0_24px_62px_-22px_rgba(14,165,233,1),0_14px_34px_-24px_rgba(0,0,0,0.95)] active:translate-y-0 sm:bottom-6 sm:right-6 sm:h-20 sm:w-20',
+          open && 'scale-[1.03] border-cyan-100/75 shadow-[0_24px_62px_-22px_rgba(14,165,233,1),0_14px_34px_-24px_rgba(0,0,0,0.95)]',
         )}
         data-testid="assistant-floating-button"
       >
-        <span className="absolute inset-0 rounded-full bg-blue-400/20 opacity-0 blur-md transition-opacity group-hover:opacity-100" />
-        <span className="absolute -inset-1 rounded-full border border-blue-400/40 opacity-70 animate-pulse" />
-        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-600 to-sky-500 text-sm font-bold text-white">
-          {currentUser.avatar ? (
-            <img src={currentUser.avatar} alt="Avatar" className="h-full w-full object-cover" />
-          ) : initials ? (
-            initials
-          ) : (
-            <UserIcon size={23} />
-          )}
-        </span>
-        <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-400 text-white shadow-[0_10px_24px_-12px_rgba(16,185,129,0.9)] dark:border-slate-950">
-          <Sparkles size={14} />
+        <span className="pointer-events-none absolute -inset-2 rounded-[34px] bg-cyan-400/20 opacity-55 blur-xl transition-opacity duration-200 group-hover:opacity-85" />
+        <span className="pointer-events-none absolute inset-0 rounded-[28px] bg-[radial-gradient(circle_at_35%_18%,rgba(103,232,249,0.42),transparent_38%),linear-gradient(145deg,rgba(14,165,233,0.42),rgba(37,99,235,0.08)_52%,rgba(2,6,23,0.35))]" />
+        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[25px] bg-slate-950">
+          <img
+            src={assistantAvatarSrc}
+            alt="Assistente IA do Lembreto"
+            className="h-full w-full scale-[1.24] object-cover object-[50%_21%] transition-transform duration-300 group-hover:scale-[1.3]"
+            draggable={false}
+          />
+          <span className="pointer-events-none absolute inset-0 rounded-[25px] ring-1 ring-inset ring-white/16" />
+          <span className="pointer-events-none absolute inset-x-2 top-1 h-5 rounded-full bg-white/18 blur-md" />
         </span>
       </button>
     </>
