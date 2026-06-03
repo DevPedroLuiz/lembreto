@@ -113,40 +113,45 @@ export async function assertInfrastructure(
 ) {
   const missing: string[] = [];
 
-  for (const relation of required.relations ?? []) {
-    if (!(await relationExists(sql, relation))) {
-      missing.push(`relation ${relation.schema ?? 'public'}.${relation.name}`);
-    }
-  }
+  const relationChecks = (required.relations ?? []).map(async (relation) => (
+    await relationExists(sql, relation)
+      ? null
+      : `relation ${relation.schema ?? 'public'}.${relation.name}`
+  ));
 
-  for (const column of required.columns ?? []) {
-    if (!(await columnExists(sql, column))) {
-      missing.push(`column ${column.schema ?? 'public'}.${column.table}.${column.column}`);
-    }
-  }
+  const columnChecks = (required.columns ?? []).map(async (column) => (
+    await columnExists(sql, column)
+      ? null
+      : `column ${column.schema ?? 'public'}.${column.table}.${column.column}`
+  ));
 
-  for (const index of required.indexes ?? []) {
-    if (!(await indexExists(sql, index))) {
-      missing.push(`index ${index.schema ?? 'public'}.${index.name}`);
-    }
-  }
+  const indexChecks = (required.indexes ?? []).map(async (index) => (
+    await indexExists(sql, index)
+      ? null
+      : `index ${index.schema ?? 'public'}.${index.name}`
+  ));
 
-  for (const constraint of required.constraints ?? []) {
+  const constraintChecks = (required.constraints ?? []).map(async (constraint) => {
     const definition = await constraintDefinition(sql, constraint);
     if (!definition) {
-      missing.push(`constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name}`);
-      continue;
+      return `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name}`;
     }
 
     const normalizedDefinition = definition.toLowerCase();
     const missingTerms = (constraint.contains ?? [])
       .filter((term) => !normalizedDefinition.includes(term.toLowerCase()));
-    if (missingTerms.length > 0) {
-      missing.push(
-        `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name} missing ${missingTerms.join('/')}`,
-      );
-    }
-  }
+    if (missingTerms.length === 0) return null;
+
+    return `constraint ${constraint.schema ?? 'public'}.${constraint.table}.${constraint.name} missing ${missingTerms.join('/')}`;
+  });
+
+  const results = await Promise.all([
+    ...relationChecks,
+    ...columnChecks,
+    ...indexChecks,
+    ...constraintChecks,
+  ]);
+  missing.push(...results.filter((item): item is string => typeof item === 'string'));
 
   if (missing.length > 0) {
     throw new InfrastructureMissingError(feature, missing);

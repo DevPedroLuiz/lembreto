@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
-  NotebookPen,
   PanelLeftClose,
   Settings,
   Target,
@@ -107,13 +106,6 @@ export function Sidebar({
             badge={overdueCount}
             badgeTone="alert"
             testId="sidebar-tasks"
-          />
-          <SidebarItem
-            active={activeTab === 'notes'}
-            onClick={() => setActiveTab('notes')}
-            icon={<NotebookPen size={20} />}
-            label="Minhas notas"
-            testId="sidebar-notes"
           />
           <SidebarItem
             active={activeTab === 'tools'}

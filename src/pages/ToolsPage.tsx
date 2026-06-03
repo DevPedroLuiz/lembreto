@@ -89,6 +89,7 @@ const POMODORO_LABELS: Record<PomodoroMode, string> = {
 const STORAGE_SESSIONS_KEY = 'lembreto.tools.sessions.v1';
 const STORAGE_CHECKLISTS_KEY = 'lembreto.tools.checklists.v1';
 const STORAGE_ROUTINE_KEY = 'lembreto.tools.routine.v1';
+const UNLINKED_CHECKLIST_KEY = '__unlinked__';
 
 function createLocalId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -229,11 +230,10 @@ export function ToolsPage({
   onOpenTask,
 }: ToolsPageProps) {
   const actionableTasks = React.useMemo(() => sortActionableTasks(tasks), [tasks]);
-  const defaultTaskId = actionableTasks[0]?.id ?? '';
   const categoryOptions = categories.length > 0 ? categories : ['Geral', 'Trabalho', 'Pessoal', 'Estudos'];
 
   const [activeTool, setActiveTool] = React.useState<ToolTab>('pomodoro');
-  const [selectedTaskId, setSelectedTaskId] = React.useState(defaultTaskId);
+  const [selectedTaskId, setSelectedTaskId] = React.useState('');
   const [toolMessage, setToolMessage] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [sessionLogs, setSessionLogs] = React.useState<SessionLog[]>(() => readJson<SessionLog[]>(STORAGE_SESSIONS_KEY, []));
@@ -271,16 +271,19 @@ export function ToolsPage({
     { id: createLocalId(), title: 'Fechamento rapido', time: '17:30', category: 'Geral', priority: 'medium' },
   ]));
 
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? actionableTasks[0] ?? null;
+  const selectedTask = actionableTasks.find((task) => task.id === selectedTaskId) ?? null;
   const selectedTaskNotes = selectedTask ? notes.filter((note) => note.taskId === selectedTask.id) : [];
-  const selectedChecklist = selectedTask ? checklists[selectedTask.id] ?? [] : [];
+  const selectedChecklistKey = selectedTask?.id ?? UNLINKED_CHECKLIST_KEY;
+  const selectedChecklist = checklists[selectedChecklistKey] ?? [];
   const holidays = React.useMemo(() => new Set(holidayEntries.map((entry) => entry.date.slice(0, 10))), [holidayEntries]);
   const deadlineResult = React.useMemo(() => getNextBusinessDate(deadlineStart, deadlineDays, holidays), [deadlineDays, deadlineStart, holidays]);
   const completedChecklistItems = selectedChecklist.filter((item) => item.done).length;
 
   React.useEffect(() => {
-    if (!selectedTaskId && defaultTaskId) setSelectedTaskId(defaultTaskId);
-  }, [defaultTaskId, selectedTaskId]);
+    if (selectedTaskId && !actionableTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId('');
+    }
+  }, [actionableTasks, selectedTaskId]);
 
   React.useEffect(() => {
     writeJson(STORAGE_SESSIONS_KEY, sessionLogs.slice(0, 20));
@@ -461,11 +464,11 @@ export function ToolsPage({
 
   const addChecklistItem = () => {
     const text = newChecklistText.trim();
-    if (!selectedTask || !text) return;
+    if (!text) return;
     setChecklists((current) => ({
       ...current,
-      [selectedTask.id]: [
-        ...(current[selectedTask.id] ?? []),
+      [selectedChecklistKey]: [
+        ...(current[selectedChecklistKey] ?? []),
         { id: createLocalId(), text, done: false },
       ],
     }));
@@ -473,20 +476,18 @@ export function ToolsPage({
   };
 
   const toggleChecklistItem = (itemId: string) => {
-    if (!selectedTask) return;
     setChecklists((current) => ({
       ...current,
-      [selectedTask.id]: (current[selectedTask.id] ?? []).map((item) => (
+      [selectedChecklistKey]: (current[selectedChecklistKey] ?? []).map((item) => (
         item.id === itemId ? { ...item, done: !item.done } : item
       )),
     }));
   };
 
   const removeChecklistItem = (itemId: string) => {
-    if (!selectedTask) return;
     setChecklists((current) => ({
       ...current,
-      [selectedTask.id]: (current[selectedTask.id] ?? []).filter((item) => item.id !== itemId),
+      [selectedChecklistKey]: (current[selectedChecklistKey] ?? []).filter((item) => item.id !== itemId),
     }));
   };
 
@@ -540,15 +541,15 @@ export function ToolsPage({
   const selectedTaskSelector = (
     <div className="space-y-2">
       <label className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-        Lembrete vinculado
+        Lembrete vinculado opcional
       </label>
       <select
-        value={selectedTask?.id ?? ''}
+        value={selectedTaskId}
         onChange={(event) => setSelectedTaskId(event.target.value)}
         className="field-control"
         data-testid="tools-task-select"
       >
-        {actionableTasks.length === 0 && <option value="">Nenhum lembrete ativo</option>}
+        <option value="">Sem vinculo</option>
         {actionableTasks.map((task) => (
           <option key={task.id} value={task.id}>
             {formatTaskLabel(task)}
@@ -782,43 +783,47 @@ export function ToolsPage({
               </span>
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <div className="surface-soft p-5">
-                  {selectedTask ? (
-                    <>
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Lembrete em foco</p>
-                          <h3 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{selectedTask.title}</h3>
-                          {selectedTask.description && (
-                            <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">{selectedTask.description}</p>
-                          )}
-                        </div>
-                        <button type="button" onClick={() => onOpenTask(selectedTask)} className="action-secondary shrink-0 px-4">
-                          Abrir
-                        </button>
-                      </div>
-                      <div className="mt-6 rounded-3xl border border-slate-200 bg-white/70 p-5 text-center dark:border-white/10 dark:bg-white/[0.04]">
-                        <div className="font-display text-6xl font-semibold tabular-nums tracking-normal text-slate-950 dark:text-white sm:text-7xl">
-                          {formatSeconds(focusSeconds)}
-                        </div>
-                        <div className="mt-5 flex flex-wrap justify-center gap-2">
-                          <button type="button" onClick={() => setFocusRunning((value) => !value)} className="action-primary">
-                            {focusRunning ? <Pause size={18} /> : <Play size={18} />}
-                            {focusRunning ? 'Pausar' : 'Iniciar'}
-                          </button>
-                          <button type="button" onClick={() => resetFocus()} className="action-secondary">
-                            <RotateCcw size={18} />
-                            Zerar
-                          </button>
-                          <button type="button" onClick={saveFocusSession} disabled={isSaving} className="action-secondary disabled:opacity-60">
-                            <Link2 size={18} />
-                            Salvar
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">Crie um lembrete ativo para iniciar um bloco de foco vinculado.</div>
-                  )}
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                        {selectedTask ? 'Lembrete em foco' : 'Bloco livre'}
+                      </p>
+                      <h3 className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">
+                        {selectedTask?.title ?? 'Foco sem lembrete vinculado'}
+                      </h3>
+                      {selectedTask?.description ? (
+                        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">{selectedTask.description}</p>
+                      ) : (
+                        <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          Use este bloco para uma sessao avulsa e salve o tempo no painel de ferramentas.
+                        </p>
+                      )}
+                    </div>
+                    {selectedTask && (
+                      <button type="button" onClick={() => onOpenTask(selectedTask)} className="action-secondary shrink-0 px-4">
+                        Abrir
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-6 rounded-3xl border border-slate-200 bg-white/70 p-5 text-center dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="font-display text-6xl font-semibold tabular-nums tracking-normal text-slate-950 dark:text-white sm:text-7xl">
+                      {formatSeconds(focusSeconds)}
+                    </div>
+                    <div className="mt-5 flex flex-wrap justify-center gap-2">
+                      <button type="button" onClick={() => setFocusRunning((value) => !value)} className="action-primary">
+                        {focusRunning ? <Pause size={18} /> : <Play size={18} />}
+                        {focusRunning ? 'Pausar' : 'Iniciar'}
+                      </button>
+                      <button type="button" onClick={() => resetFocus()} className="action-secondary">
+                        <RotateCcw size={18} />
+                        Zerar
+                      </button>
+                      <button type="button" onClick={saveFocusSession} disabled={isSaving} className="action-secondary disabled:opacity-60">
+                        <Link2 size={18} />
+                        Salvar
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-4">
                   {selectedTaskSelector}
@@ -843,7 +848,9 @@ export function ToolsPage({
                         </div>
                       ))}
                       {selectedTaskNotes.length === 0 && (
-                        <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">Nenhuma nota vinculada ainda.</p>
+                        <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          {selectedTask ? 'Nenhuma nota vinculada ainda.' : 'Notas aparecem aqui quando um lembrete for selecionado.'}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -871,7 +878,7 @@ export function ToolsPage({
                       placeholder="Adicionar subtarefa"
                       className="field-control"
                     />
-                    <button type="button" onClick={addChecklistItem} disabled={!selectedTask} className="action-primary px-4 disabled:opacity-60" aria-label="Adicionar item">
+                    <button type="button" onClick={addChecklistItem} disabled={!newChecklistText.trim()} className="action-primary px-4 disabled:opacity-60" aria-label="Adicionar item">
                       <Plus size={18} />
                     </button>
                   </div>
@@ -901,7 +908,7 @@ export function ToolsPage({
                     ))}
                     {selectedChecklist.length === 0 && (
                       <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500 dark:border-white/10 dark:text-slate-400">
-                        Adicione pequenas etapas para destravar o lembrete selecionado.
+                        {selectedTask ? 'Adicione pequenas etapas para destravar o lembrete selecionado.' : 'Adicione pequenas etapas para uma lista sem lembrete vinculado.'}
                       </div>
                     )}
                   </div>
@@ -1039,7 +1046,7 @@ export function ToolsPage({
                 </div>
               </div>
             ) : (
-              <p className="mt-4 text-sm leading-6 text-slate-500 dark:text-slate-400">Nenhum lembrete ativo para vincular ferramentas.</p>
+              <p className="mt-4 text-sm leading-6 text-slate-500 dark:text-slate-400">Ferramentas em modo avulso, sem lembrete vinculado.</p>
             )}
           </section>
 

@@ -17,9 +17,7 @@ import {
 import { assertInfrastructure } from '../infrastructure.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import {
-  cancelPendingNotificationSchedulesForTask,
   ensureNotificationSchedulingInfrastructure,
-  syncTaskNotificationSchedulesLightweight,
 } from '../notification-schedules.js';
 import {
   createTaskCategorySchema,
@@ -41,7 +39,6 @@ import {
 import {
   enqueueTaskSideEffect,
   ensureTaskSideEffectsInfrastructure,
-  userHasActiveExternalCalendarSync,
 } from '../task-side-effects.js';
 import { checkRateLimit } from '../../api/_rate_limit.js';
 import { verifyCalendarFeedToken } from '../jwt.js';
@@ -247,55 +244,23 @@ async function syncTaskTaxonomyBestEffort(
   }
 }
 
-async function enqueueScheduleSync(sql: HandlerContext['sql'], userId: string, taskId: string) {
-  await enqueueTaskSideEffect(sql, {
-    userId,
-    taskId,
-    kind: 'sync_notification_schedules',
-  });
-}
-
-async function enqueueScheduleCancel(sql: HandlerContext['sql'], userId: string, taskId: string) {
-  await enqueueTaskSideEffect(sql, {
-    userId,
-    taskId,
-    kind: 'cancel_notification_schedules',
-  });
-}
-
-async function syncSchedulesNowBestEffort(
+async function enqueueTaskMutationSideEffectBestEffort(
   context: HandlerContext,
   userId: string,
   taskId: string,
+  kind: 'sync_notification_schedules' | 'cancel_notification_schedules' | 'sync_external_calendar' | 'delete_external_calendar_event',
   caller: string,
 ) {
   try {
-    await syncTaskNotificationSchedulesLightweight(context.sql, userId, taskId, {
-      ensureInfrastructure: false,
-    });
+    await enqueueTaskSideEffect(context.sql, { userId, taskId, kind });
   } catch (error) {
-    logError('task_notification_schedule_sync_inline_failed', error, getRequestMeta(context.request, {
+    logError('task_side_effect_enqueue_failed', error, getRequestMeta(context.request, {
       userId,
       taskId,
+      kind,
       caller,
     }));
   }
-}
-
-async function enqueueCalendarSync(sql: HandlerContext['sql'], userId: string, taskId: string) {
-  await enqueueTaskSideEffect(sql, {
-    userId,
-    taskId,
-    kind: 'sync_external_calendar',
-  });
-}
-
-async function enqueueCalendarDelete(sql: HandlerContext['sql'], userId: string, taskId: string) {
-  await enqueueTaskSideEffect(sql, {
-    userId,
-    taskId,
-    kind: 'delete_external_calendar_event',
-  });
 }
 
 function createHistoryEntry(
@@ -823,14 +788,25 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
 
       const taskId = String(rows[0].id);
       const enqueueStartedAt = Date.now();
-      await enqueueScheduleSync(sql, user.id, taskId);
-      await syncSchedulesNowBestEffort(context, user.id, taskId, 'handleTasksCollection:create');
-      if (effectiveDueDate && status === 'pending' && await userHasActiveExternalCalendarSync(sql, user.id)) {
-        await enqueueCalendarSync(sql, user.id, taskId);
+      await enqueueTaskMutationSideEffectBestEffort(
+        context,
+        user.id,
+        taskId,
+        'sync_notification_schedules',
+        'handleTasksCollection:create',
+      );
+      if (effectiveDueDate && status === 'pending') {
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          taskId,
+          'sync_external_calendar',
+          'handleTasksCollection:create',
+        );
       }
       const enqueueMs = Date.now() - enqueueStartedAt;
 
-      await syncTaskTaxonomyBestEffort(context, user.id, taskId, category, tags);
+      void syncTaskTaxonomyBestEffort(context, user.id, taskId, category, tags);
       const totalMs = Date.now() - totalStartedAt;
       logInfo('tasks:create:insert-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: dbMs }));
       logInfo('tasks:create:enqueue-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: enqueueMs }));
@@ -1066,29 +1042,45 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         : null;
 
       if (shouldCancelSchedules) {
-        await cancelPendingNotificationSchedulesForTask(sql, taskId, user.id, {
-          ensureInfrastructure: false,
-          reason: `task_status_${nextStatus}`,
-          caller: 'handleTaskById:update',
-          taskStatus: nextStatus,
-        });
-        await enqueueScheduleCancel(sql, user.id, taskId);
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          taskId,
+          'cancel_notification_schedules',
+          'handleTaskById:update',
+        );
       } else {
-        await enqueueScheduleSync(sql, user.id, taskId);
-        await syncSchedulesNowBestEffort(context, user.id, taskId, 'handleTaskById:update');
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          taskId,
+          'sync_notification_schedules',
+          'handleTaskById:update',
+        );
       }
 
       if (shouldCancelSchedules && existingExternalEventId) {
-        await enqueueCalendarDelete(sql, user.id, taskId);
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          taskId,
+          'delete_external_calendar_event',
+          'handleTaskById:update',
+        );
       } else if (
         nextStatus === 'pending' &&
-        nextValues.dueDate &&
-        (existingExternalEventId || await userHasActiveExternalCalendarSync(sql, user.id))
+        nextValues.dueDate
       ) {
-        await enqueueCalendarSync(sql, user.id, taskId);
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          taskId,
+          'sync_external_calendar',
+          'handleTaskById:update',
+        );
       }
 
-      await syncTaskTaxonomyBestEffort(context, user.id, taskId, categoryValue, tagsValue);
+      void syncTaskTaxonomyBestEffort(context, user.id, taskId, categoryValue, tagsValue);
       const totalMs = Date.now() - totalStartedAt;
       logInfo('tasks:update:total-ms', getRequestMeta(request, { userId: user.id, taskId, durationMs: totalMs }));
       logInfo('task_updated', getRequestMeta(request, { userId: user.id, taskId: id }));
@@ -1122,15 +1114,21 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_event_id AS "externalCalendarEventId"
       `;
       if (rows[0]) {
-        await cancelPendingNotificationSchedulesForTask(sql, id, user.id, {
-          ensureInfrastructure: false,
-          reason: 'task_deleted',
-          caller: 'handleTaskById:delete',
-          taskStatus: 'cancelled',
-        });
-        await enqueueScheduleCancel(sql, user.id, id);
+        await enqueueTaskMutationSideEffectBestEffort(
+          context,
+          user.id,
+          id,
+          'cancel_notification_schedules',
+          'handleTaskById:delete',
+        );
         if (typeof rows[0].externalCalendarEventId === 'string') {
-          await enqueueCalendarDelete(sql, user.id, id);
+          await enqueueTaskMutationSideEffectBestEffort(
+            context,
+            user.id,
+            id,
+            'delete_external_calendar_event',
+            'handleTaskById:delete',
+          );
         }
       }
       logInfo('tasks:delete:total-ms', getRequestMeta(request, {

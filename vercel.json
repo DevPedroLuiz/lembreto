@@ -24,6 +24,7 @@
     { "source": "/api/cron/:job", "destination": "/api/cron?job=:job" },
     { "source": "/api/auth/google/start", "destination": "/api/auth?action=google-start" },
     { "source": "/api/auth/google/callback", "destination": "/api/auth?action=google-callback" },
+    { "source": "/api/auth/verify-email/resend", "destination": "/api/auth?action=verify-email-resend" },
     { "source": "/api/auth/:action", "destination": "/api/auth?action=:action" },
     { "source": "/api/tasks/:id", "destination": "/api/tasks?id=:id" },
     { "source": "/api/notes/:id", "destination": "/api/notes?id=:id" },

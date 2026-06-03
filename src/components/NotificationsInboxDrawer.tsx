@@ -17,7 +17,8 @@ interface NotificationsInboxDrawerProps {
     preset: OverdueNotificationSnoozePreset,
   ) => void;
   isNotificationActionBusy: (notification: AppNotification) => boolean;
-  onClearRecentNotifications: (notifications: AppNotification[]) => void;
+  onClearAllNotifications: () => void;
+  canClearNotifications: boolean;
   onOpenCenter: () => void;
 }
 
@@ -30,7 +31,8 @@ export function NotificationsInboxDrawer({
   onPreviewNotification,
   onSnoozeOverdueNotification,
   isNotificationActionBusy,
-  onClearRecentNotifications,
+  onClearAllNotifications,
+  canClearNotifications,
   onOpenCenter,
 }: NotificationsInboxDrawerProps) {
   const recentNotifications = notifications.slice(0, 6);
@@ -93,8 +95,8 @@ export function NotificationsInboxDrawer({
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => onClearRecentNotifications(recentNotifications)}
-                    disabled={recentNotifications.length === 0}
+                    onClick={onClearAllNotifications}
+                    disabled={!canClearNotifications}
                     aria-label="Limpar aba de notificações recentes"
                     data-testid="notifications-clear-inbox"
                     className="inline-flex h-11 w-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.08] sm:w-auto sm:px-4"

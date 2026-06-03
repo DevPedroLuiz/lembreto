@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import {
+  handleAuthCancelAccount,
   handleAuthConfig,
   handleAuthGoogleCallback,
   handleAuthGoogleStart,
@@ -10,7 +11,10 @@ import {
   handleAuthProfile,
   handleAuthRecover,
   handleAuthRegister,
+  handleAuthResendVerification,
   handleAuthResetPassword,
+  handleAuthSessions,
+  handleAuthVerifyEmail,
 } from '../lib/handlers/auth.js';
 import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
 
@@ -45,6 +49,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return handleAuthRecover({ sql, request });
       case 'reset-password':
         return handleAuthResetPassword({ sql, request });
+      case 'verify-email':
+        return handleAuthVerifyEmail({ sql, request });
+      case 'verify-email-resend':
+        return handleAuthResendVerification({ sql, request });
+      case 'sessions':
+        return handleAuthSessions({ sql, request });
+      case 'account':
+        return handleAuthCancelAccount({ sql, request });
       case 'profile':
         return handleAuthProfile({ sql, request });
       default:

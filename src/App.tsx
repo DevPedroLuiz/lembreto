@@ -11,7 +11,6 @@ import {
   BellRing,
   CalendarDays,
   ListTodo,
-  NotebookPen,
   PanelLeftOpen,
   Plus,
   RefreshCw,
@@ -3631,7 +3630,8 @@ export default function App() {
 
   const openNotesTab = useCallback(() => {
     closeFloatingSurfacesForNavigation();
-    setActiveTab('notes');
+    setTasksPageView('notes');
+    setActiveTab('tasks');
   }, [closeFloatingSurfacesForNavigation]);
 
   const openToolsTab = useCallback(() => {
@@ -3662,18 +3662,16 @@ export default function App() {
     setShowNotificationsInbox(false);
   }, []);
 
-  const clearNotificationsInbox = useCallback((recentNotifications: AppNotification[]) => {
-    if (recentNotifications.length === 0) return;
+  const clearNotificationsInbox = useCallback(() => {
+    if (notifications.length === 0) return;
 
-    setHiddenInboxNotificationIds((current) => {
-      const next = new Set(current);
-      recentNotifications.forEach((notification) => {
-        next.add(notification.id);
-      });
-      return next;
+    void clearAll().then(() => {
+      setHiddenInboxNotificationIds(new Set());
+      triggerToastOnly('Notificações limpas', 'Todos os avisos foram removidos da central.');
+    }).catch(() => {
+      triggerToastOnly('Não foi possível limpar', 'Tente limpar as notificações novamente.');
     });
-    triggerToastOnly('Atualizações limpas', 'Os registros continuam disponíveis na central de notificações.');
-  }, [triggerToastOnly]);
+  }, [clearAll, notifications.length, triggerToastOnly]);
 
   useEffect(() => {
     if (!locationSearch) return;
@@ -4195,7 +4193,9 @@ export default function App() {
     : activeTab === 'calendar'
       ? 'Seu calendário'
     : activeTab === 'tasks'
-      ? 'Sua agenda'
+      ? tasksPageView === 'notes'
+        ? 'Meus lembretes'
+        : 'Sua agenda'
       : activeTab === 'notes'
         ? 'Suas notas'
         : activeTab === 'tools'
@@ -4206,7 +4206,9 @@ export default function App() {
     : activeTab === 'calendar'
       ? 'Visualize seus lembretes por dia, semana e mês em uma grade de calendário.'
     : activeTab === 'tasks'
-      ? 'Organize lembretes, rascunhos, datas e feriados em áreas separadas.'
+      ? tasksPageView === 'notes'
+        ? 'Guarde contexto, ideias e apontamentos dentro da sua área de lembretes.'
+        : 'Organize lembretes, notas, rascunhos, datas e feriados em áreas separadas.'
       : activeTab === 'notes'
         ? 'Guarde contexto, ideias e apontamentos vinculados aos seus lembretes.'
         : activeTab === 'tools'
@@ -4290,7 +4292,7 @@ export default function App() {
                   : activeTab === 'calendar'
                     ? 'Agenda'
                     : activeTab === 'tasks'
-                      ? 'Tarefas'
+                      ? 'Lembretes'
                       : activeTab === 'notes'
                         ? 'Notas'
                         : activeTab === 'tools'
@@ -4486,6 +4488,9 @@ export default function App() {
                   <TasksPage
                     pendingTasks={taskListRows}
                     completedTasks={completedTasks}
+                    allTasks={tasks}
+                    notes={notes}
+                    trashedNotes={trashedNotes}
                     categories={categoryOptions}
                     tags={tagOptions}
                     filterCategory={filterCategory}
@@ -4503,6 +4508,10 @@ export default function App() {
                     drafts={draftTasks}
                     onEditDraft={openEditTask}
                     onPromoteDraft={handlePromoteDraft}
+                    onNewNote={() => openNewNote()}
+                    onEditNote={(note) => openEditNote(note)}
+                    onDeleteNote={handleDeleteNote}
+                    onRestoreNote={openRestoreNote}
                     activeView={tasksPageView}
                     onActiveViewChange={setTasksPageView}
                     deletingTaskIds={deletingTaskIds}
@@ -4575,7 +4584,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/94 pb-[max(env(safe-area-inset-bottom),0px)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/92 lg:hidden">
-        <div className="mx-auto grid max-w-xl grid-cols-[1fr_1fr_auto_1fr_1fr_1fr] items-center gap-1 p-2">
+        <div className="mx-auto grid max-w-xl grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 p-2">
           <button
             onClick={openDashboardTab}
             aria-label="Abrir dashboard"
@@ -4616,7 +4625,7 @@ export default function App() {
             )}
           >
             <ListTodo size={22} />
-            <span className="text-[10px] font-semibold leading-none">Tarefas</span>
+            <span className="text-[10px] font-semibold leading-none">Lembretes</span>
             {pendingSummary.overdueCount > 0 && (
               <span className="absolute right-1 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-[0_10px_20px_-12px_rgba(244,63,94,0.8)]">
                 {Math.min(pendingSummary.overdueCount, 99)}
@@ -4633,17 +4642,6 @@ export default function App() {
           >
             <Wrench size={22} />
             <span className="text-[10px] font-semibold leading-none">Ferram.</span>
-          </button>
-          <button
-            onClick={openNotesTab}
-            aria-label="Abrir notas"
-            className={cn(
-              'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 transition-colors',
-              activeTab === 'notes' ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300' : 'text-slate-500',
-            )}
-          >
-            <NotebookPen size={22} />
-            <span className="text-[10px] font-semibold leading-none">Notas</span>
           </button>
         </div>
       </nav>
@@ -4961,7 +4959,8 @@ export default function App() {
             onPreviewNotification={handlePreviewNotification}
             onSnoozeOverdueNotification={handleSnoozeOverdueNotification}
             isNotificationActionBusy={isNotificationActionBusy}
-            onClearRecentNotifications={clearNotificationsInbox}
+            onClearAllNotifications={clearNotificationsInbox}
+            canClearNotifications={notifications.length > 0}
             onOpenCenter={openNotificationsCenter}
           />
         )}

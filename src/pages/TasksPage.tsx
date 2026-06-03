@@ -18,6 +18,7 @@ import {
   Flag,
   Hash,
   Loader2,
+  NotebookPen,
   PencilLine,
   Plus,
   RotateCcw,
@@ -33,7 +34,8 @@ import { TaskItem } from '../components/TaskItem';
 import { LS } from '../lib/storage';
 import { getTaskTimeLabel } from '../lib/taskDueDate';
 import { getDerivedTaskStatus, type DerivedTaskStatus } from '../lib/taskStatus';
-import type { HolidayCalendarPayload, Priority, Task } from '../types';
+import type { HolidayCalendarPayload, Note, Priority, Task } from '../types';
+import { NotesPage } from './NotesPage';
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 200;
@@ -44,7 +46,7 @@ type StatusFilter = 'all' | DerivedTaskStatus | 'inactive';
 type TagFilter = 'all' | string;
 type QuickTaskFilter = 'none' | 'today' | 'tomorrow' | 'overdue' | 'alarm' | 'noTime';
 type DateFilterMode = 'all' | 'day' | 'range' | 'week' | 'month' | 'year';
-export type TasksPageView = 'agenda' | 'completed' | 'holidays' | 'drafts';
+export type TasksPageView = 'agenda' | 'completed' | 'holidays' | 'drafts' | 'notes';
 
 const DEFAULT_TASK_SORT_MODE: SortMode = 'dueDate';
 
@@ -113,6 +115,9 @@ function normalizeTagFilter(value: unknown, tags: string[]): TagFilter {
 interface TasksPageProps {
   pendingTasks: Task[];
   completedTasks: Task[];
+  allTasks: Task[];
+  notes: Note[];
+  trashedNotes: Note[];
   categories: string[];
   tags: string[];
   filterCategory: string;
@@ -133,6 +138,10 @@ interface TasksPageProps {
   drafts: Task[];
   onEditDraft: (task: Task) => void;
   onPromoteDraft: (task: Task) => void;
+  onNewNote: () => void;
+  onEditNote: (note: Note) => void;
+  onDeleteNote: (note: Note) => void;
+  onRestoreNote: (note: Note) => void;
   activeView: TasksPageView;
   onActiveViewChange: (view: TasksPageView) => void;
   deletingTaskIds?: ReadonlySet<string>;
@@ -522,6 +531,9 @@ function ControlButton({
 export function TasksPage({
   pendingTasks,
   completedTasks,
+  allTasks,
+  notes,
+  trashedNotes,
   categories,
   tags,
   filterCategory,
@@ -539,6 +551,10 @@ export function TasksPage({
   drafts,
   onEditDraft,
   onPromoteDraft,
+  onNewNote,
+  onEditNote,
+  onDeleteNote,
+  onRestoreNote,
   activeView,
   onActiveViewChange,
   deletingTaskIds,
@@ -1099,6 +1115,13 @@ export function TasksPage({
         countLabel: `${sortedCompletedTasks.length} concluído${sortedCompletedTasks.length === 1 ? '' : 's'}`,
       }] : []),
       {
+        value: 'notes',
+        label: 'Notas',
+        description: 'Caderno com contexto, ideias e apontamentos vinculados aos lembretes.',
+        icon: <NotebookPen size={18} />,
+        countLabel: `${notes.length} nota${notes.length === 1 ? '' : 's'}`,
+      },
+      {
         value: 'holidays',
         label: 'Datas e feriados',
         description: 'Calendário de feriados e datas importantes para planejar melhor.',
@@ -1113,7 +1136,7 @@ export function TasksPage({
         countLabel: `${drafts.length} rascunho${drafts.length === 1 ? '' : 's'}`,
       },
     ],
-    [drafts.length, showCompleted, sortedCompletedTasks.length, sortedPendingTasks.length],
+    [drafts.length, notes.length, showCompleted, sortedCompletedTasks.length, sortedPendingTasks.length],
   );
   const activePageTab = pageTabs.find((tab) => tab.value === activeView) ?? pageTabs[0];
 
@@ -1851,6 +1874,19 @@ export function TasksPage({
           onRefresh={onRefreshHolidays}
           onDetectLocation={onDetectHolidayLocation}
           onOpenLocationSettings={onOpenHolidaySettings}
+        />
+      )}
+
+      {activeView === 'notes' && (
+        <NotesPage
+          notes={notes}
+          trashedNotes={trashedNotes}
+          tasks={allTasks}
+          categories={categories}
+          onNewNote={onNewNote}
+          onEditNote={onEditNote}
+          onDeleteNote={onDeleteNote}
+          onRestoreNote={onRestoreNote}
         />
       )}
 
