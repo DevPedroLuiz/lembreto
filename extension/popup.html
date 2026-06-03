@@ -21,10 +21,20 @@
 
       <section class="status" id="statusBox" role="status" aria-live="polite"></section>
 
+      <section class="panel compactPanel">
+        <div class="sectionRow">
+          <div>
+            <strong>Sistema completo</strong>
+            <span>Abra o Lembreto inteiro em uma aba da extensão.</span>
+          </div>
+          <button id="openFullAppButton" class="primary smallButton" type="button">Abrir</button>
+        </div>
+      </section>
+
       <section id="settingsPanel" class="panel">
         <label for="appOrigin">Endereco do Lembreto</label>
         <div class="inline">
-          <input id="appOrigin" type="url" placeholder="http://localhost:3001" />
+          <input id="appOrigin" type="url" placeholder="https://lembreto.vercel.app" />
           <button id="saveSettingsButton" type="button">Salvar</button>
         </div>
       </section>
@@ -49,7 +59,8 @@
       <section id="quickPanel" class="panel hidden">
         <div class="tabs" role="tablist" aria-label="Modo de criacao">
           <button id="manualTab" class="tab active" type="button">Manual</button>
-          <button id="captureTab" class="tab" type="button">Print IA</button>
+          <button id="assistantTab" class="tab" type="button">IA</button>
+          <button id="agendaTab" class="tab" type="button">Agenda</button>
         </div>
 
         <form id="taskForm" class="form">
@@ -88,11 +99,32 @@
           <button id="createButton" class="primary" type="submit">Criar lembrete</button>
         </form>
 
-        <div id="capturePanel" class="form hidden">
-          <label for="captureInstruction">Instrucao opcional</label>
-          <textarea id="captureInstruction" rows="3" maxlength="500" placeholder="Ex: crie um lembrete para responder esse e-mail amanha"></textarea>
-          <button id="captureButton" class="primary" type="button">Printar aba e criar</button>
-          <p class="hint">A IA le apenas a parte visivel da aba atual.</p>
+        <div id="assistantPanel" class="form hidden">
+          <label for="assistantPrompt">Comando para a IA</label>
+          <textarea id="assistantPrompt" rows="3" maxlength="800" placeholder="Ex: crie um lembrete para amanhã às 9h revisar o contrato"></textarea>
+          <button id="assistantButton" class="primary" type="button">Enviar para IA</button>
+
+          <div class="divider"></div>
+
+          <label for="captureInstruction">Print com instrução opcional</label>
+          <textarea id="captureInstruction" rows="3" maxlength="500" placeholder="Ex: crie um lembrete para responder esse e-mail amanhã"></textarea>
+          <div class="actions">
+            <button id="captureButton" class="primary" type="button">Printar aba</button>
+            <button id="savePageButton" class="secondary" type="button">Salvar página</button>
+          </div>
+          <p class="hint">A IA lê apenas a parte visível da aba atual. Salvar página cria um lembrete com título e link da aba.</p>
+        </div>
+
+        <div id="agendaPanel" class="form hidden">
+          <div class="sectionRow">
+            <div>
+              <strong>Próximos lembretes</strong>
+              <span>Até 6 itens pendentes</span>
+            </div>
+            <button id="refreshAgendaButton" class="secondary smallButton" type="button">Atualizar</button>
+          </div>
+          <div id="agendaList" class="agendaList" aria-live="polite"></div>
+          <button id="openAgendaButton" class="primary" type="button">Abrir agenda completa</button>
         </div>
       </section>
     </main>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
 import { LS } from '../lib/storage';
 import { RecaptchaCheckbox } from '../components/RecaptchaCheckbox';
@@ -92,6 +92,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
   const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [rememberEmail, setRememberEmail] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState('');
   const [authError, setAuthError] = useState('');
@@ -485,14 +486,22 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     <Lock size={18} className="field-icon" />
                     <input
                       required
-                      type="password"
+                      type={showAuthPassword ? 'text' : 'password'}
                       autoComplete={isLogin ? 'current-password' : 'new-password'}
                       data-testid="auth-password-input"
                       placeholder="Senha"
                       value={authPassword}
                       onChange={(event) => setAuthPassword(event.target.value)}
-                      className="field-control field-control-with-icon"
+                      className="field-control field-control-with-icon pr-12"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowAuthPassword((current) => !current)}
+                      aria-label={showAuthPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-white/[0.08] dark:hover:text-white"
+                    >
+                      {showAuthPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
                   </div>
 
                   {!isLogin && authPassword.trim().length > 0 && (

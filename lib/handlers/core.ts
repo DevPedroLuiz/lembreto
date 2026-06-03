@@ -4,6 +4,7 @@ export interface SqlClient {
     ...params: unknown[]
   ): Promise<Array<Record<string, unknown>>>;
   json?: (value: unknown) => unknown;
+  begin?: <T>(callback: (sql: SqlClient) => Promise<T>) => Promise<T>;
 }
 
 export interface HandlerRequest {

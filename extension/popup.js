@@ -1,4 +1,5 @@
-const DEFAULT_APP_ORIGIN = 'http://localhost:3001';
+const DEFAULT_APP_ORIGIN = 'https://lembreto.vercel.app';
+const LEGACY_LOCAL_APP_ORIGIN = 'http://localhost:3001';
 const STORAGE_KEYS = ['appOrigin', 'token', 'user'];
 
 const els = {
@@ -12,14 +13,17 @@ const els = {
   appOrigin: document.getElementById('appOrigin'),
   saveSettingsButton: document.getElementById('saveSettingsButton'),
   openAppButton: document.getElementById('openAppButton'),
+  openFullAppButton: document.getElementById('openFullAppButton'),
   email: document.getElementById('email'),
   password: document.getElementById('password'),
   loginButton: document.getElementById('loginButton'),
   syncSessionButton: document.getElementById('syncSessionButton'),
   manualTab: document.getElementById('manualTab'),
-  captureTab: document.getElementById('captureTab'),
+  assistantTab: document.getElementById('assistantTab'),
+  agendaTab: document.getElementById('agendaTab'),
   taskForm: document.getElementById('taskForm'),
-  capturePanel: document.getElementById('capturePanel'),
+  assistantPanel: document.getElementById('assistantPanel'),
+  agendaPanel: document.getElementById('agendaPanel'),
   title: document.getElementById('title'),
   description: document.getElementById('description'),
   date: document.getElementById('date'),
@@ -27,8 +31,14 @@ const els = {
   priority: document.getElementById('priority'),
   category: document.getElementById('category'),
   createButton: document.getElementById('createButton'),
+  assistantPrompt: document.getElementById('assistantPrompt'),
+  assistantButton: document.getElementById('assistantButton'),
   captureInstruction: document.getElementById('captureInstruction'),
   captureButton: document.getElementById('captureButton'),
+  savePageButton: document.getElementById('savePageButton'),
+  refreshAgendaButton: document.getElementById('refreshAgendaButton'),
+  agendaList: document.getElementById('agendaList'),
+  openAgendaButton: document.getElementById('openAgendaButton'),
 };
 
 let state = {
@@ -79,6 +89,31 @@ function updateSessionUi() {
     ? 'Por seguranca, entre no site e sincronize sua sessao aqui.'
     : 'Entre por senha ou use a sessao aberta no site.';
   els.loginButton.textContent = state.recaptchaRequired ? 'Entrar pelo site' : 'Entrar';
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatTaskDate(value) {
+  if (!value) return 'Sem data';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Data invalida';
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function priorityLabel(value) {
+  if (value === 'high') return 'Alta';
+  if (value === 'low') return 'Baixa';
+  return 'Media';
 }
 
 function buildUrl(path) {
@@ -133,7 +168,7 @@ async function saveSettings() {
     await refreshAuthConfig();
     setStatus('Endereco salvo.', 'success');
   } catch {
-    setStatus('Informe um endereco valido, como http://localhost:3001.', 'error');
+    setStatus('Informe um endereco valido, como https://lembreto.vercel.app.', 'error');
   }
 }
 
@@ -146,6 +181,7 @@ async function restoreFromSiteSession() {
     await storageSet({ token: state.token, user: state.user });
     updateSessionUi();
     setStatus('Sessao do site sincronizada.', 'success');
+    void loadAgenda();
     return;
   }
 
@@ -155,6 +191,7 @@ async function restoreFromSiteSession() {
   await storageSet({ token: state.token, user: state.user });
   updateSessionUi();
   setStatus('Sessao sincronizada com o site.', 'success');
+  void loadAgenda();
 }
 
 async function login() {
@@ -192,6 +229,7 @@ async function login() {
   els.password.value = '';
   updateSessionUi();
   setStatus('Login realizado.', 'success');
+  void loadAgenda();
 }
 
 function toIsoDueDate(dateValue, timeValue) {
@@ -227,6 +265,7 @@ async function createManualTask(event) {
   els.taskForm.reset();
   els.category.value = 'Geral';
   setStatus(`Lembrete criado: ${task.title || title}`, 'success');
+  void loadAgenda();
 }
 
 function queryActiveTab() {
@@ -262,20 +301,122 @@ async function captureAndCreateTask() {
   });
 
   setStatus(response.message || 'Captura analisada.', response.action?.status === 'success' ? 'success' : 'neutral');
+  if (response.action?.status === 'success') void loadAgenda();
+}
+
+async function sendAssistantCommand() {
+  const message = els.assistantPrompt.value.trim();
+  if (!message) {
+    setStatus('Digite um comando para a IA.', 'error');
+    return;
+  }
+
+  const response = await apiRequest('/api/assistant/message', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+  els.assistantPrompt.value = '';
+  setStatus(response.message || 'Comando enviado para a IA.', response.action?.status === 'success' ? 'success' : 'neutral');
+  if (response.action?.status === 'success') void loadAgenda();
+}
+
+async function createTaskFromCurrentPage() {
+  const tab = await queryActiveTab();
+  if (!tab?.url) {
+    setStatus('Nao consegui identificar a aba atual.', 'error');
+    return;
+  }
+
+  const title = tab.title ? `Ver: ${tab.title}` : 'Ver pagina salva';
+  const task = await apiRequest('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: title.slice(0, 140),
+      description: `Pagina salva pela extensao do Lembreto.\n\n${tab.url}`,
+      dueDate: null,
+      priority: 'medium',
+      category: 'Geral',
+      tags: ['Navegador'],
+      alarmEnabled: false,
+      status: 'pending',
+    }),
+  });
+
+  setStatus(`Pagina salva: ${task.title || title}`, 'success');
+  void loadAgenda();
+}
+
+function renderAgenda(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    els.agendaList.innerHTML = '<div class="agendaEmpty">Nenhum lembrete pendente encontrado.</div>';
+    return;
+  }
+
+  els.agendaList.innerHTML = items.map((task) => `
+    <article class="agendaItem">
+      <div class="agendaItemHeader">
+        <div>
+          <div class="agendaTitle">${escapeHtml(task.title || 'Sem titulo')}</div>
+          <div class="agendaMeta">${escapeHtml(formatTaskDate(task.dueDate))} • ${escapeHtml(task.category || 'Geral')}</div>
+        </div>
+        <span class="agendaBadge">${escapeHtml(priorityLabel(task.priority))}</span>
+      </div>
+      <div class="agendaActions">
+        <button type="button" class="secondary smallButton" data-open-task="${escapeHtml(task.id)}">Abrir</button>
+        <button type="button" class="secondary smallButton" data-complete-task="${escapeHtml(task.id)}">Concluir</button>
+      </div>
+    </article>
+  `).join('');
+}
+
+async function loadAgenda() {
+  if (!state.token) return;
+  els.agendaList.innerHTML = '<div class="agendaEmpty">Carregando lembretes...</div>';
+  const data = await apiRequest('/api/tasks?status=pending&sort=dueDate&limit=6', { method: 'GET' });
+  renderAgenda(data.items || []);
+}
+
+async function openTask(taskId) {
+  await chrome.tabs.create({
+    url: `${state.appOrigin}/?notificationTarget=task&taskId=${encodeURIComponent(taskId)}`,
+  });
+}
+
+async function completeTask(taskId) {
+  await apiRequest(`/api/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status: 'completed' }),
+  });
+  setStatus('Lembrete concluido.', 'success');
+  await loadAgenda();
 }
 
 function showManualTab() {
   els.manualTab.classList.add('active');
-  els.captureTab.classList.remove('active');
+  els.assistantTab.classList.remove('active');
+  els.agendaTab.classList.remove('active');
   els.taskForm.classList.remove('hidden');
-  els.capturePanel.classList.add('hidden');
+  els.assistantPanel.classList.add('hidden');
+  els.agendaPanel.classList.add('hidden');
 }
 
-function showCaptureTab() {
-  els.captureTab.classList.add('active');
+function showAssistantTab() {
+  els.assistantTab.classList.add('active');
   els.manualTab.classList.remove('active');
-  els.capturePanel.classList.remove('hidden');
+  els.agendaTab.classList.remove('active');
+  els.assistantPanel.classList.remove('hidden');
   els.taskForm.classList.add('hidden');
+  els.agendaPanel.classList.add('hidden');
+}
+
+function showAgendaTab() {
+  els.agendaTab.classList.add('active');
+  els.manualTab.classList.remove('active');
+  els.assistantTab.classList.remove('active');
+  els.agendaPanel.classList.remove('hidden');
+  els.taskForm.classList.add('hidden');
+  els.assistantPanel.classList.add('hidden');
+  void runWithBusy(loadAgenda);
 }
 
 async function runWithBusy(action) {
@@ -295,13 +436,27 @@ async function openApp() {
   await chrome.tabs.create({ url: state.appOrigin });
 }
 
+async function openFullApp() {
+  await chrome.tabs.create({ url: chrome.runtime.getURL('full-app.html') });
+}
+
+async function openAgenda() {
+  await chrome.tabs.create({ url: `${state.appOrigin}/?tab=calendar` });
+}
+
 async function init() {
   const stored = await storageGet(STORAGE_KEYS);
+  const storedAppOrigin = stored.appOrigin === LEGACY_LOCAL_APP_ORIGIN
+    ? DEFAULT_APP_ORIGIN
+    : stored.appOrigin;
   state = {
-    appOrigin: stored.appOrigin || DEFAULT_APP_ORIGIN,
+    appOrigin: storedAppOrigin || DEFAULT_APP_ORIGIN,
     token: stored.token || null,
     user: stored.user || null,
   };
+  if (stored.appOrigin === LEGACY_LOCAL_APP_ORIGIN) {
+    await storageSet({ appOrigin: state.appOrigin });
+  }
   els.appOrigin.value = state.appOrigin;
   updateSessionUi();
   await refreshAuthConfig();
@@ -316,16 +471,31 @@ async function init() {
     });
   } else {
     setStatus('');
+    void loadAgenda();
   }
 }
 
 els.saveSettingsButton.addEventListener('click', () => runWithBusy(saveSettings));
 els.openAppButton.addEventListener('click', () => runWithBusy(openApp));
+els.openFullAppButton.addEventListener('click', () => runWithBusy(openFullApp));
 els.loginButton.addEventListener('click', () => runWithBusy(login));
 els.syncSessionButton.addEventListener('click', () => runWithBusy(restoreFromSiteSession));
 els.taskForm.addEventListener('submit', (event) => runWithBusy(() => createManualTask(event)));
+els.assistantButton.addEventListener('click', () => runWithBusy(sendAssistantCommand));
 els.captureButton.addEventListener('click', () => runWithBusy(captureAndCreateTask));
+els.savePageButton.addEventListener('click', () => runWithBusy(createTaskFromCurrentPage));
+els.refreshAgendaButton.addEventListener('click', () => runWithBusy(loadAgenda));
+els.openAgendaButton.addEventListener('click', () => runWithBusy(openAgenda));
 els.manualTab.addEventListener('click', showManualTab);
-els.captureTab.addEventListener('click', showCaptureTab);
+els.assistantTab.addEventListener('click', showAssistantTab);
+els.agendaTab.addEventListener('click', showAgendaTab);
+els.agendaList.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const taskToOpen = target.dataset.openTask;
+  const taskToComplete = target.dataset.completeTask;
+  if (taskToOpen) void runWithBusy(() => openTask(taskToOpen));
+  if (taskToComplete) void runWithBusy(() => completeTask(taskToComplete));
+});
 
 void init();

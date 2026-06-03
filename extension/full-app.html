@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lembreto - Extensao</title>
+    <link rel="stylesheet" href="full-app.css" />
+  </head>
+  <body>
+    <main class="appShell">
+      <aside class="sidebar" aria-label="Navegacao principal">
+        <div class="brand">
+          <img src="icons/icon-192.png" alt="" />
+          <div>
+            <strong>Lembreto</strong>
+            <span id="sessionLabel">Verificando sessao</span>
+          </div>
+        </div>
+
+        <nav class="navList">
+          <button class="navButton active" data-view="dashboard" type="button">Dashboard</button>
+          <button class="navButton" data-view="tasks" type="button">Lembretes</button>
+          <button class="navButton" data-view="notes" type="button">Notas</button>
+          <button class="navButton" data-view="assistant" type="button">Assistente</button>
+          <button class="navButton" data-view="settings" type="button">Configuracoes</button>
+        </nav>
+
+        <div class="sidebarFooter">
+          <button id="syncSessionButton" class="ghostButton" type="button">Usar sessao do site</button>
+          <button id="openSiteButton" class="ghostButton" type="button">Abrir site</button>
+        </div>
+      </aside>
+
+      <section class="mainArea">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Extensao do navegador</p>
+            <h1 id="viewTitle">Dashboard</h1>
+          </div>
+          <div class="topActions">
+            <button id="refreshButton" class="secondary" type="button">Atualizar</button>
+            <button id="quickCreateButton" class="primary" type="button">Novo lembrete</button>
+          </div>
+        </header>
+
+        <section id="statusBox" class="status" role="status" aria-live="polite"></section>
+
+        <section id="authPanel" class="authPanel hidden">
+          <div>
+            <p class="eyebrow">Acesso</p>
+            <h2>Entre no Lembreto para usar a extensao completa</h2>
+            <p>Por seguranca, a extensao usa a mesma sessao aberta no site de producao.</p>
+          </div>
+          <div class="authActions">
+            <button id="authOpenSiteButton" class="secondary" type="button">Entrar pelo site</button>
+            <button id="authSyncButton" class="primary" type="button">Sincronizar sessao</button>
+          </div>
+        </section>
+
+        <section id="dashboardView" class="view">
+          <div class="metricGrid">
+            <article class="metricCard">
+              <span>Pendentes</span>
+              <strong id="pendingMetric">0</strong>
+            </article>
+            <article class="metricCard dangerMetric">
+              <span>Atrasados</span>
+              <strong id="overdueMetric">0</strong>
+            </article>
+            <article class="metricCard">
+              <span>Hoje</span>
+              <strong id="todayMetric">0</strong>
+            </article>
+            <article class="metricCard">
+              <span>Notas</span>
+              <strong id="notesMetric">0</strong>
+            </article>
+          </div>
+
+          <div class="twoColumn">
+            <section class="panel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Criacao rapida</p>
+                  <h2>Novo lembrete</h2>
+                </div>
+              </div>
+              <form id="quickTaskForm" class="formGrid">
+                <label class="wideField">
+                  Titulo
+                  <input id="quickTitle" maxlength="140" placeholder="Ex: responder proposta" required />
+                </label>
+                <label>
+                  Data
+                  <input id="quickDate" type="date" />
+                </label>
+                <label>
+                  Hora
+                  <input id="quickTime" type="time" />
+                </label>
+                <label>
+                  Prioridade
+                  <select id="quickPriority">
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="low">Baixa</option>
+                  </select>
+                </label>
+                <label>
+                  Categoria
+                  <input id="quickCategory" maxlength="40" value="Geral" />
+                </label>
+                <label class="wideField">
+                  Descricao
+                  <textarea id="quickDescription" rows="3" maxlength="1200" placeholder="Detalhes do lembrete"></textarea>
+                </label>
+                <button class="primary wideField" type="submit">Criar lembrete</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Agenda</p>
+                  <h2>Proximos itens</h2>
+                </div>
+                <button class="secondary smallButton" data-view-link="tasks" type="button">Ver todos</button>
+              </div>
+              <div id="dashboardTaskList" class="itemList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tasksView" class="view hidden">
+          <div class="toolbarPanel">
+            <input id="taskSearch" type="search" placeholder="Buscar lembretes" />
+            <select id="taskStatusFilter">
+              <option value="pending">Pendentes</option>
+              <option value="overdue">Atrasados</option>
+              <option value="completed">Concluidos</option>
+              <option value="all">Todos</option>
+            </select>
+            <select id="taskPriorityFilter">
+              <option value="all">Todas prioridades</option>
+              <option value="high">Alta</option>
+              <option value="medium">Media</option>
+              <option value="low">Baixa</option>
+            </select>
+            <select id="taskSort">
+              <option value="dueDate">Prazo</option>
+              <option value="priority">Prioridade</option>
+              <option value="created">Criacao</option>
+              <option value="category">Categoria</option>
+            </select>
+          </div>
+
+          <div class="contentSplit">
+            <section class="panel listPanel">
+              <div id="taskList" class="itemList"></div>
+            </section>
+            <section class="panel detailsPanel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Detalhes</p>
+                  <h2 id="taskDetailsTitle">Selecione um lembrete</h2>
+                </div>
+              </div>
+              <form id="taskEditForm" class="formGrid hidden">
+                <input id="editTaskId" type="hidden" />
+                <label class="wideField">
+                  Titulo
+                  <input id="editTitle" maxlength="140" required />
+                </label>
+                <label>
+                  Data
+                  <input id="editDate" type="date" />
+                </label>
+                <label>
+                  Hora
+                  <input id="editTime" type="time" />
+                </label>
+                <label>
+                  Prioridade
+                  <select id="editPriority">
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="low">Baixa</option>
+                  </select>
+                </label>
+                <label>
+                  Categoria
+                  <input id="editCategory" maxlength="40" />
+                </label>
+                <label class="wideField">
+                  Descricao
+                  <textarea id="editDescription" rows="5" maxlength="1200"></textarea>
+                </label>
+                <div class="wideField actionRow">
+                  <button class="primary" type="submit">Salvar alteracoes</button>
+                  <button id="completeTaskButton" class="secondary" type="button">Concluir</button>
+                  <button id="deleteTaskButton" class="dangerButton" type="button">Excluir</button>
+                </div>
+              </form>
+              <div id="emptyTaskDetails" class="emptyState">Clique em um lembrete para editar, concluir ou excluir.</div>
+            </section>
+          </div>
+        </section>
+
+        <section id="notesView" class="view hidden">
+          <div class="twoColumn">
+            <section class="panel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Notas</p>
+                  <h2>Nova nota</h2>
+                </div>
+              </div>
+              <form id="noteForm" class="formGrid">
+                <label class="wideField">
+                  Titulo
+                  <input id="noteTitle" maxlength="140" placeholder="Ex: ideia para projeto" required />
+                </label>
+                <label>
+                  Prioridade
+                  <select id="notePriority">
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="low">Baixa</option>
+                  </select>
+                </label>
+                <label>
+                  Categoria
+                  <input id="noteCategory" maxlength="40" value="Geral" />
+                </label>
+                <label class="wideField">
+                  Conteudo
+                  <textarea id="noteContent" rows="7" maxlength="4000" placeholder="Escreva a nota"></textarea>
+                </label>
+                <button class="primary wideField" type="submit">Criar nota</button>
+              </form>
+            </section>
+            <section class="panel listPanel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Biblioteca</p>
+                  <h2>Notas salvas</h2>
+                </div>
+              </div>
+              <div id="noteList" class="itemList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="assistantView" class="view hidden">
+          <div class="twoColumn">
+            <section class="panel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">IA</p>
+                  <h2>Comando em texto</h2>
+                </div>
+              </div>
+              <div class="stack">
+                <label>
+                  Pedido para o assistente
+                  <textarea id="assistantPrompt" rows="6" maxlength="900" placeholder="Ex: crie um lembrete para amanha as 9h revisar o contrato"></textarea>
+                </label>
+                <button id="assistantSendButton" class="primary" type="button">Enviar para IA</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="sectionHeader">
+                <div>
+                  <p class="eyebrow">Print IA</p>
+                  <h2>Capturar aba</h2>
+                </div>
+              </div>
+              <div class="stack">
+                <label>
+                  Aba para capturar
+                  <select id="captureTabSelect"></select>
+                </label>
+                <label>
+                  Instrucao opcional
+                  <textarea id="captureInstruction" rows="5" maxlength="500" placeholder="Ex: crie um lembrete para responder esse e-mail amanha"></textarea>
+                </label>
+                <div class="actionRow">
+                  <button id="refreshTabsButton" class="secondary" type="button">Atualizar abas</button>
+                  <button id="captureButton" class="primary" type="button">Printar e criar</button>
+                </div>
+                <p class="hint">A extensao ativa a aba escolhida por alguns instantes, tira o print visivel e volta para esta tela.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="settingsView" class="view hidden">
+          <section class="panel settingsPanel">
+            <div class="sectionHeader">
+              <div>
+                <p class="eyebrow">Navegador</p>
+                <h2>Configuracoes da extensao</h2>
+              </div>
+            </div>
+            <div class="formGrid">
+              <label class="wideField">
+                Endereco do Lembreto
+                <input id="appOrigin" type="url" placeholder="https://lembreto.vercel.app" />
+              </label>
+              <button id="saveOriginButton" class="primary" type="button">Salvar endereco</button>
+              <button id="settingsSyncButton" class="secondary" type="button">Sincronizar sessao</button>
+              <button id="settingsOpenSiteButton" class="secondary" type="button">Abrir site</button>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="full-app.js"></script>
+  </body>
+</html>

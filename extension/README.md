@@ -15,15 +15,19 @@ Em producao, baixe `lembreto-extension.zip` pelo painel `Configuracoes > Integra
 
 No popup da extensao, informe o endereco onde o Lembreto esta rodando.
 
+- Producao: `https://lembreto.vercel.app`
 - Desenvolvimento: `http://localhost:3001`
-- Producao: use a URL publicada do app
 
 Depois abra o Lembreto em `Configuracoes > Integracoes > Extensao Lembreto` e clique em `Ativar extensao`.
 Tambem da para entrar pelo popup com e-mail/senha ou usar `Usar sessao do site`.
 
 ## Recursos
 
+- Modo sistema completo em uma aba da extensao.
 - Criacao manual de lembrete.
+- Comando de texto para a IA criar, listar ou organizar lembretes.
+- Salvamento rapido da pagina atual com titulo e link.
+- Lista de proximos lembretes pendentes com acao de abrir ou concluir.
 - Ativacao a partir da aba Integracoes do Lembreto.
 - Sincronizacao com o cookie de sessao do site.
 - Captura da parte visivel da aba atual.

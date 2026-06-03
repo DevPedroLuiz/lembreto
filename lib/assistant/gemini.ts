@@ -223,6 +223,27 @@ function pickStringArray(value: unknown) {
     : undefined;
 }
 
+function normalizePriorityValue(value: unknown) {
+  const priority = pickString(value);
+  if (!priority) return undefined;
+  const normalized = normalizeTextForIntent(priority);
+  if (normalized === 'high' || normalized === 'alta' || normalized === 'urgente' || normalized === 'importante') {
+    return 'high';
+  }
+  if (normalized === 'low' || normalized === 'baixa') return 'low';
+  if (normalized === 'medium' || normalized === 'media' || normalized === 'medio' || normalized === 'normal') {
+    return 'medium';
+  }
+  return undefined;
+}
+
+function normalizeDateLikeValue(value: unknown) {
+  if (value === null) return null;
+  const date = pickString(value);
+  if (!date) return undefined;
+  return Number.isNaN(Date.parse(date)) ? undefined : date;
+}
+
 function normalizeActionType(value: unknown) {
   const type = pickString(value);
   if (!type) return undefined;
@@ -231,6 +252,12 @@ function normalizeActionType(value: unknown) {
     add_task: 'create_task',
     create_reminder: 'create_task',
     add_reminder: 'create_task',
+    reminder: 'create_task',
+    task: 'create_task',
+    create_task_from_image: 'create_task',
+    create_task_from_screenshot: 'create_task',
+    screenshot_to_task: 'create_task',
+    image_to_task: 'create_task',
     list_reminders: 'list_tasks',
     list_tasks: 'list_tasks',
     update_reminder: 'update_task',
@@ -244,6 +271,9 @@ function normalizeActionType(value: unknown) {
     daily_plan: 'assistant_brief',
     weekly_summary: 'assistant_brief',
     overdue_summary: 'assistant_brief',
+    ask_confirmation: 'needs_confirmation',
+    clarification: 'needs_confirmation',
+    need_confirmation: 'needs_confirmation',
   };
   return aliases[normalized] ?? normalized;
 }
@@ -263,14 +293,29 @@ function defaultConfirmationMessage(type: string, payload: Record<string, unknow
 
 function normalizePayload(type: string, payload: Record<string, unknown>) {
   if (type === 'create_task') {
+    const title =
+      pickString(payload.title) ??
+      pickString(payload.name) ??
+      (isRecord(payload.task) ? pickString(payload.task.title) : undefined) ??
+      (isRecord(payload.reminder) ? pickString(payload.reminder.title) : undefined);
+    const description =
+      typeof payload.description === 'string'
+        ? payload.description
+        : typeof payload.details === 'string'
+          ? payload.details
+          : typeof payload.summary === 'string'
+            ? payload.summary
+            : undefined;
+    const dueDate = normalizeDateLikeValue(payload.dueDate ?? payload.date ?? payload.datetime ?? payload.deadline);
+    const endDate = normalizeDateLikeValue(payload.endDate ?? payload.end);
+    const priority = normalizePriorityValue(payload.priority);
+
     return {
-      ...(pickString(payload.title) ? { title: pickString(payload.title) } : {}),
-      ...(typeof payload.description === 'string' ? { description: payload.description } : {}),
-      ...(payload.dueDate !== undefined || payload.date !== undefined
-        ? { dueDate: pickStringOrNull(payload.dueDate ?? payload.date) }
-        : {}),
-      ...(payload.endDate !== undefined ? { endDate: pickStringOrNull(payload.endDate) } : {}),
-      ...(pickString(payload.priority) ? { priority: pickString(payload.priority) } : {}),
+      ...(title ? { title } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(dueDate !== undefined ? { dueDate } : {}),
+      ...(endDate !== undefined ? { endDate } : {}),
+      ...(priority ? { priority } : {}),
       ...(pickString(payload.category) ? { category: pickString(payload.category) } : {}),
       ...(pickStringArray(payload.tags) ? { tags: pickStringArray(payload.tags) } : {}),
       ...(pickBoolean(payload.alarmEnabled) !== undefined ? { alarmEnabled: pickBoolean(payload.alarmEnabled) } : {}),
@@ -349,16 +394,42 @@ function normalizePayload(type: string, payload: Record<string, unknown>) {
   return payload;
 }
 
+function inferActionTypeFromRecord(value: Record<string, unknown>) {
+  const payload = isRecord(value.payload) ? value.payload : value;
+  if (
+    pickString(payload.title) ||
+    pickString(payload.name) ||
+    (isRecord(payload.task) && pickString(payload.task.title)) ||
+    (isRecord(payload.reminder) && pickString(payload.reminder.title))
+  ) {
+    return 'create_task';
+  }
+  if (pickString(payload.question)) return 'needs_confirmation';
+  if (pickString(payload.answer) || pickString(payload.message)) return 'answer_only';
+  return undefined;
+}
+
 function normalizeAssistantAction(value: unknown) {
+  if (Array.isArray(value)) return normalizeAssistantAction(value[0]);
   if (!isRecord(value)) return value;
-  const type = normalizeActionType(value.type ?? value.action ?? value.intent);
+
+  const actionObject = isRecord(value.action) ? value.action : value;
+  const type = normalizeActionType(actionObject.type ?? value.type ?? value.action ?? value.intent)
+    ?? inferActionTypeFromRecord(actionObject)
+    ?? inferActionTypeFromRecord(value);
   if (!type) return value;
-  const rawPayload = isRecord(value.payload) ? value.payload : value;
+  const rawPayload = isRecord(actionObject.payload)
+    ? actionObject.payload
+    : isRecord(value.payload)
+      ? value.payload
+      : actionObject;
   const payload = normalizePayload(type, rawPayload);
   return {
     type,
     payload,
-    confirmationMessage: pickString(value.confirmationMessage) ??
+    confirmationMessage: pickString(actionObject.confirmationMessage) ??
+      pickString(value.confirmationMessage) ??
+      pickString(actionObject.message) ??
       pickString(value.message) ??
       defaultConfirmationMessage(type, rawPayload),
   };
@@ -605,6 +676,10 @@ export async function interpretAssistantScreenshot(
     'Inclua no description um resumo curto do que foi lido na captura e, se existir, a URL da pagina.',
     'Se a imagem nao tiver informacao suficiente para um lembrete, retorne needs_confirmation com uma pergunta objetiva.',
     'Nunca invente dados que nao aparecem na captura ou no contexto enviado.',
+    'Use somente priority em ingles: low, medium ou high.',
+    'Use somente datas ISO 8601 validas em dueDate/endDate; se a data estiver ambigua, omita dueDate.',
+    'Formato esperado para criar lembrete: {"type":"create_task","payload":{"title":"...","description":"...","dueDate":null,"priority":"medium","category":"Geral","tags":["Print IA"],"alarmEnabled":false},"confirmationMessage":"Pronto, criei o lembrete ..."}',
+    'Formato esperado quando faltar informacao: {"type":"needs_confirmation","payload":{"question":"Qual data devo usar para esse lembrete?"},"confirmationMessage":"Preciso de mais uma informacao para continuar."}',
   ].join('\n');
   const metadata = {
     pageTitle: input.pageTitle ?? '',
@@ -663,6 +738,14 @@ export async function interpretAssistantScreenshot(
     }
   }
 
-  if (receivedInvalidModelResponse) throw new AssistantInvalidModelResponseError();
+  if (receivedInvalidModelResponse) {
+    return assistantActionSchema.parse({
+      type: 'needs_confirmation',
+      payload: {
+        question: 'Nao consegui transformar esse print em um lembrete com seguranca. Escreva uma instrucao curta, por exemplo: "me lembre de responder esse e-mail amanha".',
+      },
+      confirmationMessage: 'Preciso de uma instrucao curta para criar o lembrete a partir do print.',
+    });
+  }
   throw new AssistantModelRequestError(lastError);
 }

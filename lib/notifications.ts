@@ -1058,17 +1058,38 @@ export async function clearNotificationsForUser(
   const createdFrom = normalizeNullableDate(filters.createdFrom);
   const createdTo = normalizeNullableDate(filters.createdTo);
 
-  const rows = await sql`
-    DELETE FROM notifications
-    WHERE user_id = ${userId}
-      AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
-      AND (${read}::boolean IS NULL OR read = ${read}::boolean)
-      AND (${tone}::text IS NULL OR tone = ${tone})
-      AND (${kind}::text IS NULL OR kind = ${kind})
-      AND (${createdFrom}::timestamptz IS NULL OR created_at >= ${createdFrom}::timestamptz)
-      AND (${createdTo}::timestamptz IS NULL OR created_at <= ${createdTo}::timestamptz)
-    RETURNING id
-  `;
+  const deleteMatchingNotifications = async (client: SqlClient) => {
+    await client`
+      DELETE FROM notification_deliveries
+      WHERE notification_id IN (
+        SELECT id
+        FROM notifications
+        WHERE user_id = ${userId}
+          AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
+          AND (${read}::boolean IS NULL OR read = ${read}::boolean)
+          AND (${tone}::text IS NULL OR tone = ${tone})
+          AND (${kind}::text IS NULL OR kind = ${kind})
+          AND (${createdFrom}::timestamptz IS NULL OR created_at >= ${createdFrom}::timestamptz)
+          AND (${createdTo}::timestamptz IS NULL OR created_at <= ${createdTo}::timestamptz)
+      )
+    `;
 
-  return rows.length;
+    const rows = await client`
+      DELETE FROM notifications
+      WHERE user_id = ${userId}
+        AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
+        AND (${read}::boolean IS NULL OR read = ${read}::boolean)
+        AND (${tone}::text IS NULL OR tone = ${tone})
+        AND (${kind}::text IS NULL OR kind = ${kind})
+        AND (${createdFrom}::timestamptz IS NULL OR created_at >= ${createdFrom}::timestamptz)
+        AND (${createdTo}::timestamptz IS NULL OR created_at <= ${createdTo}::timestamptz)
+      RETURNING id
+    `;
+
+    return rows.length;
+  };
+
+  return sql.begin
+    ? sql.begin(deleteMatchingNotifications)
+    : deleteMatchingNotifications(sql);
 }
