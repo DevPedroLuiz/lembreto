@@ -202,14 +202,34 @@ async function invokeCron() {
 function summarizeResponse(body) {
   if (!body || typeof body !== 'object') return null;
 
+  const processedSchedules = body.schedules?.processed ?? body.processedSchedules ?? 0;
+  const sentSchedules = body.schedules?.sent ?? body.sentSchedules ?? 0;
+  const failedSchedules = body.schedules?.failed ?? body.failedSchedules ?? 0;
+  const reclaimedSchedules = body.schedules?.reclaimed ?? body.reclaimedSchedules ?? 0;
+  const sideEffectsProcessed = body.sideEffects?.processed ?? 0;
+  const backfilledSchedules = body.backfill?.backfilledSchedules ?? body.backfilledSchedules ?? 0;
+  const detectedOverdueTasks = body.overdueDetection?.detectedOverdueTasks ?? body.detectedOverdueTasks ?? 0;
+  const hasMore = Boolean(body.hasMore || body.schedules?.hasMore || body.sideEffects?.hasMore);
+  const movedWork =
+    processedSchedules > 0 ||
+    sentSchedules > 0 ||
+    failedSchedules > 0 ||
+    reclaimedSchedules > 0 ||
+    sideEffectsProcessed > 0 ||
+    backfilledSchedules > 0 ||
+    detectedOverdueTasks > 0;
+
   return {
     ok: body.ok ?? null,
-    hasMore: Boolean(body.hasMore || body.schedules?.hasMore || body.sideEffects?.hasMore),
-    processedSchedules: body.schedules?.processed ?? body.processedSchedules ?? null,
-    sentSchedules: body.schedules?.sent ?? body.sentSchedules ?? null,
-    failedSchedules: body.schedules?.failed ?? body.failedSchedules ?? null,
-    sideEffectsProcessed: body.sideEffects?.processed ?? null,
-    backfilledSchedules: body.backfill?.backfilledSchedules ?? body.backfilledSchedules ?? null,
+    hasMore,
+    shouldAccelerate: hasMore && movedWork,
+    processedSchedules,
+    sentSchedules,
+    failedSchedules,
+    reclaimedSchedules,
+    sideEffectsProcessed,
+    backfilledSchedules,
+    detectedOverdueTasks,
     durationMs: body.durationMs ?? null,
   };
 }
@@ -283,7 +303,7 @@ async function runCycle(reason) {
       response: summary,
     });
 
-    return summary?.hasMore ? config.backlogIntervalMs : config.intervalMs;
+    return summary?.shouldAccelerate ? config.backlogIntervalMs : config.intervalMs;
   } catch (error) {
     state.failureCount += 1;
     state.consecutiveFailures += 1;
