@@ -12,6 +12,7 @@ Ele nao acessa o banco. Toda a logica de fila, deduplicacao, envio push e backfi
 ## Por que ele existe
 
 Na Vercel Hobby, cron nativo so pode rodar uma vez por dia. Para notificacoes em horario proximo do real, rode este scheduler em uma plataforma que mantenha processo Node ativo, como Railway, Render, Fly.io ou uma VPS.
+O GitHub Actions scheduled workflow e util como fallback, mas o menor intervalo suportado pelo GitHub e 5 minutos; para 1 minuto, use este worker dedicado.
 
 ## Variaveis
 

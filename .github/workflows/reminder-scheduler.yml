@@ -2,7 +2,7 @@ name: Reminder Scheduler
 
 on:
   schedule:
-    - cron: "* * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -25,8 +25,15 @@ jobs:
       - name: Verify scheduler secrets
         shell: bash
         run: |
-          test -n "$APP_URL"
-          test -n "$CRON_SECRET"
+          if [ -z "$APP_URL" ]; then
+            echo "::error::APP_URL is empty. Set it in this workflow or as a GitHub Actions secret."
+            exit 1
+          fi
+
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET is empty. Add a repository secret named CRON_SECRET with the same value configured in Vercel."
+            exit 1
+          fi
 
       - name: Trigger notification processing
         shell: bash

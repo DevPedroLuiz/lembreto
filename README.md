@@ -195,7 +195,7 @@ Se quiser uma camada extra de segurança, configure o ambiente `production` no G
 ## Scheduler externo para lembretes
 
 O projeto inclui um scheduler externo em [`.github/workflows/reminder-scheduler.yml`](.github/workflows/reminder-scheduler.yml).
-Ele chama `GET /api/cron/notifications` pelo GitHub Actions a cada 1 minuto para:
+Ele chama `GET /api/cron/notifications` pelo GitHub Actions a cada 5 minutos para:
 
 - enviar o pré-aviso de 15 minutos;
 - avisar no horário definido no lembrete;
@@ -204,7 +204,7 @@ Ele chama `GET /api/cron/notifications` pelo GitHub Actions a cada 1 minuto para
 - repetir alertas de lembretes atrasados em intervalos regulares;
 - persistir esses avisos na central de notificações.
 
-Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento frequente fica fora do cron nativo da Vercel. O `vercel.json` deve manter apenas `/api/cron/cleanup` como cron diário; um cron diário em `/api/cron/notifications` quebra a lógica de notificações no horário correto.
+Esse fluxo funciona bem no plano Hobby da Vercel porque o agendamento frequente fica fora do cron nativo da Vercel. Para atrasos menores que 5 minutos, rode o worker separado descrito em [docs/notification-scheduler.md](docs/notification-scheduler.md). O `vercel.json` deve manter apenas `/api/cron/cleanup` como cron diário; um cron diário em `/api/cron/notifications` quebra a lógica de notificações no horário correto.
 
 ### Frequência recomendada
 
@@ -215,7 +215,7 @@ GET https://SEU-DOMINIO.com/api/cron/notifications
 Authorization: Bearer {CRON_SECRET}
 ```
 
-Use a frequência de 1 minuto para reduzir atraso perceptível em pré-avisos, notificações e alarmes.
+Use a frequência de 5 minutos no GitHub Actions. Para reduzir atraso perceptível em pré-avisos, notificações e alarmes, prefira o worker dedicado com `SCHEDULER_INTERVAL_MS=60000`.
 
 Serviços que podem chamar esse endpoint:
 
@@ -240,7 +240,7 @@ Exemplo:
 
 ### Como funciona
 
-O workflow roda a cada 1 minuto.
+O workflow roda a cada 5 minutos.
 Cada execução faz uma chamada autenticada para:
 
 ```text
