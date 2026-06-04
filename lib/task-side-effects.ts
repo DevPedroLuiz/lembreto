@@ -66,7 +66,7 @@ export interface ExternalCalendarSideEffectsSummary {
 const TASK_SIDE_EFFECT_LIMIT = 10;
 const MAX_SIDE_EFFECT_DURATION_MS = 10000;
 const SIDE_EFFECT_JOB_TIMEOUT_MS = 3000;
-const EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS = 2500;
+const EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS = 8000;
 const STUCK_SIDE_EFFECT_RECLAIM_LIMIT = 10;
 const MAX_SIDE_EFFECT_ATTEMPTS = 5;
 let taskSideEffectsInfrastructureReady: Promise<void> | null = null;
@@ -647,7 +647,7 @@ export async function processTaskSideEffects(
 export async function processExternalCalendarSideEffects(
   sql: SqlClient,
   limit = 1,
-  maxDurationMs = 3000,
+  maxDurationMs = 10000,
 ): Promise<ExternalCalendarSideEffectsSummary> {
   const sideEffects = await processTaskSideEffects(sql, limit, maxDurationMs, {
     ensureInfrastructure: false,

@@ -3042,6 +3042,24 @@ async function main() {
     assert.equal(body.integrations.length, 2);
   });
 
+  await run('calendar sync all has aligned client and server timeout budgets', () => {
+    const calendarHook = readFileSync(new URL('../src/hooks/useCalendarIntegrations.ts', import.meta.url), 'utf8');
+    const calendarSync = readFileSync(new URL('../lib/calendar/calendarSync.ts', import.meta.url), 'utf8');
+    const taskSideEffects = readFileSync(new URL('../lib/task-side-effects.ts', import.meta.url), 'utf8');
+    const notificationHandler = readFileSync(new URL('../lib/handlers/notifications.ts', import.meta.url), 'utf8');
+    const vercelConfig = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as {
+      functions?: Record<string, { maxDuration?: number }>;
+    };
+
+    assert.match(calendarHook, /CALENDAR_SYNC_ALL_REQUEST_TIMEOUT_MS = 135_000/);
+    assert.match(calendarHook, /timeoutMs: CALENDAR_SYNC_ALL_REQUEST_TIMEOUT_MS/);
+    assert.match(calendarSync, /CALENDAR_SYNC_JOB_TIMEOUT_MS = 8000/);
+    assert.match(calendarSync, /SYNC_ALL_PUSH_CONCURRENCY = 4/);
+    assert.match(taskSideEffects, /EXTERNAL_CALENDAR_SIDE_EFFECT_TIMEOUT_MS = 8000/);
+    assert.match(notificationHandler, /CALENDAR_SYNC_DURATION_MS = 10000/);
+    assert.equal(vercelConfig.functions?.['api/calendar.ts']?.maxDuration, 120);
+  });
+
   await run('processes due notification schedule and marks it sent', async () => {
     const { sql, schedule, notifications } = createNotificationScheduleSqlMock();
     const result = await processDueNotificationSchedules(sql, 20);

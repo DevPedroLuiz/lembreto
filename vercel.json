@@ -5,6 +5,9 @@
   "functions": {
     "api/assistant.ts": {
       "maxDuration": 45
+    },
+    "api/calendar.ts": {
+      "maxDuration": 120
     }
   },
   "crons": [

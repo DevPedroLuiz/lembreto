@@ -29,7 +29,8 @@ const PROVIDER_CLIENTS: Record<CalendarProvider, CalendarProviderClient> = {
 };
 
 const ALL_PROVIDERS: CalendarProvider[] = ['google', 'outlook'];
-const CALENDAR_SYNC_JOB_TIMEOUT_MS = 2500;
+const CALENDAR_SYNC_JOB_TIMEOUT_MS = 8000;
+const SYNC_ALL_PUSH_CONCURRENCY = 4;
 
 let ensureCalendarSchemaPromise: Promise<void> | null = null;
 
@@ -734,7 +735,7 @@ function buildImportedHistory(provider: CalendarProvider, eventId: string) {
   }];
 }
 
-export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, maxDurationMs = 3000): Promise<{
+export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, maxDurationMs = 10000): Promise<{
   scanned: number;
   synced: number;
   skipped: number;
@@ -915,22 +916,25 @@ export async function syncAllCalendarReminders(input: {
   }
 
   const taskIds = await listSyncableTaskIds(input.sql, input.userId);
-  for (const taskId of taskIds) {
-    const result = await syncTaskToExternalCalendar({
+  for (let index = 0; index < taskIds.length; index += SYNC_ALL_PUSH_CONCURRENCY) {
+    const batch = taskIds.slice(index, index + SYNC_ALL_PUSH_CONCURRENCY);
+    const results = await Promise.all(batch.map((taskId) => syncTaskToExternalCalendar({
       sql: input.sql,
       userId: input.userId,
       taskId,
       provider: input.provider,
       force: true,
-    });
+    })));
 
-    if (result.ok && result.provider) {
-      pushed += 1;
-    } else if (result.ok) {
-      skipped += 1;
-    } else {
-      failed += 1;
-      if (result.error) errors.push(result.error);
+    for (const result of results) {
+      if (result.ok && result.provider) {
+        pushed += 1;
+      } else if (result.ok) {
+        skipped += 1;
+      } else {
+        failed += 1;
+        if (result.error) errors.push(result.error);
+      }
     }
   }
 

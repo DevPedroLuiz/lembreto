@@ -14,6 +14,8 @@ interface CalendarSyncAllResponse extends CalendarIntegrationsResponse {
   result: CalendarSyncAllResult;
 }
 
+const CALENDAR_SYNC_ALL_REQUEST_TIMEOUT_MS = 135_000;
+
 export function useCalendarIntegrations(token: string | null) {
   const [integrations, setIntegrations] = useState<CalendarIntegrationStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -88,7 +90,12 @@ export function useCalendarIntegrations(token: string | null) {
     requestToken = token,
   ) => {
     if (!requestToken) throw new Error('Não autenticado');
-    const data = await apiPost<CalendarSyncAllResponse>(`/api/calendar/${provider}/sync-all`, {}, requestToken);
+    const data = await apiPost<CalendarSyncAllResponse>(
+      `/api/calendar/${provider}/sync-all`,
+      {},
+      requestToken,
+      { timeoutMs: CALENDAR_SYNC_ALL_REQUEST_TIMEOUT_MS },
+    );
     setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
     return data.result;
   }, [token]);
