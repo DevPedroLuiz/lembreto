@@ -52,6 +52,19 @@ function pastSaoPauloNoon(): Date {
   return new Date(`${get('year')}-${get('month')}-${get('day')}T12:00:00-03:00`);
 }
 
+function futureTodayWithBuffer(): Date {
+  const today = new Date();
+  const futureToday = new Date(today.getTime() + 70 * 60 * 1000);
+
+  if (formatDateLocal(futureToday) === formatDateLocal(today)) {
+    futureToday.setSeconds(0, 0);
+    return futureToday;
+  }
+
+  today.setHours(23, 59, 59, 999);
+  return today;
+}
+
 async function waitForJsonResponse(
   page: Page,
   matcher: (response: Response) => boolean,
@@ -775,12 +788,7 @@ test.describe('Lembreto critical flows', () => {
 
   test('uses dashboard metrics as shortcuts and filtered views', async ({ page }) => {
     const user = buildE2ETestUser();
-    const today = new Date();
-    if (today.getHours() >= 22) {
-      today.setHours(23, 55, 0, 0);
-    } else {
-      today.setHours(today.getHours() + 1, 0, 0, 0);
-    }
+    const today = futureTodayWithBuffer();
 
     const overdue = new Date();
     overdue.setDate(overdue.getDate() - 2);
@@ -851,12 +859,7 @@ test.describe('Lembreto critical flows', () => {
 
   test('shows the five most important dashboard reminders first', async ({ page }) => {
     const user = buildE2ETestUser();
-    const today = new Date();
-    if (today.getHours() >= 22) {
-      today.setHours(23, 55, 0, 0);
-    } else {
-      today.setHours(today.getHours() + 1, 0, 0, 0);
-    }
+    const today = futureTodayWithBuffer();
 
     const overdue = new Date();
     overdue.setDate(overdue.getDate() - 1);
