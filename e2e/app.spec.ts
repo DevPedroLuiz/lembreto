@@ -1738,7 +1738,8 @@ test.describe('Lembreto critical flows', () => {
 
       await expect(notificationItems.filter({ hasText: 'Lembrete prestes a vencer' }).first()).toBeVisible();
       await expect(notificationItems.filter({ hasText: 'Lembrete comum prestes a vencer' }).first()).toBeVisible();
-      await expect(notificationItems.filter({ hasText: 'Lembrete atrasado recorrente' }).first()).toBeVisible();
+      await page.getByTestId('notifications-open-center').click();
+      await expect(page.getByTestId('notification-item').filter({ hasText: 'Lembrete atrasado recorrente' }).first()).toBeVisible();
     } finally {
       await cleanupUsersByEmail([user.email]);
     }

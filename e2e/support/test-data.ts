@@ -43,6 +43,34 @@ export async function getUserIdByEmail(email: string): Promise<string> {
   return user.id;
 }
 
+async function getUserContextByEmail(email: string): Promise<{ userId: string; organizationId: string }> {
+  const users = (await sql`
+    SELECT
+      users.id,
+      COALESCE(users.current_organization_id, organizations.id) AS "organizationId"
+    FROM users
+    LEFT JOIN organizations
+      ON organizations.owner_user_id = users.id
+      AND organizations.type = 'personal'
+    WHERE users.email = ${email}
+    LIMIT 1
+  `) as Array<{ id: string; organizationId: string | null }>;
+
+  const user = users[0];
+  if (!user) {
+    throw new Error(`Usuario de teste nao encontrado para ${email}`);
+  }
+
+  if (!user.organizationId) {
+    throw new Error(`Organizacao de teste nao encontrada para ${email}`);
+  }
+
+  return {
+    userId: user.id,
+    organizationId: user.organizationId,
+  };
+}
+
 export async function cleanupUserByEmail(email: string): Promise<void> {
   const users = (await sql`
     SELECT id
@@ -51,7 +79,17 @@ export async function cleanupUserByEmail(email: string): Promise<void> {
   `) as Array<{ id: string }>;
 
   for (const user of users) {
-    await sql`DELETE FROM users WHERE id = ${user.id}`;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await sql`DELETE FROM users WHERE id = ${user.id}`;
+        break;
+      } catch (error) {
+        const maybeError = error as { code?: string; message?: string };
+        const isDeadlock = maybeError.code === '40P01' || maybeError.message?.includes('deadlock detected');
+        if (!isDeadlock || attempt === 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+      }
+    }
   }
 }
 
@@ -85,16 +123,17 @@ export async function seedTasksForUser(
   total: number,
   options?: { status?: 'pending' | 'completed'; prefix?: string },
 ): Promise<void> {
-  const userId = await getUserIdByEmail(email);
+  const { userId, organizationId } = await getUserContextByEmail(email);
   const status = options?.status ?? 'pending';
   const prefix = options?.prefix ?? 'Tarefa paginada';
 
   for (let index = 1; index <= total; index += 1) {
     const dueDate = new Date(Date.now() + index * 60 * 60 * 1000).toISOString();
     await sql`
-      INSERT INTO tasks (user_id, title, description, due_date, priority, category, status)
+      INSERT INTO tasks (user_id, organization_id, title, description, due_date, priority, category, status)
       VALUES (
         ${userId},
+        ${organizationId},
         ${`${prefix} ${index}`},
         ${'Gerada automaticamente para teste E2E.'},
         ${dueDate},
@@ -119,14 +158,15 @@ export async function seedCustomTasksForUser(
     alarmEnabled?: boolean;
   }>,
 ): Promise<string[]> {
-  const userId = await getUserIdByEmail(email);
+  const { userId, organizationId } = await getUserContextByEmail(email);
   const taskIds: string[] = [];
 
   for (const task of tasks) {
     const rows = (await sql`
-      INSERT INTO tasks (user_id, title, description, due_date, priority, category, tags, alarm_enabled, status)
+      INSERT INTO tasks (user_id, organization_id, title, description, due_date, priority, category, tags, alarm_enabled, status)
       VALUES (
         ${userId},
+        ${organizationId},
         ${task.title},
         ${task.description ?? 'Gerada automaticamente para teste E2E.'},
         ${task.dueDate},
@@ -171,10 +211,11 @@ export async function seedNotificationForUser(
     dedupeKey?: string;
   },
 ): Promise<void> {
-  const userId = await getUserIdByEmail(email);
+  const { userId, organizationId } = await getUserContextByEmail(email);
 
   await createNotification(sql, {
     userId,
+    organizationId,
     ...input,
   });
 }
@@ -193,7 +234,7 @@ export async function seedNotificationScheduleForTask(
     dedupeKey?: string;
   },
 ): Promise<string> {
-  const userId = await getUserIdByEmail(email);
+  const { userId, organizationId } = await getUserContextByEmail(email);
   const dedupeKey = input.dedupeKey ?? [
     'e2e',
     userId,
@@ -206,6 +247,7 @@ export async function seedNotificationScheduleForTask(
   const rows = (await sql`
     INSERT INTO notification_schedules (
       user_id,
+      organization_id,
       task_id,
       kind,
       notify_at,
@@ -218,6 +260,7 @@ export async function seedNotificationScheduleForTask(
     )
     VALUES (
       ${userId},
+      ${organizationId},
       ${taskId},
       ${input.kind},
       ${input.notifyAt},
@@ -363,12 +406,13 @@ export async function createStuckProcessingScheduleForTask(
     tone?: NotificationTone;
   } = {},
 ): Promise<string> {
-  const userId = await getUserIdByEmail(email);
+  const { userId, organizationId } = await getUserContextByEmail(email);
   const notifyAt = input.notifyAt ?? new Date(Date.now() - 60_000);
   const kind = input.kind ?? 'notification';
   const rows = (await sql`
     INSERT INTO notification_schedules (
       user_id,
+      organization_id,
       task_id,
       kind,
       notify_at,
@@ -381,6 +425,7 @@ export async function createStuckProcessingScheduleForTask(
     )
     VALUES (
       ${userId},
+      ${organizationId},
       ${taskId},
       ${kind},
       ${notifyAt},

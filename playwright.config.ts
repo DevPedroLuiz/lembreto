@@ -5,6 +5,7 @@ import { configureE2EDatabaseEnv } from './e2e/support/e2e-env';
 configureE2EDatabaseEnv();
 
 process.env.VITE_DISABLE_RECAPTCHA = 'true';
+process.env.VITE_API_BASE_URL = '';
 process.env.RECAPTCHA_SKIP_VERIFY = 'true';
 process.env.CRON_SECRET ||= 'e2e-cron-secret-with-enough-entropy';
 

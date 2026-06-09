@@ -632,6 +632,16 @@ ALTER TABLE calendar_feeds ADD COLUMN IF NOT EXISTS organization_id UUID REFEREN
 ALTER TABLE user_categories ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE user_tags ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
 
+DROP INDEX IF EXISTS idx_calendar_integrations_user_provider;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_integrations_org_user_provider
+  ON calendar_integrations(organization_id, user_id, provider)
+  WHERE organization_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_integrations_user_provider_legacy
+  ON calendar_integrations(user_id, provider)
+  WHERE organization_id IS NULL;
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS current_organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS organization_invitations (
