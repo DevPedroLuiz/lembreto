@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { createSqlClient } from './lib/db.js';
+import { createSqlClient, resolveDatabaseUrl } from './lib/db.js';
 import { logError, logInfo } from './lib/logger.js';
 import {
   type HandlerContext,
@@ -71,9 +71,9 @@ import {
   handleNotificationSchedulesQueue,
 } from './lib/handlers/notifications.js';
 
-if (!process.env.DATABASE_URL) {
+if (!resolveDatabaseUrl()) {
   throw new Error(
-    'DATABASE_URL não definida.\n' +
+    'URL do banco nao definida.\n' +
     'Crie o arquivo .env.local na raiz do projeto com:\n' +
     'DATABASE_URL=postgresql://user:senha@host/dbname?sslmode=require'
   );

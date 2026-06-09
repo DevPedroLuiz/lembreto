@@ -35,7 +35,36 @@ function inferPoolMode(host: string | null, port: string | null) {
   return 'unknown';
 }
 
-export function getDatabaseConnectionMetadata(databaseUrl = process.env.DATABASE_URL) {
+type DatabaseUrlPurpose = 'runtime' | 'migration';
+
+const runtimeDatabaseUrlEnvNames = [
+  'DATABASE_URL',
+  'SUPABASE_APP_DATABASE_URL',
+  'POSTGRES_URL',
+  'NEON_DATABASE_URL',
+] as const;
+
+const migrationDatabaseUrlEnvNames = [
+  'SUPABASE_MIGRATION_DATABASE_URL',
+  'DATABASE_URL',
+  'SUPABASE_APP_DATABASE_URL',
+  'POSTGRES_URL',
+  'NEON_DATABASE_URL',
+] as const;
+
+export function resolveDatabaseUrl(purpose: DatabaseUrlPurpose = 'runtime') {
+  const candidates =
+    purpose === 'migration' ? migrationDatabaseUrlEnvNames : runtimeDatabaseUrlEnvNames;
+
+  for (const name of candidates) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
+export function getDatabaseConnectionMetadata(databaseUrl = resolveDatabaseUrl()) {
   if (!databaseUrl) {
     return {
       configured: false,
@@ -83,9 +112,11 @@ export function getDatabaseConnectionMetadata(databaseUrl = process.env.DATABASE
   };
 }
 
-export function createSqlClient(databaseUrl = process.env.DATABASE_URL): SqlClient {
+export function createSqlClient(databaseUrl = resolveDatabaseUrl()): SqlClient {
   if (!databaseUrl) {
-    throw new Error('DATABASE_URL não definida nas variáveis de ambiente.');
+    throw new Error(
+      'URL do banco nao definida. Configure DATABASE_URL ou SUPABASE_APP_DATABASE_URL nas variaveis de ambiente.'
+    );
   }
 
   const metadata = getDatabaseConnectionMetadata(databaseUrl);

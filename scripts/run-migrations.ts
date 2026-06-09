@@ -4,15 +4,19 @@ import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
 import postgres from 'postgres';
 
+import { resolveDatabaseUrl } from '../lib/db.js';
+
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
 const localEnvPath = join(rootDir, '.env.local');
 if (existsSync(localEnvPath)) {
   config({ path: localEnvPath });
 }
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = resolveDatabaseUrl('migration');
 if (!databaseUrl) {
-  throw new Error('DATABASE_URL is required to run migrations.');
+  throw new Error(
+    'Database URL is required to run migrations. Configure SUPABASE_MIGRATION_DATABASE_URL, DATABASE_URL or SUPABASE_APP_DATABASE_URL.'
+  );
 }
 
 const migrationsDir = join(rootDir, 'migrations');
