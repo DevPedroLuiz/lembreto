@@ -23,6 +23,7 @@ import {
   getNotificationPreferences,
   setNotificationPreferences,
 } from '../notification-preferences.js';
+import { requireCurrentOrganization } from '../organizations.js';
 import {
   backfillMissingNotificationSchedules,
   cancelPendingNotificationSchedulesForUser,
@@ -477,6 +478,8 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
 
   const user = auth.user;
   const { request, sql } = context;
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method === 'GET') {
     const options = parseNotificationListOptions(request.query);
@@ -484,7 +487,7 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
 
     try {
       const [page, enabled, preferences] = await Promise.all([
-        listNotificationsForUser(sql, user.id, options),
+        listNotificationsForUser(sql, user.id, { ...options, organizationId }),
         getNotificationsEnabled(sql, user.id),
         getNotificationPreferences(sql, user.id),
       ]);
@@ -515,6 +518,7 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
     try {
       const result = await createNotification(sql, {
         userId: user.id,
+        organizationId,
         ...parsed.data,
       });
       logInfo('notification_created', getRequestMeta(request, {
@@ -541,7 +545,7 @@ export async function handleNotificationsCollection(context: HandlerContext): Pr
     if ('error' in filters) return json(400, { error: filters.error });
 
     try {
-      const deletedCount = await clearNotificationsForUser(sql, user.id, filters);
+      const deletedCount = await clearNotificationsForUser(sql, user.id, { ...filters, organizationId });
       logInfo('notifications_cleared', getRequestMeta(request, { userId: user.id, deletedCount, filters }));
       return json(200, { deletedCount });
     } catch (error) {
@@ -559,6 +563,8 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
 
   const { request, sql } = context;
   const user = auth.user;
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method !== 'POST') return methodNotAllowed();
 
@@ -597,7 +603,7 @@ export async function handleNotificationProcessDue(context: HandlerContext): Pro
     }
     const pushRetries = await retryTemporaryPushDeliveries(sql, 5);
     const [page, enabled, preferences] = await Promise.all([
-      listNotificationsForUser(sql, user.id),
+      listNotificationsForUser(sql, user.id, { organizationId }),
       getNotificationsEnabled(sql, user.id),
       getNotificationPreferences(sql, user.id),
     ]);
@@ -640,6 +646,8 @@ export async function handleNotificationSchedulesQueue(context: HandlerContext):
 
   const { request, sql } = context;
   const user = auth.user;
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method !== 'GET') return methodNotAllowed();
 
@@ -658,6 +666,7 @@ export async function handleNotificationSchedulesQueue(context: HandlerContext):
     const [schedules, diagnostics] = await Promise.all([
       listNotificationSchedulesForUser(sql, user.id, {
         taskId,
+        organizationId,
         status,
         limit,
       }),
@@ -677,6 +686,8 @@ export async function handleNotificationById(context: HandlerContext): Promise<H
   const user = auth.user;
   const { request, sql } = context;
   const id = resolveNotificationId(context);
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (!id) {
     return json(400, { error: 'Notificação não encontrada' });
@@ -690,7 +701,7 @@ export async function handleNotificationById(context: HandlerContext): Promise<H
   }
 
   try {
-    const notification = await markNotificationReadState(sql, user.id, id, parsed.data.read);
+    const notification = await markNotificationReadState(sql, user.id, organizationId, id, parsed.data.read);
     if (!notification) {
       return json(404, { error: 'Notificação não encontrada' });
     }
@@ -709,11 +720,13 @@ export async function handleNotificationMarkAllRead(context: HandlerContext): Pr
 
   const user = auth.user;
   const { request, sql } = context;
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method !== 'POST') return methodNotAllowed();
 
   try {
-    const updatedCount = await markAllNotificationsRead(sql, user.id);
+    const updatedCount = await markAllNotificationsRead(sql, user.id, organizationId);
     logInfo('notifications_mark_all_read', getRequestMeta(request, { userId: user.id, updatedCount }));
     return json(200, { updatedCount });
   } catch (error) {
@@ -1394,6 +1407,7 @@ async function createScheduleBacklogInternalAlerts(
   const rows = await sql`
     SELECT
       user_id AS "userId",
+      organization_id AS "organizationId",
       COUNT(*) AS "dueCount",
       MIN(notify_at) AS "oldestNotifyAt"
     FROM notification_schedules
@@ -1402,7 +1416,7 @@ async function createScheduleBacklogInternalAlerts(
       AND sent_at IS NULL
       AND failed_at IS NULL
       AND cancelled_at IS NULL
-    GROUP BY user_id
+    GROUP BY user_id, organization_id
     HAVING COUNT(*) >= ${input.threshold}
     ORDER BY COUNT(*) DESC
     LIMIT 20
@@ -1414,15 +1428,17 @@ async function createScheduleBacklogInternalAlerts(
 
   for (const row of rows) {
     const userId = String(row.userId);
+    const organizationId = typeof row.organizationId === 'string' ? row.organizationId : null;
     const dueCount = toCount(row.dueCount);
     const oldestNotifyAt = row.oldestNotifyAt ? new Date(String(row.oldestNotifyAt)).toISOString() : null;
     const result = await createNotification(sql, {
       userId,
+      organizationId,
       title: 'Fila de avisos em recuperação',
       message: `${dueCount} avisos vencidos ainda nao foram processados. O sistema esta recriando e enviando a fila aos poucos.`,
       tone: 'warning',
       target: { type: 'notifications' },
-      dedupeKey: `internal:schedule-backlog:${userId}:${hourKey}`,
+      dedupeKey: `internal:schedule-backlog:${organizationId ?? userId}:${hourKey}`,
       sendPush: false,
     });
     if (result.created) created += 1;

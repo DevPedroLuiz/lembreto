@@ -1,6 +1,10 @@
 import { extractBearerToken, verifyToken, type JwtPayload } from './jwt.js';
 import type { SqlClient } from './handlers/core.js';
 import { assertInfrastructure } from './infrastructure.js';
+import {
+  ensurePersonalOrganization,
+  type CurrentOrganization,
+} from './organizations.js';
 
 export interface SafeUser {
   id: string;
@@ -11,6 +15,7 @@ export interface SafeUser {
   stateCode?: string | null;
   cityName?: string | null;
   holidayRegionCode?: string | null;
+  currentOrganization?: CurrentOrganization;
 }
 
 type AuthErrorCode =
@@ -146,7 +151,11 @@ export async function getSafeUserById(sql: SqlClient, userId: string): Promise<S
     WHERE id = ${userId}
   `;
 
-  return (rows[0] as unknown as SafeUser | undefined) ?? null;
+  const user = (rows[0] as unknown as SafeUser | undefined) ?? null;
+  if (!user) return null;
+
+  user.currentOrganization = await ensurePersonalOrganization(sql, user);
+  return user;
 }
 
 export async function requireAuthFromToken(

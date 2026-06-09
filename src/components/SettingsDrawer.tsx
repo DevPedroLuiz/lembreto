@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
   BellRing,
+  Building2,
   CalendarDays,
   Camera,
   CheckCircle2,
@@ -23,6 +24,7 @@ import {
   ShieldAlert,
   Tag,
   Unplug,
+  Users,
   UserCircle2,
   Volume2,
   X,
@@ -38,7 +40,11 @@ import type {
   CalendarSyncAllResult,
   HolidayLocationSuggestion,
   HolidayRegionOption,
+  BillingSessionResponse,
   NotificationPreferences,
+  OrganizationInviteResult,
+  OrganizationRole,
+  OrganizationWorkspace,
 } from '../types';
 
 function Toggle({
@@ -139,6 +145,19 @@ interface SettingsDrawerProps {
   onSuggestHolidayLocation: () => Promise<HolidayLocationSuggestion>;
   onApplyHolidayLocationSuggestion: () => Promise<void>;
   onClearHolidayLocationSuggestion: () => void;
+  organizationWorkspace: OrganizationWorkspace | null;
+  isLoadingOrganizationWorkspace: boolean;
+  organizationWorkspaceError: string | null;
+  onRefreshOrganizationWorkspace: () => Promise<OrganizationWorkspace | null>;
+  onUpdateOrganizationWorkspace: (payload: { name: string }) => Promise<OrganizationWorkspace>;
+  onSwitchOrganizationWorkspace: (organizationId: string) => Promise<OrganizationWorkspace>;
+  onCreateOrganizationInvite: (payload: { email: string; role: Exclude<OrganizationRole, 'owner'> }) => Promise<OrganizationInviteResult>;
+  onAcceptOrganizationInvite: (inviteToken: string) => Promise<OrganizationWorkspace>;
+  onUpdateOrganizationMemberRole: (payload: { memberId: string; role: Exclude<OrganizationRole, 'owner'> }) => Promise<OrganizationWorkspace>;
+  onRemoveOrganizationMember: (memberId: string) => Promise<OrganizationWorkspace>;
+  onRevokeOrganizationInvite: (invitationId: string) => Promise<OrganizationWorkspace>;
+  onCreateBillingCheckout: (planCode: 'pro' | 'team') => Promise<BillingSessionResponse>;
+  onCreateBillingPortal: () => Promise<BillingSessionResponse>;
 }
 
 export type SettingsView =
@@ -383,6 +402,19 @@ export function SettingsDrawer({
   onSuggestHolidayLocation,
   onApplyHolidayLocationSuggestion,
   onClearHolidayLocationSuggestion,
+  organizationWorkspace,
+  isLoadingOrganizationWorkspace,
+  organizationWorkspaceError,
+  onRefreshOrganizationWorkspace,
+  onUpdateOrganizationWorkspace,
+  onSwitchOrganizationWorkspace,
+  onCreateOrganizationInvite,
+  onAcceptOrganizationInvite,
+  onUpdateOrganizationMemberRole,
+  onRemoveOrganizationMember,
+  onRevokeOrganizationInvite,
+  onCreateBillingCheckout,
+  onCreateBillingPortal,
 }: SettingsDrawerProps) {
   const [activeView, setActiveView] = React.useState<SettingsView>(initialView);
   const [categoryDraft, setCategoryDraft] = React.useState('');
@@ -400,6 +432,15 @@ export function SettingsDrawer({
   const [taxonomyFeedback, setTaxonomyFeedback] = React.useState('');
   const [calendarFeedback, setCalendarFeedback] = React.useState('');
   const [holidayFeedback, setHolidayFeedback] = React.useState('');
+  const [workspaceNameDraft, setWorkspaceNameDraft] = React.useState(organizationWorkspace?.organization.name ?? '');
+  const [workspaceFeedback, setWorkspaceFeedback] = React.useState('');
+  const [isSavingWorkspace, setIsSavingWorkspace] = React.useState(false);
+  const [inviteEmailDraft, setInviteEmailDraft] = React.useState('');
+  const [inviteRoleDraft, setInviteRoleDraft] = React.useState<Exclude<OrganizationRole, 'owner'>>('member');
+  const [inviteTokenDraft, setInviteTokenDraft] = React.useState('');
+  const [lastInviteUrl, setLastInviteUrl] = React.useState<string | null>(null);
+  const [busyWorkspaceAction, setBusyWorkspaceAction] = React.useState<string | null>(null);
+  const [billingFeedback, setBillingFeedback] = React.useState('');
   const {
     canInstall,
     isInstalled,
@@ -422,19 +463,31 @@ export function SettingsDrawer({
     setTagDraft('');
     setTaxonomyFeedback('');
     setHolidayFeedback('');
+    setWorkspaceFeedback('');
+    setInviteEmailDraft('');
+    setInviteRoleDraft('member');
+    setInviteTokenDraft('');
+    setLastInviteUrl(null);
+    setBillingFeedback('');
+    setBusyWorkspaceAction(null);
     setCalendarFeedback('');
     setDeletingCategoryName(null);
     setDeletingTagName(null);
     setBusyCalendarProvider(null);
     setHolidayStateDraft(holidayStateCode ?? '');
     setHolidayCityDraft(holidayCityName ?? '');
+    setWorkspaceNameDraft(organizationWorkspace?.organization.name ?? '');
     setActiveView(initialView);
-  }, [holidayCityName, holidayStateCode, initialView, open]);
+  }, [holidayCityName, holidayStateCode, initialView, open, organizationWorkspace?.organization.name]);
 
   React.useEffect(() => {
     if (!open) return;
     setActiveView(initialView);
   }, [initialView, open]);
+
+  React.useEffect(() => {
+    setWorkspaceNameDraft(organizationWorkspace?.organization.name ?? '');
+  }, [organizationWorkspace?.organization.name]);
 
   const requestBrowserExtension = React.useCallback((type: typeof LEMBRETO_EXTENSION_PING | typeof LEMBRETO_EXTENSION_ENABLE) => (
     new Promise<BrowserExtensionResponse>((resolve) => {
@@ -852,6 +905,162 @@ export function SettingsDrawer({
       await onChangeNotificationPreferences(notificationPrefsDraft);
     } finally {
       setIsSavingNotificationPrefs(false);
+    }
+  };
+
+  const getPlanLimit = (key: string) => {
+    const value = organizationWorkspace?.plan.limits[key];
+    return typeof value === 'number' ? value : null;
+  };
+
+  const formatPlanLimit = (value: number | null) => {
+    if (value === null) return 'N/D';
+    if (value < 0) return 'Ilimitado';
+    return String(value);
+  };
+
+  const getRoleLabel = (role: string) => {
+    if (role === 'owner') return 'Proprietario';
+    if (role === 'admin') return 'Admin';
+    if (role === 'viewer') return 'Leitura';
+    return 'Membro';
+  };
+
+  const handleSaveWorkspaceName = async () => {
+    const nextName = workspaceNameDraft.trim();
+    if (!nextName || isSavingWorkspace) return;
+
+    try {
+      setIsSavingWorkspace(true);
+      setWorkspaceFeedback('');
+      await onUpdateOrganizationWorkspace({ name: nextName });
+      setWorkspaceFeedback('Workspace atualizado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel atualizar o workspace.');
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
+
+  const handleSwitchWorkspace = async (organizationId: string) => {
+    if (!organizationId || organizationId === organizationWorkspace?.organization.id) return;
+    try {
+      setBusyWorkspaceAction(`switch:${organizationId}`);
+      setWorkspaceFeedback('');
+      await onSwitchOrganizationWorkspace(organizationId);
+      setWorkspaceFeedback('Workspace ativo alterado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel trocar o workspace.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    const email = inviteEmailDraft.trim();
+    if (!email || busyWorkspaceAction) return;
+
+    try {
+      setBusyWorkspaceAction('invite:create');
+      setWorkspaceFeedback('');
+      const result = await onCreateOrganizationInvite({ email, role: inviteRoleDraft });
+      setInviteEmailDraft('');
+      setLastInviteUrl(result.invitationUrl ?? result.invitationToken);
+      setWorkspaceFeedback('Convite criado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel criar o convite.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleAcceptInvite = async () => {
+    const token = inviteTokenDraft.trim();
+    if (!token || busyWorkspaceAction) return;
+
+    try {
+      setBusyWorkspaceAction('invite:accept');
+      setWorkspaceFeedback('');
+      await onAcceptOrganizationInvite(token);
+      setInviteTokenDraft('');
+      setWorkspaceFeedback('Convite aceito. Workspace ativo alterado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel aceitar o convite.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleUpdateMemberRole = async (memberId: string, role: Exclude<OrganizationRole, 'owner'>) => {
+    try {
+      setBusyWorkspaceAction(`member:${memberId}`);
+      setWorkspaceFeedback('');
+      await onUpdateOrganizationMemberRole({ memberId, role });
+      setWorkspaceFeedback('Papel do membro atualizado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel atualizar o membro.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    try {
+      setBusyWorkspaceAction(`member:${memberId}`);
+      setWorkspaceFeedback('');
+      await onRemoveOrganizationMember(memberId);
+      setWorkspaceFeedback('Membro removido.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel remover o membro.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleRevokeInvite = async (invitationId: string) => {
+    try {
+      setBusyWorkspaceAction(`invite:${invitationId}`);
+      setWorkspaceFeedback('');
+      await onRevokeOrganizationInvite(invitationId);
+      setWorkspaceFeedback('Convite revogado.');
+    } catch (error) {
+      setWorkspaceFeedback(error instanceof Error ? error.message : 'Nao foi possivel revogar o convite.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleStartCheckout = async (planCode: 'pro' | 'team') => {
+    try {
+      setBusyWorkspaceAction(`billing:${planCode}`);
+      setBillingFeedback('');
+      const result = await onCreateBillingCheckout(planCode);
+      if (result.url) {
+        window.location.assign(result.url);
+        return;
+      }
+      setBillingFeedback('Checkout nao retornou uma URL.');
+    } catch (error) {
+      setBillingFeedback(error instanceof Error ? error.message : 'Nao foi possivel iniciar o checkout.');
+    } finally {
+      setBusyWorkspaceAction(null);
+    }
+  };
+
+  const handleOpenBillingPortal = async () => {
+    try {
+      setBusyWorkspaceAction('billing:portal');
+      setBillingFeedback('');
+      const result = await onCreateBillingPortal();
+      if (result.url) {
+        window.location.assign(result.url);
+        return;
+      }
+      setBillingFeedback('Portal nao retornou uma URL.');
+    } catch (error) {
+      setBillingFeedback(error instanceof Error ? error.message : 'Nao foi possivel abrir o portal de cobranca.');
+    } finally {
+      setBusyWorkspaceAction(null);
     }
   };
 
@@ -1485,6 +1694,375 @@ export function SettingsDrawer({
     </section>
   );
 
+  const renderWorkspacePanel = () => {
+    const workspace = organizationWorkspace;
+    const tasksLimit = getPlanLimit('tasks');
+    const membersLimit = getPlanLimit('members');
+    const calendarLimit = getPlanLimit('calendar_integrations');
+    const canSaveWorkspace = Boolean(
+      workspace?.permissions.canManageWorkspace &&
+      workspaceNameDraft.trim() &&
+      workspaceNameDraft.trim() !== workspace.organization.name,
+    );
+
+    return (
+      <section className="rounded-[28px] border border-blue-100 bg-blue-50/60 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <SectionHeader
+            eyebrow="Workspace SaaS"
+            title={workspace?.organization.name ?? 'Workspace'}
+            description="Controle a organizacao, o plano e os membros que compartilham os dados deste ambiente."
+          />
+
+          <button
+            type="button"
+            onClick={() => {
+              void onRefreshOrganizationWorkspace();
+            }}
+            disabled={isLoadingOrganizationWorkspace}
+            className="action-secondary min-h-[44px] justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60 lg:shrink-0"
+          >
+            {isLoadingOrganizationWorkspace ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            Atualizar
+          </button>
+        </div>
+
+        {organizationWorkspaceError ? (
+          <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+            {organizationWorkspaceError}
+          </p>
+        ) : null}
+
+        {workspace && workspace.workspaces.length > 1 ? (
+          <div className="mb-4 rounded-[26px] border border-blue-100 bg-white/88 p-4 dark:border-blue-400/20 dark:bg-slate-950/40">
+            <label className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
+                Workspace ativo
+              </span>
+              <select
+                value={workspace.organization.id}
+                onChange={(event) => {
+                  void handleSwitchWorkspace(event.target.value);
+                }}
+                disabled={Boolean(busyWorkspaceAction)}
+                className="field-control disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {workspace.workspaces.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} - {getRoleLabel(item.role)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 md:grid-cols-4">
+          {[
+            ['Plano', workspace?.plan.name ?? 'Carregando', <Building2 key="plan" size={16} />],
+            ['Tarefas', `${workspace?.usage.tasks ?? 0}/${formatPlanLimit(tasksLimit)}`, <CheckCircle2 key="tasks" size={16} />],
+            ['Membros', `${workspace?.usage.members ?? 0}/${formatPlanLimit(membersLimit)}`, <Users key="members" size={16} />],
+            ['Calendarios', `${workspace?.usage.calendarIntegrations ?? 0}/${formatPlanLimit(calendarLimit)}`, <CalendarDays key="calendar" size={16} />],
+          ].map(([label, value, icon]) => (
+            <div
+              key={String(label)}
+              className="rounded-2xl border border-blue-100 bg-white/88 px-4 py-3 dark:border-blue-400/20 dark:bg-slate-950/40"
+            >
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-300">
+                {icon}
+                {label}
+              </div>
+              <p className="mt-2 truncate text-xl font-semibold text-slate-950 dark:text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        <section className="mt-4 rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Building2 size={16} />
+                Billing
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                Upgrade e gerenciamento de assinatura via Mercado Pago.
+              </p>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[420px]">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleStartCheckout('pro');
+                }}
+                disabled={!workspace?.permissions.canManageBilling || Boolean(busyWorkspaceAction)}
+                className="action-secondary min-h-[44px] justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyWorkspaceAction === 'billing:pro' ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                Pro
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleStartCheckout('team');
+                }}
+                disabled={!workspace?.permissions.canManageBilling || Boolean(busyWorkspaceAction)}
+                className="action-secondary min-h-[44px] justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyWorkspaceAction === 'billing:team' ? <Loader2 size={16} className="animate-spin" /> : <Users size={16} />}
+                Team
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleOpenBillingPortal();
+                }}
+                disabled={!workspace?.permissions.canManageBilling || Boolean(busyWorkspaceAction)}
+                className="action-primary min-h-[44px] justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyWorkspaceAction === 'billing:portal' ? <Loader2 size={16} className="animate-spin" /> : <Settings size={16} />}
+                Gerenciar
+              </button>
+            </div>
+          </div>
+
+          {billingFeedback ? (
+            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+              {billingFeedback}
+            </p>
+          ) : null}
+        </section>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <section className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+              <Building2 size={16} />
+              Identidade do workspace
+            </div>
+            <div className="mt-4 space-y-3">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                  Nome
+                </span>
+                <input
+                  type="text"
+                  value={workspaceNameDraft}
+                  onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                  disabled={!workspace?.permissions.canManageWorkspace}
+                  className="field-control disabled:cursor-not-allowed disabled:opacity-60"
+                  maxLength={80}
+                />
+              </label>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Slug</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    {workspace?.organization.slug ?? '-'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Seu papel</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    {workspace ? getRoleLabel(workspace.organization.role) : '-'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSaveWorkspaceName();
+                }}
+                disabled={!canSaveWorkspace || isSavingWorkspace}
+                className="action-primary min-h-[44px] w-full justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSavingWorkspace ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                Salvar workspace
+              </button>
+
+              {workspaceFeedback ? (
+                <p className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                  {workspaceFeedback}
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+              <Plus size={16} />
+              Convites
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <input
+                type="email"
+                value={inviteEmailDraft}
+                onChange={(event) => setInviteEmailDraft(event.target.value)}
+                disabled={!workspace?.permissions.canManageMembers || Boolean(busyWorkspaceAction)}
+                placeholder="email@empresa.com"
+                className="field-control disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <select
+                value={inviteRoleDraft}
+                onChange={(event) => setInviteRoleDraft(event.target.value as Exclude<OrganizationRole, 'owner'>)}
+                disabled={!workspace?.permissions.canManageMembers || Boolean(busyWorkspaceAction)}
+                className="field-control disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="member">Membro</option>
+                <option value="admin">Admin</option>
+                <option value="viewer">Leitura</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCreateInvite();
+                }}
+                disabled={!workspace?.permissions.canManageMembers || !inviteEmailDraft.trim() || Boolean(busyWorkspaceAction)}
+                className="action-primary min-h-[44px] w-full justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyWorkspaceAction === 'invite:create' ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                Criar convite
+              </button>
+
+              {lastInviteUrl ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-100">
+                  <p className="font-semibold">Link do convite</p>
+                  <p className="mt-1 break-all text-xs leading-5">{lastInviteUrl}</p>
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Aceitar convite</p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={inviteTokenDraft}
+                    onChange={(event) => setInviteTokenDraft(event.target.value)}
+                    placeholder="Token"
+                    className="field-control"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleAcceptInvite();
+                    }}
+                    disabled={!inviteTokenDraft.trim() || Boolean(busyWorkspaceAction)}
+                    className="action-secondary min-w-[96px] justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {busyWorkspaceAction === 'invite:accept' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    Entrar
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {(workspace?.invitations ?? []).map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{invite.email}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{getRoleLabel(invite.role)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleRevokeInvite(invite.id);
+                      }}
+                      disabled={!workspace?.permissions.canManageMembers || busyWorkspaceAction === `invite:${invite.id}`}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300"
+                      aria-label={`Revogar convite ${invite.email}`}
+                    >
+                      {busyWorkspaceAction === `invite:${invite.id}` ? <Loader2 size={15} className="animate-spin" /> : <X size={15} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Users size={16} />
+                Membros
+              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+                {workspace?.members.length ?? 0}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {(workspace?.members ?? []).map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.04]"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200">
+                    {member.avatar ? (
+                      <img src={member.avatar} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      member.name.trim().slice(0, 1).toUpperCase() || 'L'
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{member.name}</p>
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{member.email}</p>
+                  </div>
+                  {workspace?.permissions.canManageMembers && member.role !== 'owner' ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <select
+                        value={member.role}
+                        onChange={(event) => {
+                          void handleUpdateMemberRole(member.id, event.target.value as Exclude<OrganizationRole, 'owner'>);
+                        }}
+                        disabled={Boolean(busyWorkspaceAction)}
+                        className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200"
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="member">Membro</option>
+                        <option value="viewer">Leitura</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleRemoveMember(member.id);
+                        }}
+                        disabled={Boolean(busyWorkspaceAction)}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300"
+                        aria-label={`Remover ${member.name}`}
+                      >
+                        {busyWorkspaceAction === `member:${member.id}` ? <Loader2 size={15} className="animate-spin" /> : <X size={15} />}
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                      {getRoleLabel(member.role)}
+                    </span>
+                  )}
+                </div>
+              ))}
+
+              {!workspace && isLoadingOrganizationWorkspace ? (
+                <div className="flex min-h-[108px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                  Carregando membros...
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+              Cobranca real e upgrades de plano entram na proxima etapa do SaaS.
+            </div>
+          </section>
+        </div>
+      </section>
+    );
+  };
+
   const renderActiveView = () => {
     switch (activeView) {
       case 'appearance':
@@ -1643,6 +2221,8 @@ export function SettingsDrawer({
       case 'organization':
         return (
           <section className="space-y-4">
+            {renderWorkspacePanel()}
+
             <section className="rounded-[28px] border border-slate-200/80 bg-slate-50/80 p-5 dark:border-white/10 dark:bg-white/[0.03]">
               <SectionHeader
                 eyebrow="Organização"

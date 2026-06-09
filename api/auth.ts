@@ -16,7 +16,7 @@ import {
   handleAuthSessions,
   handleAuthVerifyEmail,
 } from '../lib/handlers/auth.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveAction(req: VercelRequest): string | null {
   const value = req.query.action;
@@ -28,6 +28,8 @@ function resolveAction(req: VercelRequest): string | null {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = resolveAction(req);
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
 
   const result = await (async () => {
     switch (action) {
@@ -67,5 +69,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   })();
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

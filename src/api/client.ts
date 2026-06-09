@@ -1,4 +1,5 @@
 import { AUTH_UNAUTHORIZED_EVENT } from '../lib/authEvents';
+import { isNativeMobileRuntime } from '../lib/mobileSession';
 
 export const buildHeaders = (token?: string): Record<string, string> => ({
   'Content-Type': 'application/json',
@@ -15,9 +16,19 @@ export class ApiError extends Error {
 }
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15000;
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/+$/, '') ?? '';
+const API_BASE_URL = configuredApiBaseUrl || (isNativeMobileRuntime() ? 'https://lembreto.vercel.app' : '');
 
 interface ApiRequestOptions {
   timeoutMs?: number;
+}
+
+export function resolveApiUrl(path: string) {
+  if (/^[a-z][a-z\d+\-.]*:/i.test(path) || !API_BASE_URL) {
+    return path;
+  }
+
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function emitUnauthorizedIfNeeded(status: number, token?: string) {
@@ -48,7 +59,7 @@ async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs 
   headers.set('Pragma', 'no-cache');
 
   try {
-    return await fetch(path, {
+    return await fetch(resolveApiUrl(path), {
       ...init,
       cache: 'no-store',
       headers,

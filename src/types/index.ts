@@ -21,11 +21,93 @@ export interface User {
   stateCode?: string | null;
   cityName?: string | null;
   holidayRegionCode?: string | null;
+  currentOrganization?: {
+    id: string;
+    name: string;
+    slug: string;
+    type: 'personal' | 'team';
+    role: 'owner' | 'admin' | 'member' | 'viewer';
+    planCode: string;
+  };
+}
+
+export type OrganizationRole = 'owner' | 'admin' | 'member' | 'viewer';
+export type OrganizationType = 'personal' | 'team';
+
+export interface CurrentOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  type: OrganizationType;
+  role: OrganizationRole;
+  planCode: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  avatar?: string | null;
+  role: OrganizationRole;
+  status: 'active' | 'invited' | 'suspended';
+  createdAt: string;
+}
+
+export interface OrganizationInvitation {
+  id: string;
+  email: string;
+  role: Exclude<OrganizationRole, 'owner'>;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expiresAt: string;
+  createdAt: string;
+  invitedByName?: string | null;
+}
+
+export interface OrganizationPlan {
+  code: string;
+  name: string;
+  tier: string;
+  limits: Record<string, unknown>;
+  features: Record<string, unknown>;
+}
+
+export interface OrganizationUsage {
+  tasks: number;
+  notes: number;
+  calendarIntegrations: number;
+  members: number;
+}
+
+export interface OrganizationPermissions {
+  canManageWorkspace: boolean;
+  canManageMembers: boolean;
+  canManageBilling: boolean;
+}
+
+export interface OrganizationWorkspace {
+  organization: CurrentOrganization;
+  workspaces: CurrentOrganization[];
+  members: OrganizationMember[];
+  invitations: OrganizationInvitation[];
+  plan: OrganizationPlan;
+  usage: OrganizationUsage;
+  permissions: OrganizationPermissions;
+}
+
+export interface OrganizationInviteResult extends OrganizationWorkspace {
+  invitationToken: string;
+  invitationUrl: string | null;
+}
+
+export interface BillingSessionResponse {
+  url: string | null;
 }
 
 export interface Task {
   id: string;
   userId: string;
+  organizationId?: string | null;
   clientMutationId?: string | null;
   title: string;
   description: string;
@@ -217,6 +299,7 @@ export interface HolidayCalendarPayload {
 export interface Note {
   id: string;
   userId: string;
+  organizationId?: string | null;
   taskId: string | null;
   title: string;
   content: string;
@@ -243,6 +326,7 @@ export type OverdueNotificationSnoozePreset = 'tenMinutes' | 'oneHour' | 'tomorr
 
 export interface AppNotification {
   id: string;
+  organizationId?: string | null;
   title: string;
   message: string;
   createdAt: string;

@@ -20,6 +20,10 @@ Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação
 - Rate limit em login e cadastro
 - Blacklist de token no logout
 
+## Android e SaaS
+
+O projeto tem base Capacitor para gerar um app Android real a partir do frontend Vite. Veja [docs/android-saas.md](docs/android-saas.md) para configurar `VITE_API_BASE_URL`, sincronizar o projeto Android e planejar a evoluÃ§Ã£o SaaS.
+
 ## Variáveis de ambiente
 
 Crie `.env.local` na raiz:
@@ -31,6 +35,8 @@ GEMINI_API_KEY=sua_chave_do_google_gemini
 GEMINI_MODEL=gemini-1.5-flash
 RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 APP_URL=http://localhost:3001
+VITE_API_BASE_URL=https://api.lembreto.com
+CORS_ALLOWED_ORIGINS=https://app.lembreto.com
 GOOGLE_CLIENT_ID=seu_client_id_do_google.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=seu_client_secret_do_google
 GOOGLE_CALENDAR_CLIENT_ID=seu_client_id_do_google_calendar.apps.googleusercontent.com

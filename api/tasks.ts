@@ -11,7 +11,7 @@ import {
   handleTaskTaxonomy,
   handleTasksCollection,
 } from '../lib/handlers/tasks.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function hasTaskId(req: VercelRequest): boolean {
   const value = req.query.id;
@@ -29,6 +29,8 @@ function resolveAction(req: VercelRequest): string | null {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
   const action = resolveAction(req);
 
   let result;
@@ -53,5 +55,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     result = await handleTasksCollection({ sql, request });
   }
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

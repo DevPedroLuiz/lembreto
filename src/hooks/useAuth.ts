@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
+import { apiDelete, apiGet, apiPost, apiPut, resolveApiUrl } from '../api/client';
+import {
+  clearMobileAuthToken,
+  isNativeMobileRuntime,
+  loadMobileAuthToken,
+  saveMobileAuthToken,
+} from '../lib/mobileSession';
 import { LS } from '../lib/storage';
 import type { User } from '../types';
 
@@ -20,6 +26,12 @@ export interface AuthState {
   token: string | null;
 }
 
+function assertAuthResponse(data: { user?: User; token?: string }): asserts data is { user: User; token: string } {
+  if (!data.user || typeof data.user.name !== 'string' || !data.token) {
+    throw new Error('Resposta de autenticaÃ§Ã£o invÃ¡lida. Verifique a URL da API e tente novamente.');
+  }
+}
+
 export function useAuth() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -28,14 +40,20 @@ export function useAuth() {
 
   const restoreSession = useCallback(async () => {
     try {
-      const response = await fetch('/api/auth/me', { credentials: 'include' });
+      const mobileToken = await loadMobileAuthToken();
+      const response = await fetch(resolveApiUrl('/api/auth/me'), {
+        credentials: 'include',
+        headers: mobileToken ? { Authorization: `Bearer ${mobileToken}` } : undefined,
+      });
 
       if (response.ok) {
         const data = await response.json() as { user: User; token: string };
         setCurrentUser(data.user);
         setToken(data.token);
         LS.saveUser(data.user);
+        await saveMobileAuthToken(data.token);
       } else {
+        await clearMobileAuthToken();
         LS.clearUser();
         setCurrentUser(null);
         setToken(null);
@@ -72,8 +90,10 @@ export function useAuth() {
   }, [restoreSession, token]);
 
   const persistTokenCookie = async (newToken: string) => {
+    if (isNativeMobileRuntime()) return;
+
     try {
-      const response = await fetch('/api/auth/me', {
+      const response = await fetch(resolveApiUrl('/api/auth/me'), {
         method: 'POST',
         credentials: 'include',
         headers: { Authorization: `Bearer ${newToken}` },
@@ -93,9 +113,11 @@ export function useAuth() {
       password,
       ...(recaptchaToken ? { recaptchaToken } : {}),
     });
+    assertAuthResponse(data);
     setToken(data.token);
     setCurrentUser(data.user);
     LS.saveUser(data.user);
+    await saveMobileAuthToken(data.token);
     await persistTokenCookie(data.token);
     return data.user;
   };
@@ -107,9 +129,11 @@ export function useAuth() {
       password,
       ...(recaptchaToken ? { recaptchaToken } : {}),
     });
+    assertAuthResponse(data);
     setToken(data.token);
     setCurrentUser(data.user);
     LS.saveUser(data.user);
+    await saveMobileAuthToken(data.token);
     await persistTokenCookie(data.token);
     return data.user;
   };
@@ -118,13 +142,14 @@ export function useAuth() {
     const currentToken = token;
 
     LS.clearUser();
+    await clearMobileAuthToken();
     setCurrentUser(null);
     setToken(null);
 
     const requests: Promise<unknown>[] = [];
 
     if (currentToken) {
-      requests.push(fetch('/api/auth/logout', {
+      requests.push(fetch(resolveApiUrl('/api/auth/logout'), {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -134,7 +159,7 @@ export function useAuth() {
       }));
     }
 
-    requests.push(fetch('/api/auth/me', {
+    requests.push(fetch(resolveApiUrl('/api/auth/me'), {
       method: 'DELETE',
       credentials: 'include',
     }));
@@ -150,7 +175,7 @@ export function useAuth() {
   };
 
   const loginWithGoogle = () => {
-    window.location.assign('/api/auth/google/start');
+    window.location.assign(resolveApiUrl('/api/auth/google/start'));
   };
 
   const updateProfile = async (payload: {
@@ -171,6 +196,7 @@ export function useAuth() {
 
     if (data.token) {
       setToken(data.token);
+      await saveMobileAuthToken(data.token);
       await persistTokenCookie(data.token);
     }
 
@@ -193,6 +219,7 @@ export function useAuth() {
     const data = await apiDelete<{ revokedCurrent?: boolean }>('/api/auth/sessions', token, { sessionId });
     if (data?.revokedCurrent) {
       LS.clearUser();
+      await clearMobileAuthToken();
       setCurrentUser(null);
       setToken(null);
     }
@@ -203,6 +230,7 @@ export function useAuth() {
     if (!token) throw new Error('Não autenticado');
     const data = await apiDelete<{ message: string }>('/api/auth/account', token);
     LS.clearUser();
+    await clearMobileAuthToken();
     setCurrentUser(null);
     setToken(null);
     return data;

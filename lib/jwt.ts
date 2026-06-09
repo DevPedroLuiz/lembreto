@@ -30,6 +30,7 @@ export interface CalendarFeedJwtPayload {
 
 export interface CalendarOAuthStateJwtPayload {
   sub: string;
+  organizationId?: string;
   provider: 'google' | 'outlook';
   nonce: string;
   scope: 'calendar-oauth';

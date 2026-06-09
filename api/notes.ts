@@ -4,7 +4,7 @@ import {
   handleNoteById,
   handleNotesCollection,
 } from '../lib/handlers/notes.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function hasNoteId(req: VercelRequest): boolean {
   const value = req.query.id;
@@ -15,9 +15,11 @@ function hasNoteId(req: VercelRequest): boolean {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
   const result = hasNoteId(req)
     ? await handleNoteById({ sql, request })
     : await handleNotesCollection({ sql, request });
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

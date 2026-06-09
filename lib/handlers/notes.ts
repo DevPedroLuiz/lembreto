@@ -7,6 +7,7 @@ import {
   updateNoteSchema,
 } from '../schemas.js';
 import { createNotification } from '../notifications.js';
+import { requireCurrentOrganization } from '../organizations.js';
 import {
   ensureTaskTaxonomySchema,
   sanitizeTaskTags,
@@ -70,6 +71,7 @@ async function ensureNotesSchema(sql: HandlerContext['sql']) {
         { table: 'notes', column: 'delete_after' },
         { table: 'notes', column: 'deletion_reason' },
         { table: 'notes', column: 'expired_notification_sent_at' },
+        { table: 'notes', column: 'organization_id' },
       ],
       indexes: [
         { name: 'idx_notes_user_created' },
@@ -114,7 +116,7 @@ async function requireNotesAuth(context: HandlerContext) {
 
 async function assertTaskOwnership(
   sql: HandlerContext['sql'],
-  userId: string,
+  organizationId: string,
   taskId: string | null | undefined,
 ) {
   if (!taskId) return true;
@@ -122,7 +124,7 @@ async function assertTaskOwnership(
   const rows = await sql`
     SELECT id
     FROM tasks
-    WHERE id = ${taskId} AND user_id = ${userId}
+    WHERE id = ${taskId} AND organization_id = ${organizationId}
     LIMIT 1
   `;
 
@@ -134,17 +136,21 @@ async function syncNoteTaxonomy(sql: HandlerContext['sql'], userId: string, cate
   await upsertUserTags(sql, userId, tags);
 }
 
-async function purgeExpiredTrash(sql: HandlerContext['sql'], userId: string) {
+async function purgeExpiredTrash(sql: HandlerContext['sql'], organizationId: string) {
   await sql`
     DELETE FROM notes
-    WHERE user_id = ${userId}
+    WHERE organization_id = ${organizationId}
       AND deleted_at IS NOT NULL
       AND delete_after IS NOT NULL
       AND delete_after <= NOW()
   `;
 }
 
-async function moveExpiredTemporaryNotesToTrash(sql: HandlerContext['sql'], userId: string) {
+async function moveExpiredTemporaryNotesToTrash(
+  sql: HandlerContext['sql'],
+  userId: string,
+  organizationId: string,
+) {
   const expiredNotes = await sql`
     UPDATE notes
     SET
@@ -153,7 +159,7 @@ async function moveExpiredTemporaryNotesToTrash(sql: HandlerContext['sql'], user
       deletion_reason = 'expired',
       expired_notification_sent_at = NOW(),
       updated_at = NOW()
-    WHERE user_id = ${userId}
+    WHERE organization_id = ${organizationId}
       AND deleted_at IS NULL
       AND mode = 'temporary'
       AND expires_at IS NOT NULL
@@ -165,6 +171,7 @@ async function moveExpiredTemporaryNotesToTrash(sql: HandlerContext['sql'], user
     expiredNotes.map(async (note) => {
       await createNotification(sql, {
         userId,
+        organizationId,
         title: 'Nota temporária excluída',
         message: `"${String(note.title)}" venceu e foi enviada para a Lixeira. Ela ficará disponível por 3 dias.`,
         tone: 'warning',
@@ -184,17 +191,20 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
   const user = auth.user;
   const { request, sql } = context;
   await ensureNotesSchema(sql);
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method === 'GET') {
     try {
-      await purgeExpiredTrash(sql, user.id);
-      await moveExpiredTemporaryNotesToTrash(sql, user.id);
+      await purgeExpiredTrash(sql, organizationId);
+      await moveExpiredTemporaryNotesToTrash(sql, user.id, organizationId);
 
       const includeTrash = wantsTrash(request);
       const rows = await sql`
         SELECT
           id,
           user_id AS "userId",
+          organization_id AS "organizationId",
           task_id AS "taskId",
           title,
           content,
@@ -210,7 +220,7 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM notes
-        WHERE user_id = ${user.id}
+        WHERE organization_id = ${organizationId}
           AND (
             (${includeTrash}::boolean = FALSE AND deleted_at IS NULL)
             OR (${includeTrash}::boolean = TRUE AND deleted_at IS NOT NULL)
@@ -244,15 +254,16 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
     }
 
     try {
-      const canLinkTask = await assertTaskOwnership(sql, user.id, taskId);
+      const canLinkTask = await assertTaskOwnership(sql, organizationId, taskId);
       if (!canLinkTask) {
         return json(404, { error: 'Lembrete vinculado não encontrado' });
       }
 
       const rows = await sql`
-        INSERT INTO notes (user_id, task_id, title, content, priority, category, tags, mode, expires_at)
+        INSERT INTO notes (user_id, organization_id, task_id, title, content, priority, category, tags, mode, expires_at)
         VALUES (
           ${user.id},
+          ${organizationId},
           ${taskId},
           ${title},
           ${content},
@@ -265,6 +276,7 @@ export async function handleNotesCollection(context: HandlerContext): Promise<Ha
         RETURNING
           id,
           user_id AS "userId",
+          organization_id AS "organizationId",
           task_id AS "taskId",
           title,
           content,
@@ -301,6 +313,8 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
   const { request, sql } = context;
   const id = resolveNoteId(context);
   await ensureNotesSchema(sql);
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (!id) {
     return json(400, { error: 'Nota não encontrada' });
@@ -312,6 +326,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
         SELECT
           id,
           user_id AS "userId",
+          organization_id AS "organizationId",
           task_id AS "taskId",
           title,
           content,
@@ -328,7 +343,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           updated_at AS "updatedAt"
         FROM notes
         WHERE id = ${id}
-          AND user_id = ${user.id}
+          AND organization_id = ${organizationId}
           AND deleted_at IS NULL
       `;
 
@@ -362,7 +377,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           task_id,
           deleted_at
         FROM notes
-        WHERE id = ${id} AND user_id = ${user.id}
+        WHERE id = ${id} AND organization_id = ${organizationId}
       `;
 
       if (currentRows.length === 0) {
@@ -371,7 +386,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
 
       const current = currentRows[0] as Record<string, unknown>;
       const taskId = parsed.data.taskId !== undefined ? parsed.data.taskId : (current.task_id as string | null | undefined) ?? null;
-      const canLinkTask = await assertTaskOwnership(sql, user.id, taskId);
+      const canLinkTask = await assertTaskOwnership(sql, organizationId, taskId);
       if (!canLinkTask) {
         return json(404, { error: 'Lembrete vinculado não encontrado' });
       }
@@ -412,10 +427,11 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           deletion_reason = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE deletion_reason END,
           expired_notification_sent_at = CASE WHEN ${parsed.data.restore === true}::boolean THEN NULL ELSE expired_notification_sent_at END,
           updated_at = NOW()
-        WHERE id = ${id} AND user_id = ${user.id}
+        WHERE id = ${id} AND organization_id = ${organizationId}
         RETURNING
           id,
           user_id AS "userId",
+          organization_id AS "organizationId",
           task_id AS "taskId",
           title,
           content,
@@ -450,7 +466,7 @@ export async function handleNoteById(context: HandlerContext): Promise<HandlerRe
           delete_after = COALESCE(delete_after, NOW() + INTERVAL '3 days'),
           deletion_reason = COALESCE(deletion_reason, 'manual'),
           updated_at = NOW()
-        WHERE id = ${id} AND user_id = ${user.id}
+        WHERE id = ${id} AND organization_id = ${organizationId}
       `;
       logInfo('note_deleted', getRequestMeta(request, { userId: user.id, noteId: id }));
       return { status: 204 };

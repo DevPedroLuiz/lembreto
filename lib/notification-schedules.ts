@@ -45,6 +45,7 @@ let notificationSchedulingInfrastructureReady: Promise<void> | null = null;
 interface TaskForScheduling {
   id: string;
   userId: string;
+  organizationId?: string | null;
   title: string;
   description: string;
   dueDate: string | null;
@@ -78,6 +79,7 @@ interface TaskForScheduling {
 interface ScheduleRow {
   id: string;
   userId: string;
+  organizationId: string | null;
   taskId: string;
   kind: NotificationScheduleKind;
   notifyAt: string;
@@ -200,6 +202,7 @@ function mapTask(row: Record<string, unknown>): TaskForScheduling {
   return {
     id: String(row.id),
     userId: String(row.userId),
+    organizationId: typeof row.organizationId === 'string' ? row.organizationId : null,
     title: String(row.title ?? ''),
     description: String(row.description ?? ''),
     dueDate: toIso(row.dueDate),
@@ -243,6 +246,7 @@ function mapSchedule(row: Record<string, unknown>): ScheduleRow {
   return {
     id: String(row.id),
     userId: String(row.userId),
+    organizationId: typeof row.organizationId === 'string' ? row.organizationId : null,
     taskId: String(row.taskId),
     kind: String(row.kind) as NotificationScheduleKind,
     notifyAt: new Date(String(row.notifyAt)).toISOString(),
@@ -633,6 +637,7 @@ export async function ensureNotificationSchedulingInfrastructure(sql: SqlClient)
         { table: 'notification_preferences', column: 'muted_categories' },
         { table: 'notification_preferences', column: 'category_message_templates' },
         { table: 'notification_schedules', column: 'user_id' },
+        { table: 'notification_schedules', column: 'organization_id' },
         { table: 'notification_schedules', column: 'task_id' },
         { table: 'notification_schedules', column: 'kind' },
         { table: 'notification_schedules', column: 'notify_at' },
@@ -683,6 +688,7 @@ async function fetchTaskForScheduling(sql: SqlClient, userId: string, taskId: st
     SELECT
       tasks.id,
       tasks.user_id AS "userId",
+      tasks.organization_id AS "organizationId",
       tasks.title,
       tasks.description,
       tasks.due_date AS "dueDate",
@@ -857,6 +863,7 @@ async function insertSchedule(
   const rows = await sql`
     INSERT INTO notification_schedules (
       user_id,
+      organization_id,
       task_id,
       kind,
       notify_at,
@@ -869,6 +876,7 @@ async function insertSchedule(
     )
     VALUES (
       ${task.userId},
+      ${task.organizationId ?? null},
       ${task.id},
       ${input.kind},
       ${input.notifyAt},
@@ -881,6 +889,7 @@ async function insertSchedule(
     )
     ON CONFLICT (user_id, dedupe_key)
     DO UPDATE SET
+      organization_id = EXCLUDED.organization_id,
       task_id = EXCLUDED.task_id,
       kind = EXCLUDED.kind,
       notify_at = EXCLUDED.notify_at,
@@ -1231,6 +1240,7 @@ async function detectAndScheduleOverdueTasks(
     SELECT
       tasks.id,
       tasks.user_id AS "userId",
+      tasks.organization_id AS "organizationId",
       tasks.title,
       tasks.description,
       tasks.due_date AS "dueDate",
@@ -1445,6 +1455,7 @@ async function claimDueSchedules(sql: SqlClient, limit: number, options: { userI
     RETURNING
       ns.id,
       ns.user_id AS "userId",
+      ns.organization_id AS "organizationId",
       ns.task_id AS "taskId",
       ns.kind,
       ns.notify_at AS "notifyAt",
@@ -1464,6 +1475,7 @@ export async function listNotificationSchedulesForUser(
   userId: string,
   options: {
     taskId?: string | null;
+    organizationId?: string | null;
     status?: NotificationScheduleStatus | null;
     limit?: number;
     ensureInfrastructure?: boolean;
@@ -1473,6 +1485,7 @@ export async function listNotificationSchedulesForUser(
     await ensureNotificationSchedulingInfrastructure(sql);
   }
   const taskId = options.taskId ?? null;
+  const organizationId = options.organizationId ?? null;
   const status = options.status ?? null;
   const limit = Math.min(Math.max(Math.floor(options.limit ?? 100), 1), 250);
   const rows = await sql`
@@ -1500,6 +1513,7 @@ export async function listNotificationSchedulesForUser(
     FROM notification_schedules ns
     LEFT JOIN tasks ON tasks.id = ns.task_id AND tasks.user_id = ns.user_id
     WHERE ns.user_id = ${userId}
+      AND (${organizationId}::uuid IS NULL OR ns.organization_id = ${organizationId})
       AND (${taskId}::uuid IS NULL OR ns.task_id = ${taskId}::uuid)
       AND (${status}::text IS NULL OR ns.status = ${status})
     ORDER BY
@@ -1776,6 +1790,7 @@ async function scheduleNextIncrementalReminder(sql: SqlClient, schedule: Schedul
 async function sendAlarmSchedule(sql: SqlClient, schedule: ScheduleRow, task: TaskForScheduling) {
   const result = await createNotification(sql, {
     userId: schedule.userId,
+    organizationId: schedule.organizationId,
     title: schedule.title,
     message: schedule.message,
     tone: schedule.tone,
@@ -1965,6 +1980,7 @@ async function processSingleSchedule(sql: SqlClient, schedule: ScheduleRow) {
   } else {
     const result = await createNotification(sql, {
       userId: schedule.userId,
+      organizationId: schedule.organizationId,
       title: schedule.title,
       message: schedule.message,
       tone: schedule.tone,

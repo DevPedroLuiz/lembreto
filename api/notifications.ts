@@ -11,7 +11,7 @@ import {
   handleNotificationSchedulesQueue,
   handleNotificationsCollection,
 } from '../lib/handlers/notifications.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveQueryValue(value: string | string[] | undefined): string | null {
   if (typeof value === 'string') return value;
@@ -23,6 +23,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = resolveQueryValue(req.query.action as string | string[] | undefined);
   const notificationId = resolveQueryValue(req.query.id as string | string[] | undefined);
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
 
   const result = await (async () => {
     if (action === 'push-subscriptions') {
@@ -60,5 +62,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleNotificationsCollection({ sql, request });
   })();
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

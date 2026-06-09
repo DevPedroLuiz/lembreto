@@ -525,3 +525,133 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status
 -- DELETE FROM calendar_feeds       WHERE expires_at < NOW() OR revoked_at < NOW() - INTERVAL '30 days';
 -- DELETE FROM notifications        WHERE created_at < NOW() - INTERVAL '180 days';
 -- ============================================================
+
+-- ============================================================
+-- SaaS multi-tenant: organizacoes, planos, assinaturas e uso
+-- ============================================================
+CREATE TABLE IF NOT EXISTS plans (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  tier TEXT NOT NULL CHECK (tier IN ('free', 'pro', 'team', 'enterprise')),
+  limits JSONB NOT NULL DEFAULT '{}'::JSONB,
+  features JSONB NOT NULL DEFAULT '{}'::JSONB,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO plans (code, name, tier, limits, features)
+VALUES
+  ('free', 'Free', 'free', '{"tasks":100,"members":1,"calendar_integrations":1,"ai_messages_per_month":25}'::JSONB, '{"team":false,"native_push":false,"priority_support":false}'::JSONB),
+  ('pro', 'Pro', 'pro', '{"tasks":-1,"members":1,"calendar_integrations":3,"ai_messages_per_month":500}'::JSONB, '{"team":false,"native_push":true,"priority_support":false}'::JSONB),
+  ('team', 'Team', 'team', '{"tasks":-1,"members":10,"calendar_integrations":10,"ai_messages_per_month":2000}'::JSONB, '{"team":true,"native_push":true,"priority_support":true}'::JSONB)
+ON CONFLICT (code) DO UPDATE
+SET name = EXCLUDED.name,
+    tier = EXCLUDED.tier,
+    limits = EXCLUDED.limits,
+    features = EXCLUDED.features,
+    active = TRUE,
+    updated_at = NOW();
+
+CREATE TABLE IF NOT EXISTS organizations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL DEFAULT 'personal' CHECK (type IN ('personal', 'team')),
+  owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_personal_owner
+  ON organizations(owner_user_id)
+  WHERE type = 'personal' AND owner_user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS organization_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invited', 'suspended')),
+  invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (organization_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_organization_members_user
+  ON organization_members(user_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_organization_members_org_role
+  ON organization_members(organization_id, role);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  plan_code TEXT NOT NULL REFERENCES plans(code),
+  provider TEXT NOT NULL DEFAULT 'internal' CHECK (provider IN ('internal', 'stripe', 'mercado_pago', 'pagarme')),
+  provider_customer_id TEXT,
+  provider_subscription_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete')),
+  current_period_start TIMESTAMPTZ,
+  current_period_end TIMESTAMPTZ,
+  cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+  trial_ends_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_provider_subscription
+  ON subscriptions(provider, provider_subscription_id)
+  WHERE provider_subscription_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_org_status
+  ON subscriptions(organization_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  event_type TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_org_type_time
+  ON usage_events(organization_id, event_type, occurred_at DESC);
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE notification_schedules ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE task_side_effects ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE calendar_integrations ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE calendar_feeds ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE user_categories ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+ALTER TABLE user_tags ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS current_organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS organization_invitations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member', 'viewer')),
+  token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+  invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  accepted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  accepted_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_organization_invitations_org_status
+  ON organization_invitations(organization_id, status, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_invitations_pending_email
+  ON organization_invitations(organization_id, LOWER(email))
+  WHERE status = 'pending';

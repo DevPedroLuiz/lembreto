@@ -8,6 +8,7 @@ import {
   type HandlerContext,
   type HandlerResult,
   buildHandlerRequest,
+  handleCorsPreflight,
   sendHandlerResult,
 } from './lib/handlers/core.js';
 import {
@@ -43,6 +44,11 @@ import {
 } from './lib/handlers/notes.js';
 import { handleAssistantMessage, handleAssistantScreenshot } from './lib/handlers/assistant.js';
 import { handleCleanupCron } from './lib/handlers/cron.js';
+import {
+  handleBilling,
+  handleMercadoPagoWebhookRaw,
+} from './lib/handlers/billing.js';
+import { handleOrganization } from './lib/handlers/organization.js';
 import {
   handleCalendarConnectCallback,
   handleCalendarConnectStart,
@@ -99,13 +105,17 @@ function withRequestMeta(req: express.Request, res: express.Response, next: expr
 function createHandlerRunner(defaultAppUrl?: string) {
   return (handler: (context: HandlerContext) => Promise<HandlerResult>) =>
     async (req: express.Request, res: express.Response) => {
+      const request = buildHandlerRequest(req);
+      const preflight = handleCorsPreflight(request);
+      if (preflight) return sendHandlerResult(res, preflight, request);
+
       const result = await handler({
         sql,
-        request: buildHandlerRequest(req),
+        request,
         defaultAppUrl,
       });
 
-      return sendHandlerResult(res, result);
+      return sendHandlerResult(res, result, request);
     };
 }
 
@@ -116,8 +126,25 @@ async function startServer() {
   const run = createHandlerRunner(defaultAppUrl);
 
   app.set('trust proxy', true);
-  app.use(express.json({ limit: '10mb' }));
   app.use(withRequestMeta);
+  app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const signatureHeader = req.headers['x-signature'];
+    const requestIdHeader = req.headers['x-request-id'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    const requestId = Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader;
+    const result = await handleMercadoPagoWebhookRaw(
+      sql,
+      Buffer.isBuffer(req.body) ? req.body : Buffer.from(''),
+      { signature, requestId },
+      req.query,
+    );
+    return sendHandlerResult(res, result);
+  });
+  app.use(express.json({ limit: '10mb' }));
+  app.options('/api/*', (req, res) => {
+    const request = buildHandlerRequest(req);
+    return sendHandlerResult(res, handleCorsPreflight(request) ?? { status: 204 }, request);
+  });
 
   app.post('/api/auth/register', run(handleAuthRegister));
   app.post('/api/auth/login', run(handleAuthLogin));
@@ -137,6 +164,13 @@ async function startServer() {
   app.delete('/api/auth/sessions', run(handleAuthSessions));
   app.delete('/api/auth/account', run(handleAuthCancelAccount));
   app.put('/api/auth/profile', run(handleAuthProfile));
+
+  app.post('/api/billing', run(handleBilling));
+
+  app.get('/api/organization', run(handleOrganization));
+  app.post('/api/organization', run(handleOrganization));
+  app.put('/api/organization', run(handleOrganization));
+  app.delete('/api/organization', run(handleOrganization));
 
   app.get('/api/tasks', run(handleTasksCollection));
   app.post('/api/tasks', run(handleTasksCollection));

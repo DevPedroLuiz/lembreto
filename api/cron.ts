@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sql from './_db.js';
 import { handleCleanupCron } from '../lib/handlers/cron.js';
 import { handleCronHealth, handleNotificationsCron } from '../lib/handlers/notifications.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveJob(req: VercelRequest): string | null {
   const value = req.query.job;
@@ -14,6 +14,8 @@ function resolveJob(req: VercelRequest): string | null {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const job = resolveJob(req);
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
 
   const result = await (async () => {
     switch (job) {
@@ -31,5 +33,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   })();
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

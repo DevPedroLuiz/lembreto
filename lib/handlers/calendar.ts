@@ -114,7 +114,9 @@ export async function handleCalendarIntegrations(context: HandlerContext): Promi
   if ('status' in auth) return auth;
 
   try {
-    const integrations = await listCalendarIntegrations(context.sql, auth.user.id);
+    const integrations = await listCalendarIntegrations(context.sql, auth.user.id, {
+      organizationId: auth.user.currentOrganization?.id ?? null,
+    });
     return json(200, { integrations: toPublicIntegrations(integrations) });
   } catch (error) {
     logError('calendar_integrations_list_failed', error, getRequestMeta(context.request, { userId: auth.user.id }));
@@ -192,6 +194,7 @@ export async function handleCalendarDisconnect(context: HandlerContext): Promise
     await disconnectCalendarIntegration({
       sql: context.sql,
       userId: auth.user.id,
+      organizationId: auth.user.currentOrganization?.id ?? null,
       provider,
     });
     logInfo('calendar_disconnected', getRequestMeta(context.request, { userId: auth.user.id, provider }));
@@ -218,10 +221,13 @@ export async function handleCalendarIntegrationSettings(context: HandlerContext)
     await updateCalendarIntegrationSyncEnabled({
       sql: context.sql,
       userId: auth.user.id,
+      organizationId: auth.user.currentOrganization?.id ?? null,
       provider,
       syncEnabled: parsed.data.syncEnabled,
     });
-    const integrations = await listCalendarIntegrations(context.sql, auth.user.id);
+    const integrations = await listCalendarIntegrations(context.sql, auth.user.id, {
+      organizationId: auth.user.currentOrganization?.id ?? null,
+    });
     return json(200, { integrations: toPublicIntegrations(integrations) });
   } catch (error) {
     logError('calendar_settings_update_failed', error, getRequestMeta(context.request, { userId: auth.user.id, provider }));
@@ -242,9 +248,12 @@ export async function handleCalendarSyncAll(context: HandlerContext): Promise<Ha
     const result = await syncAllCalendarReminders({
       sql: context.sql,
       userId: auth.user.id,
+      organizationId: auth.user.currentOrganization?.id ?? null,
       provider,
     });
-    const integrations = await listCalendarIntegrations(context.sql, auth.user.id);
+    const integrations = await listCalendarIntegrations(context.sql, auth.user.id, {
+      organizationId: auth.user.currentOrganization?.id ?? null,
+    });
 
     logInfo('calendar_sync_all_completed', getRequestMeta(context.request, {
       userId: auth.user.id,
@@ -280,6 +289,7 @@ export async function handleCalendarTaskSync(context: HandlerContext): Promise<H
     const result = await syncTaskToExternalCalendar({
       sql: context.sql,
       userId: auth.user.id,
+      organizationId: auth.user.currentOrganization?.id ?? null,
       taskId,
       provider: parsed.data.provider,
       force: true,

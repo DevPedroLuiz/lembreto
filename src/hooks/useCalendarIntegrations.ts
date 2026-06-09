@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
+import { apiDelete, apiGet, apiPost, apiPut, resolveApiUrl } from '../api/client';
 import type {
   CalendarIntegrationProvider,
   CalendarIntegrationStatus,
@@ -50,7 +50,7 @@ export function useCalendarIntegrations(token: string | null) {
 
   const connectCalendar = useCallback((provider: CalendarIntegrationProvider, requestToken = token) => {
     if (!requestToken) throw new Error('Não autenticado');
-    window.location.assign(`/api/calendar/${provider}/connect`);
+    window.location.assign(resolveApiUrl(`/api/calendar/${provider}/connect`));
   }, [token]);
 
   const updateCalendarSync = useCallback(async (

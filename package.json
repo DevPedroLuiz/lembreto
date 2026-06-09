@@ -13,6 +13,11 @@
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
+    "mobile:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:run": "npm run mobile:sync && cap run android",
+    "android:build": "npm run mobile:sync && cap build android",
+    "android:release": "npm run mobile:sync && cd android && gradlew assembleRelease bundleRelease",
     "scheduler:notifications": "node scheduler/notification-scheduler.mjs",
     "scheduler:check": "node --check scheduler/notification-scheduler.mjs",
     "setup:test-db": "tsx scripts/setup-test-db.ts",
@@ -21,6 +26,9 @@
     "cleanup:db": "tsx --env-file=.env.local scripts/cleanup-db.ts"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
     "@google/genai": "^2.6.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vercel/analytics": "^2.0.1",
@@ -44,6 +52,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.0",
     "@playwright/test": "^1.59.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.25",

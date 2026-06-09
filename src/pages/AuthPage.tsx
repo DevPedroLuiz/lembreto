@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
+import { resolveApiUrl } from '../api/client';
 import { LS } from '../lib/storage';
 import { RecaptchaCheckbox } from '../components/RecaptchaCheckbox';
 import { BrandMark } from '../components/BrandLogo';
@@ -120,7 +121,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
     let cancelled = false;
 
-    fetch('/api/auth/config', { credentials: 'include' })
+    fetch(resolveApiUrl('/api/auth/config'), { credentials: 'include' })
       .then(async (response) => {
         if (!response.ok) throw new Error('Configuração de autenticação indisponível');
         return response.json() as Promise<AuthConfig>;

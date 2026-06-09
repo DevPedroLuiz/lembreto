@@ -23,7 +23,7 @@ import { addDays, addHours, addMinutes, format, isPast, isToday, isTomorrow, par
 import { ptBR } from 'date-fns/locale';
 import { AnimatePresence, motion } from 'motion/react';
 
-import { apiGet, apiPost, buildHeaders } from './api/client';
+import { apiGet, apiPost, buildHeaders, resolveApiUrl } from './api/client';
 import { useAuth, type AuthSession } from './hooks/useAuth';
 import { useCalendarIntegrations } from './hooks/useCalendarIntegrations';
 import { useHolidays } from './hooks/useHolidays';
@@ -31,6 +31,7 @@ import { useAlarmSound } from './hooks/useAlarmSound';
 import { useAppConfig } from './hooks/useAppConfig';
 import { useNotes } from './hooks/useNotes';
 import { useNotifications, type NotificationListQuery, type NotificationsSnapshot } from './hooks/useNotifications';
+import { useOrganization } from './hooks/useOrganization';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useTasks } from './hooks/useTasks';
 import { useToast } from './hooks/useToast';
@@ -536,6 +537,21 @@ export default function App() {
     updateNotificationsEnabled,
     updateNotificationPreferences,
   } = useNotifications(isResetPasswordRoute ? null : auth.token);
+  const {
+    workspace: organizationWorkspace,
+    loading: isLoadingOrganizationWorkspace,
+    error: organizationWorkspaceError,
+    refresh: refreshOrganizationWorkspace,
+    updateWorkspace: updateOrganizationWorkspace,
+    switchWorkspace: switchOrganizationWorkspace,
+    createInvite: createOrganizationInvite,
+    acceptInvite: acceptOrganizationInvite,
+    updateMemberRole: updateOrganizationMemberRole,
+    removeMember: removeOrganizationMember,
+    revokeInvite: revokeOrganizationInvite,
+    createBillingCheckout,
+    createBillingPortal,
+  } = useOrganization(isResetPasswordRoute ? null : auth.token);
   const {
     toastMsg,
     setToastMsg,
@@ -1659,7 +1675,7 @@ export default function App() {
       throw new Error('Não autenticado');
     }
 
-    const response = await fetch('/api/tasks/calendar.ics', {
+    const response = await fetch(resolveApiUrl('/api/tasks/calendar.ics'), {
       headers: buildHeaders(auth.token),
     });
 
@@ -4975,6 +4991,19 @@ export default function App() {
             onSuggestHolidayLocation={requestHolidayLocationSuggestion}
             onApplyHolidayLocationSuggestion={applyHolidayLocationSuggestion}
             onClearHolidayLocationSuggestion={() => setHolidayLocationSuggestion(null)}
+            organizationWorkspace={organizationWorkspace}
+            isLoadingOrganizationWorkspace={isLoadingOrganizationWorkspace}
+            organizationWorkspaceError={organizationWorkspaceError}
+            onRefreshOrganizationWorkspace={refreshOrganizationWorkspace}
+            onUpdateOrganizationWorkspace={updateOrganizationWorkspace}
+            onSwitchOrganizationWorkspace={switchOrganizationWorkspace}
+            onCreateOrganizationInvite={createOrganizationInvite}
+            onAcceptOrganizationInvite={acceptOrganizationInvite}
+            onUpdateOrganizationMemberRole={updateOrganizationMemberRole}
+            onRemoveOrganizationMember={removeOrganizationMember}
+            onRevokeOrganizationInvite={revokeOrganizationInvite}
+            onCreateBillingCheckout={createBillingCheckout}
+            onCreateBillingPortal={createBillingPortal}
           />
         )}
 

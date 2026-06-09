@@ -241,6 +241,36 @@ export const updateNotificationSettingsSchema = z.object({
   'Envie enabled ou preferences para atualizar',
 );
 
+export const updateOrganizationSchema = z.object({
+  name: z.string().trim().min(2, 'Nome do workspace muito curto').max(80, 'Nome do workspace muito longo'),
+}).strict();
+
+export const switchOrganizationSchema = z.object({
+  organizationId: z.string().uuid('Workspace invalido'),
+}).strict();
+
+export const createOrganizationInviteSchema = z.object({
+  email: emailSchema,
+  role: z.enum(['admin', 'member', 'viewer']).default('member'),
+}).strict();
+
+export const updateOrganizationMemberSchema = z.object({
+  memberId: z.string().uuid('Membro invalido'),
+  role: z.enum(['admin', 'member', 'viewer']),
+}).strict();
+
+export const removeOrganizationMemberSchema = z.object({
+  memberId: z.string().uuid('Membro invalido'),
+}).strict();
+
+export const revokeOrganizationInviteSchema = z.object({
+  invitationId: z.string().uuid('Convite invalido'),
+}).strict();
+
+export const acceptOrganizationInviteSchema = z.object({
+  token: z.string().trim().min(32, 'Convite invalido').max(256, 'Convite invalido'),
+}).strict();
+
 export const pushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url('Endpoint de push inválido').max(4096, 'Endpoint de push muito longo'),
   expirationTime: z.number().int().nullable().optional(),

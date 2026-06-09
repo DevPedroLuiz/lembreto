@@ -9,7 +9,7 @@ import {
   handleCalendarSyncAll,
   handleCalendarTaskSync,
 } from '../lib/handlers/calendar.js';
-import { buildHandlerRequest, sendHandlerResult } from '../lib/handlers/core.js';
+import { buildHandlerRequest, handleCorsPreflight, sendHandlerResult } from '../lib/handlers/core.js';
 
 function resolveAction(req: VercelRequest): string | null {
   const value = req.query.action;
@@ -20,6 +20,8 @@ function resolveAction(req: VercelRequest): string | null {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const request = buildHandlerRequest(req);
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return sendHandlerResult(res, preflight, request);
   const action = resolveAction(req);
 
   let result;
@@ -40,5 +42,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     result = await handleCalendarIntegrations({ sql, request });
   }
 
-  return sendHandlerResult(res, result);
+  return sendHandlerResult(res, result, request);
 }

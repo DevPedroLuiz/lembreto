@@ -13,6 +13,7 @@ import { isTrustedRequestOrigin } from '../csrf.js';
 import { resolveHolidayLocation } from '../holidays.js';
 import { extractBearerToken, signToken, verifyToken } from '../jwt.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import { ensurePersonalOrganization, type CurrentOrganization } from '../organizations.js';
 import {
   createEmailVerificationToken,
   hashEmailVerificationToken,
@@ -72,6 +73,7 @@ interface UserRow {
   stateCode: string | null;
   cityName: string | null;
   holidayRegionCode: string | null;
+  currentOrganization?: CurrentOrganization;
 }
 
 interface LoginUserRow extends UserRow {
@@ -265,6 +267,16 @@ async function sendVerificationForUser(
   await sendVerificationEmail(user.email, user.name, buildVerificationLink(context, rawToken));
 }
 
+async function attachCurrentOrganization(
+  sql: HandlerContext['sql'],
+  user: UserRow,
+): Promise<UserRow> {
+  return {
+    ...user,
+    currentOrganization: await ensurePersonalOrganization(sql, user),
+  };
+}
+
 function redirectToAuthError(context: HandlerContext, message: string, clearState = true): HandlerResult {
   const headers: Record<string, string | string[]> = {
     Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent(message)}`,
@@ -358,7 +370,7 @@ async function findOrCreateGoogleUser(
         holiday_region_code AS "holidayRegionCode"
     `;
 
-    return updated[0] as unknown as UserRow;
+    return attachCurrentOrganization(sql, updated[0] as unknown as UserRow);
   }
 
   const existingByEmail = await sql`
@@ -394,7 +406,7 @@ async function findOrCreateGoogleUser(
         holiday_region_code AS "holidayRegionCode"
     `;
 
-    return linked[0] as unknown as UserRow;
+    return attachCurrentOrganization(sql, linked[0] as unknown as UserRow);
   }
 
   const generatedPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
@@ -413,7 +425,7 @@ async function findOrCreateGoogleUser(
       holiday_region_code AS "holidayRegionCode"
   `;
 
-  return rows[0] as unknown as UserRow;
+  return attachCurrentOrganization(sql, rows[0] as unknown as UserRow);
 }
 
 export async function handleAuthGoogleStart(context: HandlerContext): Promise<HandlerResult> {
@@ -550,7 +562,7 @@ export async function handleAuthRegister(context: HandlerContext): Promise<Handl
         holiday_region_code AS "holidayRegionCode"
     `;
 
-    const user = rows[0] as unknown as UserRow;
+    const user = await attachCurrentOrganization(sql, rows[0] as unknown as UserRow);
     await clearRateLimit(ip, 'register');
 
     const { token } = await createTrackedSession(context, user);
@@ -626,7 +638,8 @@ export async function handleAuthLogin(context: HandlerContext): Promise<HandlerR
 
     await clearRateLimit(ip, 'login');
 
-    const { password_hash: _passwordHash, ...safeUser } = user;
+    const { password_hash: _passwordHash, ...rawSafeUser } = user;
+    const safeUser = await attachCurrentOrganization(sql, rawSafeUser);
     const { token } = await createTrackedSession(context, safeUser);
     logInfo('auth_login_success', getRequestMeta(request, { userId: safeUser.id, ip }));
 
@@ -700,7 +713,8 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
   }
 
   if (request.method === 'GET') {
-    const token = getSessionTokenFromCookieHeader(request.headers.cookie as string | undefined);
+    const bearerToken = extractBearerToken(request.headers.authorization as string | undefined);
+    const token = bearerToken ?? getSessionTokenFromCookieHeader(request.headers.cookie as string | undefined);
     if (!token) {
       return json(401, { error: 'Sem sessão ativa' });
     }
@@ -715,11 +729,8 @@ export async function handleAuthMe(context: HandlerContext): Promise<HandlerResu
     } catch (error) {
       const authFailure = getAuthFailureResponse(error);
       if (authFailure) {
-        return json(
-          authFailure.status,
-          { error: authFailure.error },
-          { 'Set-Cookie': clearSessionCookie() },
-        );
+        const headers = bearerToken ? undefined : { 'Set-Cookie': clearSessionCookie() };
+        return json(authFailure.status, { error: authFailure.error }, headers);
       }
       logError('auth_me_get_failed', error, getRequestMeta(request));
       return json(500, { error: 'Erro interno' });
@@ -1200,7 +1211,7 @@ export async function handleAuthProfile(context: HandlerContext): Promise<Handle
         holiday_region_code AS "holidayRegionCode"
     `;
 
-    const user = rows[0] as unknown as UserRow;
+    const user = await attachCurrentOrganization(sql, rows[0] as unknown as UserRow);
 
     if (emailChanged) {
       void sendVerificationForUser(context, user).catch((error) => {

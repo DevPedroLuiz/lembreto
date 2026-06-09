@@ -3,6 +3,8 @@ import type { SafeUser } from '../auth.js';
 import type { SqlClient } from '../handlers/core.js';
 import { assertInfrastructure } from '../infrastructure.js';
 import { signCalendarOAuthState, verifyCalendarOAuthState } from '../jwt.js';
+import { getCurrentOrganizationForUser } from '../organizations.js';
+import { ensurePlanLimitAvailable } from '../plan-limits.js';
 import { buildCalendarEventInput, LEMBRETO_TIME_ZONE } from './eventPayload.js';
 import { decryptCalendarToken, encryptCalendarToken } from './crypto.js';
 import { syncTaskNotificationSchedules } from '../notification-schedules.js';
@@ -85,6 +87,7 @@ export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
         ],
         columns: [
           { table: 'calendar_integrations', column: 'user_id' },
+          { table: 'calendar_integrations', column: 'organization_id' },
           { table: 'calendar_integrations', column: 'provider' },
           { table: 'calendar_integrations', column: 'access_token_encrypted' },
           { table: 'calendar_integrations', column: 'refresh_token_encrypted' },
@@ -100,7 +103,7 @@ export async function ensureCalendarIntegrationSchema(sql: SqlClient) {
           { table: 'tasks', column: 'deleted_at' },
         ],
         indexes: [
-          { name: 'idx_calendar_integrations_user_provider' },
+          { name: 'idx_calendar_integrations_org_user_provider' },
           { name: 'idx_tasks_external_calendar' },
           { name: 'idx_tasks_user_deleted_status' },
         ],
@@ -125,6 +128,7 @@ function normalizeIntegration(row: Record<string, unknown>): CalendarIntegration
   return {
     id: String(row.id),
     userId: String(row.userId),
+    organizationId: typeof row.organizationId === 'string' ? row.organizationId : null,
     provider: String(row.provider) as CalendarProvider,
     accessTokenEncrypted: String(row.accessTokenEncrypted),
     refreshTokenEncrypted: String(row.refreshTokenEncrypted),
@@ -155,6 +159,7 @@ export function toPublicIntegrations(rows: CalendarIntegration[]): PublicCalenda
 
 type CalendarInfrastructureOptions = {
   ensureInfrastructure?: boolean;
+  organizationId?: string | null;
 };
 
 export async function listCalendarIntegrations(
@@ -169,6 +174,7 @@ export async function listCalendarIntegrations(
     SELECT
       id,
       user_id AS "userId",
+      organization_id AS "organizationId",
       provider,
       access_token_encrypted AS "accessTokenEncrypted",
       refresh_token_encrypted AS "refreshTokenEncrypted",
@@ -180,6 +186,7 @@ export async function listCalendarIntegrations(
       updated_at AS "updatedAt"
     FROM calendar_integrations
     WHERE user_id = ${userId}
+      AND (${options.organizationId ?? null}::uuid IS NULL OR organization_id = ${options.organizationId ?? null})
     ORDER BY provider ASC
   `;
 
@@ -199,6 +206,7 @@ export async function getCalendarIntegration(
 export async function upsertCalendarIntegration(input: {
   sql: SqlClient;
   userId: string;
+  organizationId: string | null;
   provider: CalendarProvider;
   tokenSet: CalendarTokenSet;
   calendarId?: string;
@@ -207,6 +215,7 @@ export async function upsertCalendarIntegration(input: {
   await input.sql`
     INSERT INTO calendar_integrations (
       user_id,
+      organization_id,
       provider,
       access_token_encrypted,
       refresh_token_encrypted,
@@ -218,6 +227,7 @@ export async function upsertCalendarIntegration(input: {
     )
     VALUES (
       ${input.userId},
+      ${input.organizationId},
       ${input.provider},
       ${encryptCalendarToken(input.tokenSet.accessToken)},
       ${encryptCalendarToken(input.tokenSet.refreshToken)},
@@ -227,9 +237,10 @@ export async function upsertCalendarIntegration(input: {
       ${null},
       NOW()
     )
-    ON CONFLICT (user_id, provider)
+    ON CONFLICT (organization_id, user_id, provider) WHERE organization_id IS NOT NULL
     DO UPDATE SET
       access_token_encrypted = EXCLUDED.access_token_encrypted,
+      organization_id = EXCLUDED.organization_id,
       refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
       expires_at = EXCLUDED.expires_at,
       calendar_id = EXCLUDED.calendar_id,
@@ -242,6 +253,7 @@ export async function upsertCalendarIntegration(input: {
 export async function updateCalendarIntegrationSyncEnabled(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
   syncEnabled: boolean;
 }) {
@@ -250,18 +262,21 @@ export async function updateCalendarIntegrationSyncEnabled(input: {
     UPDATE calendar_integrations
     SET sync_enabled = ${input.syncEnabled}, updated_at = NOW()
     WHERE user_id = ${input.userId} AND provider = ${input.provider}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
   `;
 }
 
 export async function disconnectCalendarIntegration(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
 }) {
   await ensureCalendarIntegrationSchema(input.sql);
   await input.sql`
     DELETE FROM calendar_integrations
     WHERE user_id = ${input.userId} AND provider = ${input.provider}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
   `;
   await input.sql`
     UPDATE tasks
@@ -272,6 +287,7 @@ export async function disconnectCalendarIntegration(input: {
       external_calendar_last_error = NULL,
       external_calendar_synced_at = NULL
     WHERE user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND external_calendar_provider = ${input.provider}
   `;
 }
@@ -283,6 +299,7 @@ export function buildCalendarAuthorizationUrl(input: {
 }): string {
   const state = signCalendarOAuthState({
     sub: input.user.id,
+    organizationId: input.user.currentOrganization?.id,
     provider: input.provider,
     nonce: crypto.randomBytes(16).toString('hex'),
   });
@@ -303,9 +320,49 @@ export async function connectCalendarFromOAuthCallback(input: {
   const state = verifyCalendarOAuthState(input.state);
   const client = PROVIDER_CLIENTS[state.provider];
   const tokenSet = await client.exchangeCode(input.code, input.redirectUri);
+  const organization = state.organizationId
+    ? { id: state.organizationId }
+    : await getCurrentOrganizationForUser(input.sql, state.sub);
+  if (!organization?.id) throw new Error('Workspace nao encontrado para calendario.');
+
+  const membership = await input.sql`
+    SELECT id
+    FROM organization_members
+    WHERE organization_id = ${organization.id}
+      AND user_id = ${state.sub}
+      AND status = 'active'
+    LIMIT 1
+  `;
+  if (membership.length === 0) throw new Error('Usuario sem acesso ao workspace do calendario.');
+
+  const existing = await input.sql`
+    SELECT id
+    FROM calendar_integrations
+    WHERE organization_id = ${organization.id}
+      AND user_id = ${state.sub}
+      AND provider = ${state.provider}
+    LIMIT 1
+  `;
+  if (existing.length === 0) {
+    const limit = await ensurePlanLimitAvailable(input.sql, {
+      organizationId: organization.id,
+      limitKey: 'calendar_integrations',
+      currentUsageQuery: async (clientSql) => {
+        const rows = await clientSql`
+          SELECT COUNT(*) AS count
+          FROM calendar_integrations
+          WHERE organization_id = ${organization.id}
+        `;
+        return Number(rows[0]?.count ?? 0);
+      },
+    });
+    if (!limit.allowed) throw new Error('Limite de integracoes de calendario atingido.');
+  }
+
   await upsertCalendarIntegration({
     sql: input.sql,
     userId: state.sub,
+    organizationId: organization.id,
     provider: state.provider,
     tokenSet,
   });
@@ -393,6 +450,7 @@ export async function getTaskForCalendarSync(
     SELECT
       id,
       user_id AS "userId",
+      organization_id AS "organizationId",
       title,
       description,
       due_date AS "dueDate",
@@ -409,6 +467,7 @@ export async function getTaskForCalendarSync(
     FROM tasks
     WHERE id = ${taskId}
       AND user_id = ${userId}
+      AND (${options.organizationId ?? null}::uuid IS NULL OR organization_id = ${options.organizationId ?? null})
   `;
 
   const row = rows[0];
@@ -417,6 +476,7 @@ export async function getTaskForCalendarSync(
   return {
     id: String(row.id),
     userId: String(row.userId),
+    organizationId: typeof row.organizationId === 'string' ? row.organizationId : null,
     title: String(row.title),
     description: String(row.description ?? ''),
     dueDate: row.dueDate ? new Date(String(row.dueDate)).toISOString() : null,
@@ -436,6 +496,7 @@ export async function getTaskForCalendarSync(
 export async function syncTaskToExternalCalendar(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   taskId: string;
   provider?: CalendarProvider;
   force?: boolean;
@@ -443,6 +504,7 @@ export async function syncTaskToExternalCalendar(input: {
 }): Promise<{ ok: boolean; provider: CalendarProvider | null; error?: string }> {
   const task = await getTaskForCalendarSync(input.sql, input.userId, input.taskId, {
     ensureInfrastructure: input.ensureInfrastructure,
+    organizationId: input.organizationId ?? null,
   });
   if (!task) return { ok: false, provider: null, error: 'Lembrete não encontrado' };
 
@@ -451,6 +513,7 @@ export async function syncTaskToExternalCalendar(input: {
     await removeTaskFromExternalCalendar({
       sql: input.sql,
       userId: input.userId,
+      organizationId: input.organizationId ?? task.organizationId,
       task,
       clearLocalState: true,
       ensureInfrastructure: input.ensureInfrastructure,
@@ -460,6 +523,7 @@ export async function syncTaskToExternalCalendar(input: {
 
   const integrations = await listCalendarIntegrations(input.sql, input.userId, {
     ensureInfrastructure: input.ensureInfrastructure,
+    organizationId: input.organizationId ?? task.organizationId,
   });
   const integration = input.provider
     ? integrations.find((item) => item.provider === input.provider)
@@ -518,12 +582,13 @@ export async function syncTaskToExternalCalendar(input: {
   }
 }
 
-async function listSyncableTaskIds(sql: SqlClient, userId: string): Promise<string[]> {
+async function listSyncableTaskIds(sql: SqlClient, userId: string, organizationId?: string | null): Promise<string[]> {
   await ensureCalendarIntegrationSchema(sql);
   const rows = await sql`
     SELECT id
     FROM tasks
     WHERE user_id = ${userId}
+      AND (${organizationId ?? null}::uuid IS NULL OR organization_id = ${organizationId ?? null})
       AND due_date IS NOT NULL
       AND deleted_at IS NULL
       AND status <> 'cancelled'
@@ -536,6 +601,7 @@ async function listSyncableTaskIds(sql: SqlClient, userId: string): Promise<stri
 async function cleanupDuplicateLocalTasks(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
 }): Promise<{ removed: number; errors: string[] }> {
   await ensureCalendarIntegrationSchema(input.sql);
@@ -550,6 +616,7 @@ async function cleanupDuplicateLocalTasks(input: {
       created_at AS "createdAt"
     FROM tasks
     WHERE user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND due_date IS NOT NULL
       AND deleted_at IS NULL
       AND status <> 'cancelled'
@@ -602,11 +669,14 @@ async function cleanupDuplicateLocalTasks(input: {
     const duplicates = sorted.slice(1);
 
     for (const duplicate of duplicates) {
-      const task = await getTaskForCalendarSync(input.sql, input.userId, duplicate.id);
+      const task = await getTaskForCalendarSync(input.sql, input.userId, duplicate.id, {
+        organizationId: input.organizationId ?? null,
+      });
       if (task?.externalCalendarProvider && task.externalCalendarEventId) {
         const removedExternal = await removeTaskFromExternalCalendar({
           sql: input.sql,
           userId: input.userId,
+          organizationId: input.organizationId ?? task.organizationId,
           task,
           clearLocalState: false,
         });
@@ -624,6 +694,7 @@ async function cleanupDuplicateLocalTasks(input: {
           deleted_at = COALESCE(deleted_at, NOW())
         WHERE id = ${duplicate.id}
           AND user_id = ${input.userId}
+          AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
           AND id <> ${keeper.id}
       `;
       removed += 1;
@@ -636,6 +707,7 @@ async function cleanupDuplicateLocalTasks(input: {
 async function externalEventAlreadyImported(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
   eventId: string;
 }): Promise<boolean> {
@@ -643,6 +715,7 @@ async function externalEventAlreadyImported(input: {
     SELECT 1
     FROM tasks
     WHERE user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND external_calendar_provider = ${input.provider}
       AND external_calendar_event_id = ${input.eventId}
     LIMIT 1
@@ -654,6 +727,7 @@ async function externalEventAlreadyImported(input: {
 async function findMatchingTaskForExternalEvent(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
   event: ExternalCalendarEvent;
 }): Promise<{ id: string; externalCalendarEventId: string | null } | null> {
@@ -670,6 +744,7 @@ async function findMatchingTaskForExternalEvent(input: {
       created_at AS "createdAt"
     FROM tasks
     WHERE user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND due_date IS NOT NULL
       AND deleted_at IS NULL
       AND status <> 'cancelled'
@@ -703,6 +778,7 @@ async function findMatchingTaskForExternalEvent(input: {
 async function linkExternalEventToExistingTask(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
   taskId: string;
   eventId: string;
@@ -717,6 +793,7 @@ async function linkExternalEventToExistingTask(input: {
       external_calendar_synced_at = NOW()
     WHERE id = ${input.taskId}
       AND user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND deleted_at IS NULL
   `;
 }
@@ -746,7 +823,7 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, max
   const startedAt = Date.now();
   await ensureCalendarIntegrationSchema(sql);
   const rows = await sql`
-    SELECT id, user_id AS "userId"
+    SELECT id, user_id AS "userId", organization_id AS "organizationId"
     FROM tasks
     WHERE external_calendar_sync_status = 'pending'
       AND (
@@ -773,6 +850,7 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, max
       syncTaskToExternalCalendar({
         sql,
         userId: String(row.userId),
+        organizationId: typeof row.organizationId === 'string' ? row.organizationId : null,
         taskId: String(row.id),
       }),
       Math.min(remainingMs, CALENDAR_SYNC_JOB_TIMEOUT_MS),
@@ -804,12 +882,14 @@ export async function processPendingCalendarSyncs(sql: SqlClient, limit = 5, max
 async function importExternalCalendarEvent(input: {
   sql: SqlClient;
   userId: string;
+  organizationId: string | null;
   provider: CalendarProvider;
   event: ExternalCalendarEvent;
 }): Promise<'created' | 'linked' | 'skipped'> {
   if (await externalEventAlreadyImported({
     sql: input.sql,
     userId: input.userId,
+    organizationId: input.organizationId,
     provider: input.provider,
     eventId: input.event.id,
   })) {
@@ -821,6 +901,7 @@ async function importExternalCalendarEvent(input: {
     await linkExternalEventToExistingTask({
       sql: input.sql,
       userId: input.userId,
+      organizationId: input.organizationId,
       provider: input.provider,
       taskId: matchingTask.id,
       eventId: input.event.id,
@@ -831,6 +912,7 @@ async function importExternalCalendarEvent(input: {
   const inserted = await input.sql`
     INSERT INTO tasks (
       user_id,
+      organization_id,
       title,
       description,
       due_date,
@@ -847,6 +929,7 @@ async function importExternalCalendarEvent(input: {
     )
     VALUES (
       ${input.userId},
+      ${input.organizationId},
       ${input.event.title},
       ${input.event.description},
       ${input.event.dueDate},
@@ -873,6 +956,7 @@ async function importExternalCalendarEvent(input: {
 export async function syncAllCalendarReminders(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   provider: CalendarProvider;
 }): Promise<{
   provider: CalendarProvider;
@@ -883,7 +967,9 @@ export async function syncAllCalendarReminders(input: {
   failed: number;
   errors: string[];
 }> {
-  const integration = await getCalendarIntegration(input.sql, input.userId, input.provider);
+  const integration = await getCalendarIntegration(input.sql, input.userId, input.provider, {
+    organizationId: input.organizationId ?? null,
+  });
   if (!integration) {
     return {
       provider: input.provider,
@@ -907,6 +993,7 @@ export async function syncAllCalendarReminders(input: {
   const duplicateCleanup = await cleanupDuplicateLocalTasks({
     sql: input.sql,
     userId: input.userId,
+    organizationId: input.organizationId ?? integration.organizationId,
     provider: input.provider,
   });
   deduplicated += duplicateCleanup.removed;
@@ -915,12 +1002,13 @@ export async function syncAllCalendarReminders(input: {
     errors.push(...duplicateCleanup.errors);
   }
 
-  const taskIds = await listSyncableTaskIds(input.sql, input.userId);
+  const taskIds = await listSyncableTaskIds(input.sql, input.userId, input.organizationId ?? integration.organizationId);
   for (let index = 0; index < taskIds.length; index += SYNC_ALL_PUSH_CONCURRENCY) {
     const batch = taskIds.slice(index, index + SYNC_ALL_PUSH_CONCURRENCY);
     const results = await Promise.all(batch.map((taskId) => syncTaskToExternalCalendar({
       sql: input.sql,
       userId: input.userId,
+      organizationId: input.organizationId ?? integration.organizationId,
       taskId,
       provider: input.provider,
       force: true,
@@ -955,6 +1043,7 @@ export async function syncAllCalendarReminders(input: {
       const importResult = await importExternalCalendarEvent({
         sql: input.sql,
         userId: input.userId,
+        organizationId: input.organizationId ?? integration.organizationId,
         provider: input.provider,
         event,
       });
@@ -985,6 +1074,7 @@ export async function syncAllCalendarReminders(input: {
 export async function removeTaskFromExternalCalendar(input: {
   sql: SqlClient;
   userId: string;
+  organizationId?: string | null;
   task?: CalendarTaskForSync | null;
   taskId?: string;
   clearLocalState?: boolean;
@@ -994,6 +1084,7 @@ export async function removeTaskFromExternalCalendar(input: {
     input.taskId
       ? await getTaskForCalendarSync(input.sql, input.userId, input.taskId, {
           ensureInfrastructure: input.ensureInfrastructure,
+          organizationId: input.organizationId ?? null,
         })
       : null
   );
@@ -1003,6 +1094,7 @@ export async function removeTaskFromExternalCalendar(input: {
 
   const integration = await getCalendarIntegration(input.sql, input.userId, task.externalCalendarProvider, {
     ensureInfrastructure: input.ensureInfrastructure,
+    organizationId: input.organizationId ?? task.organizationId,
   });
   if (!integration) {
     return { ok: true, provider: task.externalCalendarProvider };

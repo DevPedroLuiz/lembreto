@@ -16,6 +16,8 @@ import {
 } from '../holidays.js';
 import { assertInfrastructure } from '../infrastructure.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import { requireCurrentOrganization } from '../organizations.js';
+import { ensurePlanLimitAvailable } from '../plan-limits.js';
 import {
   ensureNotificationSchedulingInfrastructure,
 } from '../notification-schedules.js';
@@ -95,6 +97,7 @@ async function ensureTaskInfrastructure(sql: HandlerContext['sql']) {
     await assertInfrastructure(sql, 'task list indexes', {
       columns: [
         { table: 'tasks', column: 'client_mutation_id' },
+        { table: 'tasks', column: 'organization_id' },
       ],
       indexes: [
         { name: 'idx_tasks_user_deleted_status_created' },
@@ -486,6 +489,8 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
   const { request, sql } = context;
 
   await ensureTaskInfrastructure(sql);
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (request.method === 'GET') {
     try {
@@ -509,7 +514,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       const countRows = await sql`
         SELECT COUNT(*) AS total
         FROM tasks
-        WHERE user_id = ${user.id}
+        WHERE organization_id = ${organizationId}
           AND deleted_at IS NULL
           AND (${statusFilter === 'cancelled'} OR status <> 'cancelled')
           AND (${statusFilter}::text IS NULL OR (
@@ -543,6 +548,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         SELECT
           id,
           user_id     AS "userId",
+          organization_id AS "organizationId",
           client_mutation_id AS "clientMutationId",
           title,
           description,
@@ -574,7 +580,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
           external_calendar_last_error AS "externalCalendarLastError",
           external_calendar_synced_at AS "externalCalendarSyncedAt"
         FROM tasks
-        WHERE user_id = ${user.id}
+        WHERE organization_id = ${organizationId}
           AND deleted_at IS NULL
           AND (${statusFilter === 'cancelled'} OR status <> 'cancelled')
           AND (${statusFilter}::text IS NULL OR (
@@ -702,10 +708,30 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
       status,
     }));
     try {
+      const taskLimit = await ensurePlanLimitAvailable(sql, {
+        organizationId,
+        limitKey: 'tasks',
+        currentUsageQuery: async (client) => {
+          const rows = await client`
+            SELECT COUNT(*) AS count
+            FROM tasks
+            WHERE organization_id = ${organizationId}
+              AND deleted_at IS NULL
+          `;
+          return Number(rows[0]?.count ?? 0);
+        },
+      });
+      if (!taskLimit.allowed) {
+        return json(403, {
+          error: `Limite de tarefas do plano atingido (${taskLimit.usage}/${taskLimit.limit}).`,
+        });
+      }
+
       const dbStartedAt = Date.now();
       const rows = await sql`
         INSERT INTO tasks (
           user_id,
+          organization_id,
           client_mutation_id,
           title,
           description,
@@ -728,6 +754,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         )
         VALUES (
           ${user.id},
+          ${organizationId},
           ${clientMutationId ?? null},
           ${title},
           ${description},
@@ -753,6 +780,7 @@ export async function handleTasksCollection(context: HandlerContext): Promise<Ha
         RETURNING
           id,
           user_id     AS "userId",
+          organization_id AS "organizationId",
           client_mutation_id AS "clientMutationId",
           title,
           description,
@@ -836,6 +864,8 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
   const id = resolveTaskId(context);
 
   await ensureTaskInfrastructure(sql);
+  const organization = await requireCurrentOrganization(sql, user);
+  const organizationId = organization.id;
 
   if (!id) {
     return json(400, { error: 'Tarefa não encontrada' });
@@ -847,6 +877,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
         SELECT
           id,
           user_id     AS "userId",
+          organization_id AS "organizationId",
           client_mutation_id AS "clientMutationId",
           title,
           description,
@@ -879,7 +910,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           external_calendar_synced_at AS "externalCalendarSyncedAt"
         FROM tasks
         WHERE id = ${id}
-          AND user_id = ${user.id}
+          AND organization_id = ${organizationId}
           AND deleted_at IS NULL
       `;
 
@@ -937,7 +968,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
           floating_interval_minutes,
           external_calendar_event_id,
           history
-        FROM tasks WHERE id = ${id} AND user_id = ${user.id}
+        FROM tasks WHERE id = ${id} AND organization_id = ${organizationId}
       `;
       if (current.length === 0) {
         return json(404, { error: 'Tarefa não encontrada' });
@@ -1052,10 +1083,11 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
             ELSE external_calendar_last_error
           END,
           history     = COALESCE(history, '[]'::jsonb) || COALESCE(${historyUpdate}::jsonb, '[]'::jsonb)
-        WHERE id = ${id} AND user_id = ${user.id}
+        WHERE id = ${id} AND organization_id = ${organizationId}
         RETURNING
           id,
           user_id     AS "userId",
+          organization_id AS "organizationId",
           client_mutation_id AS "clientMutationId",
           title,
           description,
@@ -1163,7 +1195,7 @@ export async function handleTaskById(context: HandlerContext): Promise<HandlerRe
             ELSE external_calendar_last_error
           END
         WHERE id = ${id}
-          AND user_id = ${user.id}
+          AND organization_id = ${organizationId}
         RETURNING
           id,
           external_calendar_event_id AS "externalCalendarEventId"
@@ -1259,6 +1291,8 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
 
   try {
     await ensureNotificationSchedulingInfrastructure(sql);
+    const organization = await requireCurrentOrganization(sql, user);
+    const organizationId = organization.id;
     const rows = await sql`
       SELECT
         id,
@@ -1272,7 +1306,7 @@ export async function handleTaskCalendarExport(context: HandlerContext): Promise
         status,
         created_at  AS "createdAt"
       FROM tasks
-      WHERE user_id = ${user.id}
+      WHERE organization_id = ${organizationId}
         AND due_date IS NOT NULL
         AND status = 'pending'
         AND deleted_at IS NULL

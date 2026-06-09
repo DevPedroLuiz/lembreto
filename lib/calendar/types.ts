@@ -10,6 +10,7 @@ export type { CalendarProvider, ExternalCalendarSyncStatus };
 export interface CalendarIntegration {
   id: string;
   userId: string;
+  organizationId: string | null;
   provider: CalendarProvider;
   accessTokenEncrypted: string;
   refreshTokenEncrypted: string;
@@ -33,6 +34,7 @@ export interface PublicCalendarIntegration {
 export interface CalendarTaskForSync {
   id: string;
   userId: string;
+  organizationId: string | null;
   title: string;
   description: string;
   dueDate: string | null;

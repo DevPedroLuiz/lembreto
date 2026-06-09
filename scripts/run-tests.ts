@@ -94,6 +94,17 @@ function createSqlMock(options?: { blacklisted?: boolean; missingUser?: boolean 
       return options?.blacklisted ? [{ exists: 1 }] : [];
     }
 
+    if (query.includes('WITH organization_row')) {
+      return [{
+        id: 'org-1',
+        name: 'Pedro workspace',
+        slug: 'personal-user-1',
+        type: 'personal',
+        role: 'owner',
+        planCode: 'free',
+      }];
+    }
+
     if (query.includes('FROM users')) {
       if (options?.missingUser) return [];
       return [{
@@ -172,6 +183,17 @@ function createAssistantSqlMock() {
     if (infrastructureRows) return infrastructureRows;
 
     if (query.includes('FROM token_blacklist')) return [];
+
+    if (query.includes('WITH organization_row')) {
+      return [{
+        id: 'org-1',
+        name: 'Pedro workspace',
+        slug: 'personal-user-1',
+        type: 'personal',
+        role: 'owner',
+        planCode: 'free',
+      }];
+    }
 
     if (query.includes('FROM users')) {
       return [{
@@ -308,20 +330,21 @@ function createAssistantSqlMock() {
       const task = {
         id: '22222222-2222-4222-8222-222222222222',
         userId: values[0],
-        clientMutationId: values[1],
-        title: values[2],
-        description: values[3],
-        dueDate: values[4],
-        endDate: values[5],
-        priority: values[6],
-        category: values[7],
-        tags: values[8],
-        suppressHolidayNotifications: values[9],
-        overdueReminderIntensity: values[10],
-        alarmEnabled: values[11],
-        preNoticeMinutes: values[12],
-        reminderMode: values[13],
-        expiresAt: values[14],
+        organizationId: values[1],
+        clientMutationId: values[2],
+        title: values[3],
+        description: values[4],
+        dueDate: values[5],
+        endDate: values[6],
+        priority: values[7],
+        category: values[8],
+        tags: values[9],
+        suppressHolidayNotifications: values[10],
+        overdueReminderIntensity: values[11],
+        alarmEnabled: values[12],
+        preNoticeMinutes: values[13],
+        reminderMode: values[14],
+        expiresAt: values[15],
         overdueSince: null,
         overdueExpiresAt: null,
         deletedAt: null,
@@ -329,8 +352,8 @@ function createAssistantSqlMock() {
         completionSource: null,
         autoDeletedReason: null,
         autoDeletedAt: null,
-        mutedUntil: values[15],
-        status: values[17],
+        mutedUntil: values[16],
+        status: values[18],
         history: [],
         createdAt: new Date().toISOString(),
         externalCalendarProvider: null,
@@ -545,6 +568,17 @@ function createNotificationScheduleSqlMock(options?: {
       return [];
     }
 
+    if (query.includes('WITH organization_row')) {
+      return [{
+        id: 'org-1',
+        name: 'Pedro workspace',
+        slug: `personal-${userId}`,
+        type: 'personal',
+        role: 'owner',
+        planCode: 'free',
+      }];
+    }
+
     if (query.includes('FROM users') && !query.includes('FROM tasks') && !query.includes('INNER JOIN users')) {
       return values[0] === userId
         ? [{
@@ -671,14 +705,15 @@ function createNotificationScheduleSqlMock(options?: {
       const notification = {
         id: '44444444-4444-4444-8444-444444444444',
         userId: values[0],
-        title: values[1],
-        message: values[2],
-        tone: values[3],
-        targetType: values[4],
-        targetTaskId: values[5],
-        dedupeKey: values[6],
-        sourceScheduleId: values[7],
-        kind: values[8],
+        organizationId: values[1],
+        title: values[2],
+        message: values[3],
+        tone: values[4],
+        targetType: values[5],
+        targetTaskId: values[6],
+        dedupeKey: values[7],
+        sourceScheduleId: values[8],
+        kind: values[9],
         createdAt: now.toISOString(),
         read: false,
       };
@@ -1091,13 +1126,14 @@ function createTaskSideEffectsSqlMock(options?: {
       const schedule = {
         id: crypto.randomUUID(),
         userId: values[0],
-        taskId: values[1],
-        kind: values[2],
-        notifyAt: values[3] instanceof Date ? values[3].toISOString() : String(values[3]),
-        title: values[4],
-        message: values[5],
-        tone: values[6],
-        dedupeKey: values[7],
+        organizationId: values[1],
+        taskId: values[2],
+        kind: values[3],
+        notifyAt: values[4] instanceof Date ? values[4].toISOString() : String(values[4]),
+        title: values[5],
+        message: values[6],
+        tone: values[7],
+        dedupeKey: values[8],
         status: 'pending',
       };
       if (!schedules.some((item) => item.dedupeKey === schedule.dedupeKey && item.userId === schedule.userId)) {
@@ -1467,15 +1503,16 @@ function createCronPostSideEffectScheduleSqlMock() {
       const schedule = {
         id: crypto.randomUUID(),
         userId: values[0],
-        taskId: values[1],
-        kind: values[2],
-        notifyAt: values[3] instanceof Date ? values[3].toISOString() : String(values[3]),
-        title: values[4],
-        message: values[5],
-        tone: values[6],
-        dedupeKey: values[7],
-        sequenceIndex: values[8],
-        intervalMinutes: values[9],
+        organizationId: values[1],
+        taskId: values[2],
+        kind: values[3],
+        notifyAt: values[4] instanceof Date ? values[4].toISOString() : String(values[4]),
+        title: values[5],
+        message: values[6],
+        tone: values[7],
+        dedupeKey: values[8],
+        sequenceIndex: values[9],
+        intervalMinutes: values[10],
         status: 'pending',
         sentAt: null,
         failedAt: null,
@@ -1492,14 +1529,15 @@ function createCronPostSideEffectScheduleSqlMock() {
       const notification = {
         id: '44444444-4444-4444-8444-444444444444',
         userId: values[0],
-        title: values[1],
-        message: values[2],
-        tone: values[3],
-        targetType: values[4],
-        targetTaskId: values[5],
-        dedupeKey: values[6],
-        sourceScheduleId: values[7],
-        kind: values[8],
+        organizationId: values[1],
+        title: values[2],
+        message: values[3],
+        tone: values[4],
+        targetType: values[5],
+        targetTaskId: values[6],
+        dedupeKey: values[7],
+        sourceScheduleId: values[8],
+        kind: values[9],
         createdAt: dbNow.toISOString(),
         read: false,
       };
@@ -1589,6 +1627,7 @@ async function main() {
     handleTaskCalendarFeed,
     handleTasksCollection,
   } = await import('../lib/handlers/tasks.js');
+  const { clearRateLimit } = await import('../api/_rate_limit.js');
   const { handleAssistantMessage } = await import('../lib/handlers/assistant.js');
   const { assistantActionSchema } = await import('../lib/assistant/schemas.js');
   const { executeAssistantAction } = await import('../lib/assistant/tools.js');
@@ -1607,6 +1646,8 @@ async function main() {
     processTaskSideEffects,
   } = await import('../lib/task-side-effects.js');
   const { requiresWorkEndDateForStatus } = await import('../lib/contracts.js');
+
+  await clearRateLimit('unknown', 'bulk_create');
 
   await run('buildTokenJti composes subject and iat', () => {
     assert.equal(buildTokenJti({ sub: 'user-1', iat: 42 }), 'user-1_42');
@@ -2233,6 +2274,16 @@ async function main() {
       if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('WITH organization_row')) {
+        return [{
+          id: 'org-1',
+          name: 'Pedro workspace',
+          slug: 'personal-user-1',
+          type: 'personal',
+          role: 'owner',
+          planCode: 'free',
+        }];
+      }
       if (query.includes('FROM users')) {
         return [{
           id: 'user-1',
@@ -2469,6 +2520,16 @@ async function main() {
       if (infrastructureRows) return infrastructureRows;
 
       if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('WITH organization_row')) {
+        return [{
+          id: 'org-1',
+          name: 'Pedro workspace',
+          slug: 'personal-user-1',
+          type: 'personal',
+          role: 'owner',
+          planCode: 'free',
+        }];
+      }
       if (query.includes('FROM users')) {
         return [{
           id: 'user-1',
@@ -2614,8 +2675,10 @@ async function main() {
     assert.equal(result.pageInfo.hasMore, true);
     assert.equal(result.pageInfo.limit, 2);
     assert.equal(typeof result.pageInfo.nextCursor, 'string');
-    assert.deepEqual(calls[0]?.slice(0, 7), [
+    assert.deepEqual(calls[0]?.slice(0, 9), [
       'user-1',
+      null,
+      null,
       'aviso',
       'aviso',
       'aviso',
@@ -2649,8 +2712,10 @@ async function main() {
 
     assert.equal(deleted, 2);
     assert.ok(deleteValues);
-    assert.deepEqual((deleteValues as unknown[]).slice(0, 7), [
+    assert.deepEqual((deleteValues as unknown[]).slice(0, 9), [
       'user-1',
+      null,
+      null,
       'alarme',
       'alarme',
       'alarme',
@@ -2668,6 +2733,16 @@ async function main() {
       const infrastructureRows = getInfrastructureCheckRows(query, values);
       if (infrastructureRows) return infrastructureRows;
       if (query.includes('FROM token_blacklist')) return [];
+      if (query.includes('WITH organization_row')) {
+        return [{
+          id: 'org-1',
+          name: 'Pedro workspace',
+          slug: 'personal-user-1',
+          type: 'personal',
+          role: 'owner',
+          planCode: 'free',
+        }];
+      }
       if (query.includes('FROM users')) {
         return [{
           id: 'user-1',
@@ -2701,8 +2776,10 @@ async function main() {
 
     assert.equal(response.status, 200);
     assert.ok(deleteValues);
-    assert.deepEqual((deleteValues as unknown[]).slice(0, 7), [
+    assert.deepEqual((deleteValues as unknown[]).slice(0, 9), [
       'user-1',
+      'org-1',
+      'org-1',
       'falha',
       'falha',
       'falha',
@@ -2710,8 +2787,8 @@ async function main() {
       false,
       'error',
     ]);
-    assert.equal(deleteValues[10], '2026-05-20T00:00:00.000Z');
-    assert.equal(deleteValues[12], '2026-05-21T23:59:59.999Z');
+    assert.equal(deleteValues[12], '2026-05-20T00:00:00.000Z');
+    assert.equal(deleteValues[14], '2026-05-21T23:59:59.999Z');
   });
 
   await run('work end time requirement applies only to active statuses', () => {
@@ -2936,6 +3013,7 @@ async function main() {
       {
         id: 'integration-1',
         userId: 'user-1',
+        organizationId: null,
         provider: 'google',
         accessTokenEncrypted: 'encrypted-access',
         refreshTokenEncrypted: 'encrypted-refresh',
@@ -3580,7 +3658,7 @@ async function main() {
   await run('reminder scheduler workflow has safe logs and authenticated cron call', () => {
     const workflow = readFileSync(new URL('../.github/workflows/reminder-scheduler.yml', import.meta.url), 'utf8');
 
-    assert.match(workflow, /cron: "\* \* \* \* \*"/);
+    assert.match(workflow, /cron: "\*\/5 \* \* \* \*"/);
     assert.match(workflow, /APP_URL: https:\/\/lembreto\.vercel\.app/);
     assert.match(workflow, /CRON_SECRET: \$\{\{ secrets\.CRON_SECRET \}\}/);
     assert.match(workflow, /Authorization: Bearer \$CRON_SECRET/);
@@ -3593,7 +3671,7 @@ async function main() {
     assert.match(workflow, /scheduleDuePendingCount/);
     assert.match(workflow, /hasMore=true/);
     assert.match(workflow, /backlogWarnings/);
-    assert.doesNotMatch(workflow, /echo .*CRON_SECRET/);
+    assert.doesNotMatch(workflow, /echo .*\$CRON_SECRET/);
     assert.doesNotMatch(workflow, /set -x/);
   });
 

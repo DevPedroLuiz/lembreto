@@ -27,6 +27,7 @@ export interface NotificationTarget {
 
 export interface AppNotificationRecord {
   id: string;
+  organizationId?: string | null;
   title: string;
   message: string;
   createdAt: string;
@@ -40,6 +41,7 @@ export interface AppNotificationRecord {
 
 interface NotificationRow {
   id: string;
+  organizationId?: string | null;
   title: string;
   message: string;
   createdAt: string;
@@ -88,6 +90,7 @@ export interface PushSubscriptionInput {
 
 export interface CreateNotificationInput {
   userId: string;
+  organizationId?: string | null;
   title: string;
   message: string;
   tone: NotificationTone;
@@ -105,6 +108,7 @@ export interface CreateNotificationResult {
 }
 
 export interface NotificationListFilters {
+  organizationId?: string | null;
   search?: string;
   read?: boolean | null;
   tone?: NotificationTone | null;
@@ -176,6 +180,7 @@ function buildTarget(row: NotificationRow): AppNotificationRecord['target'] | un
 export function mapNotificationRow(row: NotificationRow): AppNotificationRecord {
   return {
     id: row.id,
+    organizationId: row.organizationId ?? null,
     title: row.title,
     message: row.message,
     createdAt: row.createdAt,
@@ -668,6 +673,7 @@ export async function ensureNotificationsInfrastructure(sql: SqlClient) {
         columns: [
           { table: 'users', column: 'notifications_enabled' },
           { table: 'notifications', column: 'user_id' },
+          { table: 'notifications', column: 'organization_id' },
           { table: 'notifications', column: 'title' },
           { table: 'notifications', column: 'message' },
           { table: 'notifications', column: 'tone' },
@@ -738,6 +744,7 @@ export async function listNotificationsForUser(
   const rows = await sql`
     SELECT
       id,
+      organization_id AS "organizationId",
       title,
       message,
       created_at AS "createdAt",
@@ -750,6 +757,7 @@ export async function listNotificationsForUser(
       kind
     FROM notifications
     WHERE user_id = ${userId}
+      AND (${options.organizationId ?? null}::uuid IS NULL OR organization_id = ${options.organizationId ?? null})
       AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
       AND (${read}::boolean IS NULL OR read = ${read}::boolean)
       AND (${tone}::text IS NULL OR tone = ${tone})
@@ -878,6 +886,7 @@ export async function createNotification(
     const existing = await sql`
       SELECT
         id,
+        organization_id AS "organizationId",
         title,
         message,
         created_at AS "createdAt",
@@ -890,6 +899,7 @@ export async function createNotification(
         kind
       FROM notifications
       WHERE user_id = ${input.userId}
+        AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
         AND (
           (${lookupDedupeKey}::text IS NOT NULL AND dedupe_key = ${lookupDedupeKey})
           OR (${lookupSourceScheduleId}::uuid IS NOT NULL AND source_schedule_id = ${lookupSourceScheduleId})
@@ -913,9 +923,10 @@ export async function createNotification(
 
   try {
     inserted = await sql`
-      INSERT INTO notifications (user_id, title, message, tone, target_type, target_task_id, dedupe_key, source_schedule_id, kind)
+      INSERT INTO notifications (user_id, organization_id, title, message, tone, target_type, target_task_id, dedupe_key, source_schedule_id, kind)
       VALUES (
         ${input.userId},
+        ${input.organizationId ?? null},
         ${input.title},
         ${input.message},
         ${input.tone},
@@ -928,6 +939,7 @@ export async function createNotification(
       ON CONFLICT DO NOTHING
       RETURNING
         id,
+        organization_id AS "organizationId",
         title,
         message,
         created_at AS "createdAt",
@@ -973,6 +985,7 @@ export async function createNotification(
   const existing = await sql`
     SELECT
       id,
+      organization_id AS "organizationId",
       title,
       message,
       created_at AS "createdAt",
@@ -985,6 +998,7 @@ export async function createNotification(
       kind
     FROM notifications
     WHERE user_id = ${input.userId}
+      AND (${input.organizationId ?? null}::uuid IS NULL OR organization_id = ${input.organizationId ?? null})
       AND (
         (${lookupDedupeKey}::text IS NOT NULL AND dedupe_key = ${lookupDedupeKey})
         OR (${lookupSourceScheduleId}::uuid IS NOT NULL AND source_schedule_id = ${lookupSourceScheduleId})
@@ -1005,6 +1019,7 @@ export async function createNotification(
 export async function markNotificationReadState(
   sql: SqlClient,
   userId: string,
+  organizationId: string | null,
   notificationId: string,
   read: boolean,
 ) {
@@ -1013,9 +1028,12 @@ export async function markNotificationReadState(
   const rows = await sql`
     UPDATE notifications
     SET read = ${read}
-    WHERE id = ${notificationId} AND user_id = ${userId}
+    WHERE id = ${notificationId}
+      AND user_id = ${userId}
+      AND (${organizationId}::uuid IS NULL OR organization_id = ${organizationId})
     RETURNING
       id,
+      organization_id AS "organizationId",
       title,
       message,
       created_at AS "createdAt",
@@ -1031,13 +1049,15 @@ export async function markNotificationReadState(
   return rows.length > 0 ? mapNotificationRow(rows[0] as unknown as NotificationRow) : null;
 }
 
-export async function markAllNotificationsRead(sql: SqlClient, userId: string) {
+export async function markAllNotificationsRead(sql: SqlClient, userId: string, organizationId: string | null = null) {
   await ensureNotificationsInfrastructure(sql);
 
   const rows = await sql`
     UPDATE notifications
     SET read = TRUE
-    WHERE user_id = ${userId} AND read = FALSE
+    WHERE user_id = ${userId}
+      AND (${organizationId}::uuid IS NULL OR organization_id = ${organizationId})
+      AND read = FALSE
     RETURNING id
   `;
 
@@ -1052,6 +1072,7 @@ export async function clearNotificationsForUser(
   await ensureNotificationsInfrastructure(sql);
 
   const search = filters.search?.trim() ? filters.search.trim() : null;
+  const organizationId = filters.organizationId ?? null;
   const read = filters.read ?? null;
   const tone = filters.tone ?? null;
   const kind = filters.kind ?? null;
@@ -1065,6 +1086,7 @@ export async function clearNotificationsForUser(
         SELECT id
         FROM notifications
         WHERE user_id = ${userId}
+          AND (${organizationId}::uuid IS NULL OR organization_id = ${organizationId})
           AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
           AND (${read}::boolean IS NULL OR read = ${read}::boolean)
           AND (${tone}::text IS NULL OR tone = ${tone})
@@ -1077,6 +1099,7 @@ export async function clearNotificationsForUser(
     const rows = await client`
       DELETE FROM notifications
       WHERE user_id = ${userId}
+        AND (${organizationId}::uuid IS NULL OR organization_id = ${organizationId})
         AND (${search}::text IS NULL OR title ILIKE '%' || ${search}::text || '%' OR message ILIKE '%' || ${search}::text || '%')
         AND (${read}::boolean IS NULL OR read = ${read}::boolean)
         AND (${tone}::text IS NULL OR tone = ${tone})
