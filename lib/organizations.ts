@@ -135,6 +135,7 @@ export async function ensurePersonalOrganization(
       ) AS "planCode"
     FROM organization_row
     INNER JOIN membership_row ON membership_row.organization_id = organization_row.id
+    LEFT JOIN subscription_row ON subscription_row.organization_id = organization_row.id
   `;
 
   return mapOrganization(rows[0] as unknown as OrganizationRow);
