@@ -313,6 +313,14 @@ export async function countNotificationsForSchedule(scheduleId: string): Promise
   return Number(rows[0]?.count ?? 0);
 }
 
+export async function rescheduleNotificationScheduleForTest(scheduleId: string, notifyAt: Date): Promise<void> {
+  await sql`
+    UPDATE notification_schedules
+    SET notify_at = ${notifyAt}
+    WHERE id = ${scheduleId}
+  `;
+}
+
 export async function getNotificationScheduleById(scheduleId: string): Promise<{
   id: string;
   taskId: string;
