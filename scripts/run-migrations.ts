@@ -30,6 +30,18 @@ const shouldDisableSsl =
   databaseUrl.includes('localhost') ||
   databaseUrl.includes('127.0.0.1');
 
+function getTimeoutSetting(name: string, fallback: string) {
+  const value = process.env[name]?.trim() || fallback;
+  if (!/^\d+(ms|s|min|h)$/.test(value)) {
+    throw new Error(`${name} must use a PostgreSQL duration like 5s, 300s, 5min or 1h.`);
+  }
+
+  return value;
+}
+
+const lockTimeout = getTimeoutSetting('MIGRATION_LOCK_TIMEOUT', '10s');
+const statementTimeout = getTimeoutSetting('MIGRATION_STATEMENT_TIMEOUT', '5min');
+
 const sql = postgres(databaseUrl, {
   ssl: shouldDisableSsl ? false : 'require',
   max: 1,
@@ -58,8 +70,8 @@ try {
     console.log(`Applying migration ${version}`);
 
     await sql.begin(async (transaction) => {
-      await transaction`SET LOCAL lock_timeout = '5s'`;
-      await transaction`SET LOCAL statement_timeout = '60s'`;
+      await transaction.unsafe(`SET LOCAL lock_timeout = '${lockTimeout}'`);
+      await transaction.unsafe(`SET LOCAL statement_timeout = '${statementTimeout}'`);
       await transaction.unsafe(migrationSql);
       await transaction`
         INSERT INTO schema_migrations (version)

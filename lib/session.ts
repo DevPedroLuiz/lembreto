@@ -1,5 +1,6 @@
 const COOKIE_NAME = 'lembreto_session';
 const GOOGLE_OAUTH_STATE_COOKIE_NAME = 'lembreto_google_oauth_state';
+const GOOGLE_OAUTH_CLIENT_COOKIE_NAME = 'lembreto_google_oauth_client';
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -31,6 +32,19 @@ export function buildGoogleOAuthStateCookie(state: string, maxAgeSeconds: number
   return parts.join('; ');
 }
 
+export function buildGoogleOAuthClientCookie(client: 'web' | 'native', maxAgeSeconds: number): string {
+  const parts = [
+    `${GOOGLE_OAUTH_CLIENT_COOKIE_NAME}=${client}`,
+    `Max-Age=${maxAgeSeconds}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+  ];
+
+  if (isProduction()) parts.push('Secure');
+  return parts.join('; ');
+}
+
 export function clearSessionCookie(): string {
   return `${COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${
     isProduction() ? '; Secure' : ''
@@ -39,6 +53,12 @@ export function clearSessionCookie(): string {
 
 export function clearGoogleOAuthStateCookie(): string {
   return `${GOOGLE_OAUTH_STATE_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${
+    isProduction() ? '; Secure' : ''
+  }`;
+}
+
+export function clearGoogleOAuthClientCookie(): string {
+  return `${GOOGLE_OAUTH_CLIENT_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${
     isProduction() ? '; Secure' : ''
   }`;
 }
@@ -60,4 +80,8 @@ export function getSessionTokenFromCookieHeader(cookieHeader: string | undefined
 
 export function getGoogleOAuthStateFromCookieHeader(cookieHeader: string | undefined): string | null {
   return getCookieFromHeader(cookieHeader, GOOGLE_OAUTH_STATE_COOKIE_NAME);
+}
+
+export function getGoogleOAuthClientFromCookieHeader(cookieHeader: string | undefined): 'web' | 'native' {
+  return getCookieFromHeader(cookieHeader, GOOGLE_OAUTH_CLIENT_COOKIE_NAME) === 'native' ? 'native' : 'web';
 }

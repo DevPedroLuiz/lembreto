@@ -61,6 +61,20 @@ jobs:
           test -n "$VERCEL_ORG_ID"
           test -n "$VERCEL_PROJECT_ID"
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull production environment
+        shell: bash
+        run: npx vercel env pull .env.local --environment=production --yes --token="$VERCEL_TOKEN"
+
+      - name: Run production migrations
+        shell: bash
+        env:
+          MIGRATION_LOCK_TIMEOUT: 10s
+          MIGRATION_STATEMENT_TIMEOUT: 5min
+        run: npm run migrate
+
       - name: Deploy to Vercel
         id: deploy
         shell: bash

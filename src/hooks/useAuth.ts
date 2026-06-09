@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
 import { apiDelete, apiGet, apiPost, apiPut, resolveApiUrl } from '../api/client';
 import {
   clearMobileAuthToken,
@@ -8,6 +10,10 @@ import {
 } from '../lib/mobileSession';
 import { LS } from '../lib/storage';
 import type { User } from '../types';
+
+const MOBILE_GOOGLE_CALLBACK_PROTOCOL = 'com.lembreto.app:';
+const MOBILE_GOOGLE_CALLBACK_HOST = 'auth';
+const MOBILE_GOOGLE_CALLBACK_PATH = '/google/callback';
 
 export interface AuthSession {
   id: string;
@@ -107,6 +113,82 @@ export function useAuth() {
     }
   };
 
+  const completeNativeGoogleLogin = useCallback(async (newToken: string) => {
+    const response = await fetch(resolveApiUrl('/api/auth/me'), {
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${newToken}` },
+    });
+
+    if (!response.ok) {
+      throw new Error('Falha ao validar a sessão Google no aplicativo.');
+    }
+
+    const data = await response.json() as { user: User; token: string };
+    assertAuthResponse(data);
+    setToken(data.token);
+    setCurrentUser(data.user);
+    LS.saveUser(data.user);
+    await saveMobileAuthToken(data.token);
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeMobileRuntime()) return undefined;
+
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+
+    void CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        return;
+      }
+
+      if (
+        parsedUrl.protocol !== MOBILE_GOOGLE_CALLBACK_PROTOCOL ||
+        parsedUrl.hostname !== MOBILE_GOOGLE_CALLBACK_HOST ||
+        parsedUrl.pathname !== MOBILE_GOOGLE_CALLBACK_PATH
+      ) {
+        return;
+      }
+
+      await Browser.close().catch(() => undefined);
+
+      const authError = parsedUrl.searchParams.get('auth_error');
+      if (authError) {
+        window.location.assign(`/?auth_error=${encodeURIComponent(authError)}`);
+        return;
+      }
+
+      const googleToken = parsedUrl.searchParams.get('token');
+      if (!googleToken) {
+        window.location.assign('/?auth_error=Não foi possível concluir o login com Google.');
+        return;
+      }
+
+      try {
+        await completeNativeGoogleLogin(googleToken);
+        window.history.replaceState(null, '', '/');
+      } catch {
+        await clearMobileAuthToken();
+        window.location.assign('/?auth_error=Falha ao concluir login com Google.');
+      }
+    }).then((handle) => {
+      if (disposed) {
+        void handle.remove();
+        return;
+      }
+
+      listener = handle;
+    });
+
+    return () => {
+      disposed = true;
+      if (listener) void listener.remove();
+    };
+  }, [completeNativeGoogleLogin]);
+
   const login = async (email: string, password: string, recaptchaToken?: string) => {
     const data = await apiPost<{ user: User; token: string }>('/api/auth/login', {
       email,
@@ -175,7 +257,15 @@ export function useAuth() {
   };
 
   const loginWithGoogle = () => {
-    window.location.assign(resolveApiUrl('/api/auth/google/start'));
+    const googleStartUrl = resolveApiUrl(`/api/auth/google/start${isNativeMobileRuntime() ? '?client=native' : ''}`);
+    if (isNativeMobileRuntime()) {
+      void Browser.open({ url: googleStartUrl }).catch(() => {
+        window.location.assign(googleStartUrl);
+      });
+      return;
+    }
+
+    window.location.assign(googleStartUrl);
   };
 
   const updateProfile = async (payload: {

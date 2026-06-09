@@ -27,9 +27,12 @@ import {
 } from '../password-reset.js';
 import {
   buildSessionCookie,
+  buildGoogleOAuthClientCookie,
   buildGoogleOAuthStateCookie,
+  clearGoogleOAuthClientCookie,
   clearGoogleOAuthStateCookie,
   clearSessionCookie,
+  getGoogleOAuthClientFromCookieHeader,
   getGoogleOAuthStateFromCookieHeader,
   getSessionTokenFromCookieHeader,
 } from '../session.js';
@@ -63,6 +66,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
+const DEFAULT_MOBILE_GOOGLE_REDIRECT_URL = 'com.lembreto.app://auth/google/callback';
 
 interface UserRow {
   id: string;
@@ -164,6 +168,19 @@ function getAppBaseUrl(context: HandlerContext): string {
 
 function getGoogleRedirectUri(context: HandlerContext): string {
   return `${getAppBaseUrl(context)}/api/auth/google/callback`;
+}
+
+function getMobileGoogleRedirectUrl() {
+  return (process.env.MOBILE_GOOGLE_REDIRECT_URL ?? DEFAULT_MOBILE_GOOGLE_REDIRECT_URL).replace(/\?+$/, '');
+}
+
+function buildMobileGoogleRedirect(params: Record<string, string>) {
+  const url = new URL(getMobileGoogleRedirectUrl());
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+
+  return url.toString();
 }
 
 function buildVerificationLink(context: HandlerContext, rawToken: string): string {
@@ -277,13 +294,31 @@ async function attachCurrentOrganization(
   };
 }
 
-function redirectToAuthError(context: HandlerContext, message: string, clearState = true): HandlerResult {
+function getGoogleOAuthClient(context: HandlerContext) {
+  return getGoogleOAuthClientFromCookieHeader(context.request.headers.cookie as string | undefined);
+}
+
+function getGoogleOAuthClearCookies(): string[] {
+  return [
+    clearGoogleOAuthStateCookie(),
+    clearGoogleOAuthClientCookie(),
+  ];
+}
+
+function redirectToAuthError(
+  context: HandlerContext,
+  message: string,
+  clearState = true,
+  client = getGoogleOAuthClient(context),
+): HandlerResult {
   const headers: Record<string, string | string[]> = {
-    Location: `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent(message)}`,
+    Location: client === 'native'
+      ? buildMobileGoogleRedirect({ auth_error: message })
+      : `${getAppBaseUrl(context)}/?auth_error=${encodeURIComponent(message)}`,
   };
 
   if (clearState) {
-    headers['Set-Cookie'] = clearGoogleOAuthStateCookie();
+    headers['Set-Cookie'] = getGoogleOAuthClearCookies();
   }
 
   return empty(302, headers);
@@ -431,12 +466,13 @@ async function findOrCreateGoogleUser(
 export async function handleAuthGoogleStart(context: HandlerContext): Promise<HandlerResult> {
   const { request } = context;
   if (request.method !== 'GET') return methodNotAllowed();
+  const requestedClient = getStringQueryParam(request.query?.client) === 'native' ? 'native' : 'web';
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     logError('auth_google_not_configured', new Error('GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET missing'), getRequestMeta(request));
-    return redirectToAuthError(context, 'Login com Google ainda não configurado.');
+    return redirectToAuthError(context, 'Login com Google ainda não configurado.', true, requestedClient);
   }
 
   const state = crypto.randomBytes(32).toString('hex');
@@ -451,7 +487,10 @@ export async function handleAuthGoogleStart(context: HandlerContext): Promise<Ha
 
   return empty(302, {
     Location: authorizationUrl.toString(),
-    'Set-Cookie': buildGoogleOAuthStateCookie(state, GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS),
+    'Set-Cookie': [
+      buildGoogleOAuthStateCookie(state, GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS),
+      buildGoogleOAuthClientCookie(requestedClient, GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS),
+    ],
   });
 }
 
@@ -494,11 +533,19 @@ export async function handleAuthGoogleCallback(context: HandlerContext): Promise
     const { token } = await createTrackedSession(context, user);
 
     logInfo('auth_google_success', getRequestMeta(request, { userId: user.id }));
+    const oauthClient = getGoogleOAuthClient(context);
+    if (oauthClient === 'native') {
+      return empty(302, {
+        Location: buildMobileGoogleRedirect({ token }),
+        'Set-Cookie': getGoogleOAuthClearCookies(),
+      });
+    }
+
     return empty(302, {
       Location: `${getAppBaseUrl(context)}/`,
       'Set-Cookie': [
         buildSessionCookie(token, 7 * 24 * 60 * 60),
-        clearGoogleOAuthStateCookie(),
+        ...getGoogleOAuthClearCookies(),
       ],
     });
   } catch (error) {

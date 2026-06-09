@@ -9,7 +9,7 @@
     "start": "tsx --env-file=.env.local server.ts",
     "build": "vite build",
     "migrate": "tsx scripts/run-migrations.ts",
-    "vercel-build": "npm run migrate && vite build",
+    "vercel-build": "vite build",
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
@@ -28,6 +28,8 @@
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",
     "@capacitor/android": "^8.4.0",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/browser": "^8.0.3",
     "@capacitor/core": "^8.4.0",
     "@google/genai": "^2.6.0",
     "@tailwindcss/vite": "^4.1.14",
