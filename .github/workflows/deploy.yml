@@ -68,7 +68,19 @@ jobs:
         shell: bash
         run: npx vercel env pull .env.local --environment=production --yes --token="$VERCEL_TOKEN"
 
+      - name: Check production migration database URL
+        id: migration_db
+        shell: bash
+        run: |
+          if npx tsx -e "import { config } from 'dotenv'; import { resolveDatabaseUrl } from './lib/db.ts'; config({ path: '.env.local' }); process.exit(resolveDatabaseUrl('migration') ? 0 : 1);"; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping production migrations because no readable database URL was available after vercel env pull. Sensitive Vercel env values are still available to the deployment runtime; run migrations from a trusted environment or configure a CI-readable migration URL."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run production migrations
+        if: steps.migration_db.outputs.configured == 'true'
         shell: bash
         env:
           MIGRATION_LOCK_TIMEOUT: 10s
