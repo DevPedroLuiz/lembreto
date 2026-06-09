@@ -1,5 +1,4 @@
 import { AUTH_UNAUTHORIZED_EVENT } from '../lib/authEvents';
-import { isNativeMobileRuntime } from '../lib/mobileSession';
 
 export const buildHeaders = (token?: string): Record<string, string> => ({
   'Content-Type': 'application/json',
@@ -17,7 +16,16 @@ export class ApiError extends Error {
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15000;
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/+$/, '') ?? '';
-const API_BASE_URL = configuredApiBaseUrl || (isNativeMobileRuntime() ? 'https://lembreto.vercel.app' : '');
+
+function isNativeLocalOrigin() {
+  if (typeof window === 'undefined') return false;
+  const { protocol, hostname } = window.location;
+  return protocol === 'capacitor:' ||
+    protocol === 'ionic:' ||
+    (protocol === 'https:' && ['localhost', '127.0.0.1', '::1'].includes(hostname));
+}
+
+const API_BASE_URL = configuredApiBaseUrl || (isNativeLocalOrigin() ? 'https://lembreto.vercel.app' : '');
 
 interface ApiRequestOptions {
   timeoutMs?: number;
@@ -57,9 +65,10 @@ async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs 
   const headers = new Headers(init.headers);
   headers.set('Cache-Control', 'no-cache');
   headers.set('Pragma', 'no-cache');
+  const url = resolveApiUrl(path);
 
   try {
-    return await fetch(resolveApiUrl(path), {
+    return await fetch(url, {
       ...init,
       cache: 'no-store',
       headers,
@@ -68,6 +77,10 @@ async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs 
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new ApiError('Tempo esgotado ao falar com o servidor. Tente novamente em instantes.', 408);
+    }
+
+    if (error instanceof TypeError) {
+      throw new ApiError(`Nao foi possivel conectar a API (${url}). Verifique sua internet e tente novamente.`, 0);
     }
 
     throw error;
