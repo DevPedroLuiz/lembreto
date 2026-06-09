@@ -41,14 +41,21 @@ const runtimeDatabaseUrlEnvNames = [
   'DATABASE_URL',
   'SUPABASE_APP_DATABASE_URL',
   'POSTGRES_URL',
+  'POSTGRES_PRISMA_URL',
+  'DATABASE_URL_PRISMA',
   'NEON_DATABASE_URL',
 ] as const;
 
 const migrationDatabaseUrlEnvNames = [
   'SUPABASE_MIGRATION_DATABASE_URL',
   'DATABASE_URL',
+  'DATABASE_URL_UNPOOLED',
+  'POSTGRES_URL_NON_POOLING',
+  'POSTGRES_URL_NO_SSL',
   'SUPABASE_APP_DATABASE_URL',
   'POSTGRES_URL',
+  'POSTGRES_PRISMA_URL',
+  'DATABASE_URL_PRISMA',
   'NEON_DATABASE_URL',
 ] as const;
 
@@ -115,7 +122,7 @@ export function getDatabaseConnectionMetadata(databaseUrl = resolveDatabaseUrl()
 export function createSqlClient(databaseUrl = resolveDatabaseUrl()): SqlClient {
   if (!databaseUrl) {
     throw new Error(
-      'URL do banco nao definida. Configure DATABASE_URL ou SUPABASE_APP_DATABASE_URL nas variaveis de ambiente.'
+      'URL do banco nao definida. Configure DATABASE_URL, SUPABASE_APP_DATABASE_URL ou POSTGRES_URL nas variaveis de ambiente.'
     );
   }
 

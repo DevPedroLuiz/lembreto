@@ -15,7 +15,7 @@ if (existsSync(localEnvPath)) {
 const databaseUrl = resolveDatabaseUrl('migration');
 if (!databaseUrl) {
   throw new Error(
-    'Database URL is required to run migrations. Configure SUPABASE_MIGRATION_DATABASE_URL, DATABASE_URL or SUPABASE_APP_DATABASE_URL.'
+    'Database URL is required to run migrations. Configure SUPABASE_MIGRATION_DATABASE_URL, DATABASE_URL, POSTGRES_URL_NON_POOLING, POSTGRES_URL or SUPABASE_APP_DATABASE_URL.'
   );
 }
 
