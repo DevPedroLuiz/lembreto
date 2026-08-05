@@ -5,6 +5,7 @@ const PUSH_SERVICE_WORKER_PATH = '/push-sw.js';
 
 function isPushSupported() {
   return typeof window !== 'undefined'
+    && window.location.protocol !== 'file:'
     && 'serviceWorker' in navigator
     && 'PushManager' in window;
 }

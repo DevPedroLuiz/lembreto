@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  ShieldCheck,
+  User as UserIcon,
+} from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
 import { resolveApiUrl } from '../api/client';
 import { LS } from '../lib/storage';
@@ -38,17 +46,17 @@ function getPasswordStrength(password: string): {
       label: 'Senha forte',
       width: '100%',
       tone: 'bg-emerald-500',
-      helper: 'Boa combinação de tamanho e variedade de caracteres.',
+      helper: 'Boa combinacao de tamanho e variedade de caracteres.',
     };
   }
 
   if (score >= 3) {
     return {
       level: 'medium',
-      label: 'Senha média',
+      label: 'Senha media',
       width: '68%',
       tone: 'bg-amber-500',
-      helper: 'Já está melhor. Vale adicionar mais variedade para ficar mais segura.',
+      helper: 'Ja esta melhor. Vale adicionar mais variedade para ficar mais segura.',
     };
   }
 
@@ -57,7 +65,7 @@ function getPasswordStrength(password: string): {
     label: 'Senha fraca',
     width: '34%',
     tone: 'bg-rose-500',
-    helper: 'Use pelo menos 8 caracteres com letras maiúsculas, números e símbolos.',
+    helper: 'Use pelo menos 8 caracteres com letras maiusculas, numeros e simbolos.',
   };
 }
 
@@ -69,9 +77,9 @@ function SecurityVerificationUnavailable() {
           <ShieldCheck size={17} />
         </div>
         <div>
-          <p className="font-semibold">Verificação de segurança indisponível</p>
+          <p className="font-semibold">Verificacao de seguranca indisponivel</p>
           <p className="mt-1 leading-6">
-            Atualize a página e tente novamente. Se continuar assim, a chave pública do reCAPTCHA precisa ser configurada no ambiente.
+            Atualize a pagina e tente novamente. Se continuar assim, a chave publica do reCAPTCHA precisa ser configurada no ambiente.
           </p>
         </div>
       </div>
@@ -123,7 +131,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
     fetch(resolveApiUrl('/api/auth/config'), { credentials: 'include' })
       .then(async (response) => {
-        if (!response.ok) throw new Error('Configuração de autenticação indisponível');
+        if (!response.ok) throw new Error('Configuracao de autenticacao indisponivel');
         return response.json() as Promise<AuthConfig>;
       })
       .then((config) => {
@@ -186,15 +194,15 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
 
   const validateRecaptcha = useCallback(() => {
     if (recaptchaMissingRequired) {
-      setAuthError('A verificação de segurança não está disponível. Atualize a página e tente novamente.');
+      setAuthError('A verificacao de seguranca nao esta disponivel. Atualize a pagina e tente novamente.');
       return false;
     }
     if (!recaptchaEnabled || recaptchaToken) return true;
     if (recaptchaUnavailable) {
-      setAuthError('Não foi possível carregar o reCAPTCHA. Atualize a página e tente novamente.');
+      setAuthError('Nao foi possivel carregar o reCAPTCHA. Atualize a pagina e tente novamente.');
       return false;
     }
-    setAuthError('Confirme que você não é um robô.');
+    setAuthError('Confirme que voce nao e um robo.');
     return false;
   }, [recaptchaEnabled, recaptchaMissingRequired, recaptchaToken, recaptchaUnavailable]);
 
@@ -212,9 +220,9 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
         ? await auth.login(normalizedEmail, authPassword, recaptchaToken)
         : await auth.register(authName, normalizedEmail, authPassword, recaptchaToken);
 
-      toastNotify('Bem-vindo!', `Olá, ${user.name}!`);
+      toastNotify('Bem-vindo!', `Ola, ${user.name}!`);
     } catch (error: unknown) {
-      setAuthError(error instanceof Error ? error.message : 'Falha na comunicação com o servidor.');
+      setAuthError(error instanceof Error ? error.message : 'Falha na comunicacao com o servidor.');
       resetRecaptcha();
     } finally {
       setAuthLoading(false);
@@ -240,72 +248,68 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
     }
   };
 
-  return (
-    <div className="relative flex h-[100dvh] min-h-[100dvh] items-start justify-center overflow-y-auto overflow-x-hidden px-3 py-4 sm:items-center sm:px-4 sm:py-8">
-      <div className="absolute inset-0 bg-grid opacity-50 dark:opacity-30" />
+  const switchMode = (nextIsLogin: boolean) => {
+    setIsLogin(nextIsLogin);
+    setIsRecovering(false);
+    setRecoverSuccess(false);
+    setAuthError('');
+    resetRecaptcha();
+  };
 
-      <div className="relative my-auto grid w-full min-w-0 max-w-6xl overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/90 shadow-[0_40px_120px_-40px_rgba(15,23,42,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/78 dark:shadow-[0_40px_120px_-48px_rgba(0,0,0,0.85)] sm:rounded-[36px] lg:grid-cols-[1.1fr_0.9fr]">
-        <aside className="hidden border-r border-slate-200/80 bg-slate-50/80 p-10 dark:border-white/10 dark:bg-white/[0.04] lg:flex lg:flex-col">
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-white sm:px-6">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(37,99,235,0.12),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(20,184,166,0.12),transparent_28%),radial-gradient(circle_at_50%_90%,rgba(124,58,237,0.08),transparent_36%)]" />
+
+      <main className="relative grid w-full max-w-6xl overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_34px_90px_-52px_rgba(15,23,42,0.5)] dark:border-white/10 dark:bg-slate-900 lg:grid-cols-[0.92fr_1fr]">
+        <section className="hidden flex-col justify-between border-r border-slate-200 bg-slate-950 p-10 text-white dark:border-white/10 lg:flex">
           <div>
-            <span className="section-eyebrow">
-              <ShieldCheck size={14} />
-              Organização com clareza
-            </span>
-            <div className="mt-6 flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-950 shadow-[0_20px_44px_-28px_rgba(14,165,255,0.8)] ring-1 ring-cyan-300/20 dark:bg-black">
+            <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-white shadow-[0_18px_40px_-22px_rgba(14,165,233,0.8)]">
                 <BrandMark className="h-10 w-10" />
               </div>
               <div>
-                <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                  Lembreto
-                </h1>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Sua rotina em um só lugar.
-                </p>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Sistema</p>
+                <h1 className="text-2xl font-semibold">Lembreto</h1>
               </div>
             </div>
-          </div>
 
-          <div className="mt-12 space-y-6">
-            <div className="surface-soft p-5">
-              <h2 className="text-lg font-semibold text-slate-950 dark:text-white">
-                Planeje, acompanhe e conclua com menos atrito.
+            <div className="mt-14 max-w-md">
+              <p className="inline-flex rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-cyan-100">
+                Acesso direto
+              </p>
+              <h2 className="mt-5 text-4xl font-semibold leading-tight">
+                Entre no painel para organizar lembretes, notas e alarmes.
               </h2>
-              <p className="mt-2 text-sm leading-7 text-slate-500 dark:text-slate-400">
-                Organize lembretes por prioridade, categoria e prazo em uma interface limpa, rápida e confortável de usar.
+              <p className="mt-5 text-sm leading-7 text-slate-400">
+                Esta e a entrada do sistema. A landing agora fica isolada e nao interfere no aplicativo desktop.
               </p>
             </div>
-
-            <div className="grid gap-4">
-              {[
-                'Visão clara das prioridades do dia.',
-                'Acompanhamento de lembretes pendentes e concluídos.',
-                'Recuperação de acesso e preferências salvas no navegador.',
-              ].map((item) => (
-                <div
-                  key={item}
-                  className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white/85 px-4 py-4 dark:border-white/10 dark:bg-white/[0.04]"
-                >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
-                    <ShieldCheck size={16} />
-                  </div>
-                  <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{item}</p>
-                </div>
-              ))}
-            </div>
           </div>
-        </aside>
 
-        <section className="min-w-0 p-4 sm:p-8 lg:p-10">
-          <div className="mx-auto w-full min-w-0 max-w-md">
-            <div className="mb-5 text-center sm:mb-8 lg:text-left">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 shadow-[0_18px_36px_-22px_rgba(14,165,255,0.7)] ring-1 ring-cyan-300/20 sm:mb-4 sm:h-14 sm:w-14 sm:rounded-3xl lg:mx-0 lg:hidden">
-                <BrandMark className="h-9 w-9 sm:h-10 sm:w-10" />
+          <div className="grid gap-3">
+            {[
+              'Dashboard, agenda e lembretes no primeiro acesso.',
+              'Login, cadastro, Google e recuperacao de senha.',
+              'Sessao preparada para web, mobile e desktop.',
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-200">
+                <CheckCircle2 size={17} className="text-emerald-300" />
+                {item}
               </div>
-              <span className="section-eyebrow">
+            ))}
+          </div>
+        </section>
+
+        <section className="flex min-h-[680px] items-center justify-center p-5 sm:p-8 lg:p-10">
+          <div className="w-full max-w-md">
+            <div className="mb-8 text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 shadow-[0_18px_40px_-24px_rgba(37,99,235,0.8)] dark:bg-white">
+                <BrandMark className="h-11 w-11" />
+              </div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-bold uppercase text-slate-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300">
                 {isRecovering ? 'Acesso' : isLogin ? 'Entrar' : 'Criar conta'}
               </span>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:mt-4 sm:text-3xl">
+              <h2 className="mt-4 text-3xl font-semibold text-slate-950 dark:text-white">
                 {isRecovering
                   ? recoverSuccess
                     ? 'Verifique seu e-mail'
@@ -317,28 +321,25 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                 {isRecovering
                   ? recoverSuccess
-                    ? 'Se o endereço estiver cadastrado, você receberá um link de recuperação em instantes.'
-                    : 'Informe o e-mail da conta para iniciar a recuperação.'
+                    ? 'Se o endereco estiver cadastrado, voce recebera um link de recuperacao em instantes.'
+                    : 'Informe o e-mail da conta para iniciar a recuperacao.'
                   : isLogin
-                    ? 'Faça login para continuar seu planejamento.'
+                    ? 'Faca login para abrir seu painel.'
                     : 'Comece a organizar sua rotina em poucos minutos.'}
               </p>
             </div>
 
             {isRecovering ? (
               recoverSuccess ? (
-                <div className="surface-soft space-y-6 p-4 text-center sm:p-6">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <div className="space-y-6 rounded-[24px] border border-slate-200 bg-slate-50 p-6 text-center dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
                     <Mail size={28} />
                   </div>
-
-                  <div>
-                    <p className="text-sm leading-7 text-slate-500 dark:text-slate-400">
-                      Se <span className="font-semibold text-slate-800 dark:text-slate-200">{recoverEmail}</span> estiver cadastrado, você receberá um link em breve.
-                    </p>
-                  </div>
-
+                  <p className="text-sm leading-7 text-slate-500 dark:text-slate-400">
+                    Se <span className="font-semibold text-slate-900 dark:text-slate-200">{recoverEmail}</span> estiver cadastrado, voce recebera um link em breve.
+                  </p>
                   <button
+                    type="button"
                     onClick={() => {
                       setIsRecovering(false);
                       setRecoverSuccess(false);
@@ -353,7 +354,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 </div>
               ) : (
                 <form onSubmit={handleRecover} className="space-y-4">
-                  <div className="surface-soft space-y-4 p-4 sm:p-6">
+                  <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04] sm:p-6">
                     <div className="relative">
                       <Mail size={18} className="field-icon" />
                       <input
@@ -413,19 +414,15 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               )
             ) : (
               <form onSubmit={handleAuth} className="space-y-4">
-                <div className="surface-soft space-y-4 p-4 sm:p-6">
-                  <div className="grid grid-cols-2 rounded-2xl bg-slate-100 p-1 dark:bg-white/[0.05]">
+                <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04] sm:p-6">
+                  <div className="grid grid-cols-2 rounded-2xl bg-slate-200/70 p-1 dark:bg-white/[0.06]">
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsLogin(true);
-                        setAuthError('');
-                        resetRecaptcha();
-                      }}
+                      onClick={() => switchMode(true)}
                       className={[
                         'min-w-0 rounded-2xl px-2 py-3 text-sm font-semibold transition-colors sm:px-4',
                         isLogin
-                          ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white'
+                          ? 'bg-white text-slate-950 shadow-sm dark:bg-white dark:text-slate-950'
                           : 'text-slate-500 dark:text-slate-400',
                       ].join(' ')}
                     >
@@ -434,15 +431,11 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                     <button
                       type="button"
                       data-testid="auth-mode-toggle"
-                      onClick={() => {
-                        setIsLogin(false);
-                        setAuthError('');
-                        resetRecaptcha();
-                      }}
+                      onClick={() => switchMode(false)}
                       className={[
                         'min-w-0 rounded-2xl px-2 py-3 text-sm font-semibold transition-colors sm:px-4',
                         !isLogin
-                          ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white'
+                          ? 'bg-white text-slate-950 shadow-sm dark:bg-white dark:text-slate-950'
                           : 'text-slate-500 dark:text-slate-400',
                       ].join(' ')}
                     >
@@ -506,16 +499,16 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                   </div>
 
                   {!isLogin && authPassword.trim().length > 0 && (
-                    <div data-testid="password-strength-indicator" className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                    <div data-testid="password-strength-indicator" className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-slate-950/50">
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                        <p className="text-sm font-semibold text-slate-950 dark:text-white">
                           {passwordStrength.label}
                         </p>
-                        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          Segurança da senha
+                        <span className="text-xs font-medium text-slate-500">
+                          Seguranca da senha
                         </span>
                       </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
                         <div
                           className={`h-full rounded-full transition-all ${passwordStrength.tone}`}
                           style={{ width: passwordStrength.width }}
@@ -596,7 +589,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                           setAuthLoading(true);
                           auth.loginWithGoogle();
                         }}
-                        className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
+                        className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
                       >
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-base font-bold text-blue-600 shadow-sm">
                           G
@@ -617,14 +610,10 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 </div>
 
                 <p className="text-center text-sm text-slate-500 dark:text-slate-400">
-                  {isLogin ? 'Ainda não tem uma conta?' : 'Já possui uma conta?'}{' '}
+                  {isLogin ? 'Ainda nao tem uma conta?' : 'Ja possui uma conta?'}{' '}
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsLogin((value) => !value);
-                      setAuthError('');
-                      resetRecaptcha();
-                    }}
+                    onClick={() => switchMode(!isLogin)}
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
                   >
                     {isLogin ? 'Criar conta' : 'Fazer login'}
@@ -634,7 +623,7 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
             )}
           </div>
         </section>
-      </div>
+      </main>
     </div>
   );
 }

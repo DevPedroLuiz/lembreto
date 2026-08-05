@@ -1,3 +1,4 @@
+import { Capacitor, CapacitorHttp, type HttpResponse } from '@capacitor/core';
 import { AUTH_UNAUTHORIZED_EVENT } from '../lib/authEvents';
 
 export const buildHeaders = (token?: string): Record<string, string> => ({
@@ -20,12 +21,19 @@ const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | unde
 function isNativeLocalOrigin() {
   if (typeof window === 'undefined') return false;
   const { protocol, hostname } = window.location;
-  return protocol === 'capacitor:' ||
+  return protocol === 'file:' ||
+    protocol === 'capacitor:' ||
     protocol === 'ionic:' ||
     (protocol === 'https:' && ['localhost', '127.0.0.1', '::1'].includes(hostname));
 }
 
 const API_BASE_URL = configuredApiBaseUrl || (isNativeLocalOrigin() ? 'https://lembreto.vercel.app' : '');
+
+interface ApiResponse {
+  status: number;
+  ok: boolean;
+  json: () => Promise<unknown>;
+}
 
 interface ApiRequestOptions {
   timeoutMs?: number;
@@ -44,7 +52,7 @@ function emitUnauthorizedIfNeeded(status: number, token?: string) {
   window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT, { detail: { token } }));
 }
 
-async function parseJsonSafe(res: Response) {
+async function parseJsonSafe(res: ApiResponse) {
   return res.json().catch(() => ({})) as Promise<unknown>;
 }
 
@@ -59,15 +67,64 @@ function getApiErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
-async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const headers = new Headers(init.headers);
+function normalizeRequestHeaders(headersInit?: HeadersInit) {
+  const headers = new Headers(headersInit);
   headers.set('Cache-Control', 'no-cache');
   headers.set('Pragma', 'no-cache');
+  return headers;
+}
+
+function headersToRecord(headers: Headers) {
+  const output: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    output[key] = value;
+  });
+  return output;
+}
+
+function getNativeRequestData(body: BodyInit | null | undefined) {
+  if (typeof body !== 'string') return body ?? undefined;
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return body;
+  }
+}
+
+function createNativeApiResponse(response: HttpResponse): ApiResponse {
+  return {
+    status: response.status,
+    ok: response.status >= 200 && response.status < 300,
+    json: async () => {
+      if (typeof response.data === 'string') {
+        return JSON.parse(response.data || '{}');
+      }
+
+      return response.data ?? {};
+    },
+  };
+}
+
+async function fetchWithTimeout(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<ApiResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = normalizeRequestHeaders(init.headers);
   const url = resolveApiUrl(path);
 
   try {
+    if (Capacitor.isNativePlatform()) {
+      return createNativeApiResponse(await CapacitorHttp.request({
+        url,
+        method: init.method ?? 'GET',
+        headers: headersToRecord(headers),
+        data: getNativeRequestData(init.body),
+        connectTimeout: timeoutMs,
+        readTimeout: timeoutMs,
+        responseType: 'json',
+      }));
+    }
+
     return await fetch(url, {
       ...init,
       cache: 'no-store',

@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/push-sw.js', { scope: '/' }).catch(() => {
       // The app still works without offline caching; registration is best effort.

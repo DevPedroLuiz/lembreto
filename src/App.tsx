@@ -1709,7 +1709,7 @@ export default function App() {
     }
 
     const feed = await apiGet<CalendarFeedResponse>('/api/tasks/calendar/feed', auth.token);
-    const feedUrl = new URL(feed.feedPath, window.location.origin).toString();
+    const feedUrl = new URL(resolveApiUrl(feed.feedPath), window.location.href).toString();
 
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(feedUrl);
@@ -1727,7 +1727,7 @@ export default function App() {
     }
 
     const feed = await apiPost<CalendarFeedResponse>('/api/tasks/calendar/feed', {}, auth.token);
-    const feedUrl = new URL(feed.feedPath, window.location.origin).toString();
+    const feedUrl = new URL(resolveApiUrl(feed.feedPath), window.location.href).toString();
 
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(feedUrl);

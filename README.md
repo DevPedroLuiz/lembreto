@@ -24,6 +24,21 @@ Sistema de gerenciamento de tarefas com dashboard, autenticação, recuperação
 
 O projeto tem base Capacitor para gerar um app Android real a partir do frontend Vite. Veja [docs/android-saas.md](docs/android-saas.md) para configurar `VITE_API_BASE_URL`, sincronizar o projeto Android e planejar a evoluÃ§Ã£o SaaS.
 
+## Desktop
+
+O projeto tambem tem uma versao desktop com Electron, empacotando o build Vite como aplicativo Windows.
+
+```bash
+npm run desktop:dev
+npm run desktop:pack
+npm run desktop:build
+```
+
+- `desktop:dev` gera o build web e abre o app desktop local.
+- `desktop:pack` cria uma pasta executavel para teste rapido em `desktop-dist/`.
+- `desktop:build` gera o instalador Windows NSIS em `desktop-dist/`.
+- Quando o app desktop roda a partir de arquivos locais, a API usa `VITE_API_BASE_URL`; se ela nao estiver definida, usa `https://lembreto.vercel.app`.
+
 ## Variáveis de ambiente
 
 Crie `.env.local` na raiz:

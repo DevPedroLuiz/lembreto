@@ -1,0 +1,166 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #050607;
+  font-family: var(--font-sans);
+  color: white;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.28);
+  color: white;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.8);
+  outline-offset: 2px;
+}
+
+.field-control {
+  @apply w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] transition-all placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10;
+}
+
+.dark .field-control,
+.field-control {
+  @apply border-white/10 bg-slate-950/60 text-slate-100 placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-blue-400/10;
+}
+
+.field-control-with-icon {
+  @apply pl-11 pr-4;
+}
+
+.field-icon {
+  @apply pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400;
+}
+
+.action-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-sky-500 px-5 py-3 font-semibold text-white shadow-[0_20px_36px_-22px_rgba(37,99,235,0.65)] transition-all hover:-translate-y-0.5 hover:from-blue-700 hover:to-sky-500 active:translate-y-0;
+}
+
+.action-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3 font-semibold text-slate-100 transition-all hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.08] active:translate-y-0;
+}
+
+.bg-grid {
+  background-size: 32px 32px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+}
+
+.theme-light {
+  color-scheme: light;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(14, 165, 233, 0.16), transparent 34%),
+    radial-gradient(circle at 82% 18%, rgba(16, 185, 129, 0.13), transparent 30%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4f8 100%);
+}
+
+.theme-light .bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+}
+
+.theme-light .text-white,
+.theme-light .text-slate-100,
+.theme-light .text-slate-200,
+.theme-light .text-cyan-50,
+.theme-light .text-cyan-100 {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-300,
+.theme-light .text-slate-400,
+.theme-light .text-slate-500 {
+  color: #475569 !important;
+}
+
+.theme-light .border-white\/10,
+.theme-light .border-white\/12,
+.theme-light .border-cyan-300\/20,
+.theme-light .border-cyan-300\/25,
+.theme-light .border-cyan-300\/30,
+.theme-light .border-cyan-300\/40 {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+.theme-light .bg-white\/\[0\.035\],
+.theme-light .bg-white\/\[0\.04\],
+.theme-light .bg-white\/\[0\.045\],
+.theme-light .bg-white\/\[0\.05\],
+.theme-light .bg-white\/\[0\.06\],
+.theme-light .bg-white\/\[0\.07\],
+.theme-light .bg-white\/\[0\.08\],
+.theme-light .bg-cyan-300\/\[0\.08\],
+.theme-light .bg-cyan-300\/\[0\.09\],
+.theme-light .bg-cyan-300\/\[0\.1\],
+.theme-light .bg-cyan-300\/\[0\.12\],
+.theme-light .bg-black\/24,
+.theme-light .bg-black\/30 {
+  background-color: rgba(255, 255, 255, 0.74) !important;
+}
+
+.theme-light .bg-\[\#020817\],
+.theme-light .bg-\[\#050a1a\],
+.theme-light .bg-\[\#060b1d\] {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/70 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .field-control {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.theme-light .field-control::placeholder {
+  color: #94a3b8 !important;
+}
+
+.theme-light .shadow-\[0_30px_90px_-42px_rgba\(0\,0\,0\,0\.95\)\],
+.theme-light .shadow-\[0_34px_120px_-58px_rgba\(14\,165\,233\,0\.75\)\],
+.theme-light .shadow-\[0_42px_120px_-46px_rgba\(0\,216\,245\,0\.7\)\] {
+  box-shadow: 0 28px 80px -48px rgba(15, 23, 42, 0.34) !important;
+}
+
+.lucide {
+  display: block;
+  flex-shrink: 0;
+}

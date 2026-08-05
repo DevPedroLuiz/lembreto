@@ -2,12 +2,17 @@
   "name": "lembreto",
   "private": true,
   "version": "0.0.0",
+  "description": "Sistema de lembretes, tarefas, notas e alarmes.",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx --env-file=.env.local server.ts",
     "dev:e2e": "tsx scripts/start-e2e-server.ts",
     "start": "tsx --env-file=.env.local server.ts",
     "build": "vite build",
+    "desktop:dev": "node scripts/run-desktop.mjs",
+    "desktop:pack": "node scripts/build-desktop.mjs --dir",
+    "desktop:build": "node scripts/build-desktop.mjs --installer",
     "migrate": "tsx scripts/run-migrations.ts",
     "vercel-build": "vite build",
     "preview": "vite preview",
@@ -66,9 +71,36 @@
     "@types/web-push": "^3.6.4",
     "@vercel/node": "^5.0.0",
     "autoprefixer": "^10.4.21",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.lembreto.app",
+    "productName": "Lembreto",
+    "directories": {
+      "output": "desktop-dist"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lembreto"
+    }
   }
 }
