@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   BellRing,

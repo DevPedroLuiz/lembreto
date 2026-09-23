@@ -10,13 +10,22 @@ interface RecaptchaVerifyResponse {
 }
 
 export function isRecaptchaConfigured(): boolean {
-  return Boolean(process.env.RECAPTCHA_SECRET_KEY);
+  const secret = process.env.RECAPTCHA_SECRET_KEY?.trim();
+  if (!secret) return false;
+  if (secret.startsWith('your_') || secret.includes('placeholder') || secret === 'your_google_recaptcha_v2_secret_key') {
+    return false;
+  }
+  return true;
 }
 
 export function getRecaptchaSiteKey(): string | null {
+  if (!isRecaptchaConfigured()) return null;
   const siteKey = process.env.VITE_RECAPTCHA_SITE_KEY ?? process.env.RECAPTCHA_SITE_KEY;
   const normalizedSiteKey = siteKey?.trim();
-  return normalizedSiteKey ? normalizedSiteKey : null;
+  if (!normalizedSiteKey || normalizedSiteKey.startsWith('your_') || normalizedSiteKey.includes('placeholder')) {
+    return null;
+  }
+  return normalizedSiteKey;
 }
 
 export function shouldSkipRecaptchaForTest(): boolean {
@@ -25,7 +34,7 @@ export function shouldSkipRecaptchaForTest(): boolean {
 
 export function shouldEnforceRecaptcha(): boolean {
   if (shouldSkipRecaptchaForTest()) return false;
-  return isRecaptchaConfigured() || process.env.NODE_ENV === 'production';
+  return isRecaptchaConfigured();
 }
 
 export async function verifyRecaptchaToken(

@@ -2,5 +2,5 @@
   "name": "Lembreto",
   "description": "Sistema de gerenciamento de tarefas com notificações e dashboard.",
   "requestFramePermissions": ["notifications"],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

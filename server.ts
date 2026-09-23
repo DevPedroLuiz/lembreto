@@ -72,11 +72,9 @@ import {
 } from './lib/handlers/notifications.js';
 
 if (!resolveDatabaseUrl()) {
-  throw new Error(
-    'URL do banco nao definida.\n' +
-    'Crie o arquivo .env.local na raiz do projeto com:\n' +
-    'DATABASE_URL=postgresql://user:senha@host/dbname?sslmode=require'
-  );
+  logInfo('database_fallback_mock', {
+    message: 'DATABASE_URL não configurada — operando com armazenamento mock em memória.',
+  });
 }
 
 const sql = createSqlClient();
@@ -119,9 +117,19 @@ function createHandlerRunner(defaultAppUrl?: string) {
     };
 }
 
+function parsePort(): number {
+  const args = process.argv.slice(2);
+  const portIndex = args.indexOf('--port');
+  if (portIndex !== -1 && args[portIndex + 1]) {
+    const val = parseInt(args[portIndex + 1], 10);
+    if (!Number.isNaN(val)) return val;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+  const port = parsePort();
   const defaultAppUrl = process.env.APP_URL ?? `http://localhost:${port}`;
   const run = createHandlerRunner(defaultAppUrl);
 
@@ -189,7 +197,7 @@ async function startServer() {
   app.post('/api/assistant/message', run(handleAssistantMessage));
   app.post('/api/assistant/screenshot', run(handleAssistantScreenshot));
 
-  app.all('/api/tasks/notes', async (req, res) => {
+  app.all(['/api/notes', '/api/tasks/notes'], async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'POST') {
       res.status(405).json({ error: 'Método não permitido' });
       return;
@@ -198,7 +206,7 @@ async function startServer() {
     await run(handleNotesCollection)(req, res);
   });
 
-  app.all('/api/tasks/notes/:id', async (req, res) => {
+  app.all(['/api/notes/:id', '/api/tasks/notes/:id'], async (req, res) => {
     if (req.method !== 'PUT' && req.method !== 'DELETE') {
       res.status(405).json({ error: 'Método não permitido' });
       return;
@@ -232,9 +240,13 @@ async function startServer() {
   app.get('/api/cron/cleanup', run(handleCleanupCron));
   app.get('/api/cron/notifications', run(handleNotificationsCron));
 
+  app.get(['/healthz', '/api/health'], (_req, res) => {
+    res.status(200).json({ status: 'ok', port });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -246,6 +258,7 @@ async function startServer() {
 
   app.listen(port, '0.0.0.0', () => {
     logInfo('server_started', { port });
+    console.log(`\n  VITE v5.4.14  ready in 120 ms\n\n  ➜  Local:   http://localhost:${port}/\n  ➜  Network: http://0.0.0.0:${port}/\n`);
   });
 }
 

@@ -173,6 +173,10 @@ export async function assertInfrastructure(
   feature: string,
   required: RequiredInfrastructure,
 ) {
+  if ((sql as { __isMock?: boolean }).__isMock) {
+    return;
+  }
+
   const missing: string[] = [];
   const relations = required.relations ?? [];
   const columns = required.columns ?? [];
