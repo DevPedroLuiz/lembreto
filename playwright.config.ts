@@ -43,6 +43,9 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer,
     timeout: 120_000,
+    env: {
+      PORT: String(PORT),
+    },
   },
   projects: [
     {

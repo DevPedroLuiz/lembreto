@@ -9,7 +9,6 @@ import {
   Lock,
   Mail,
   ShieldCheck,
-  Sparkles,
   User as UserIcon,
 } from 'lucide-react';
 import type { useAuth } from '../hooks/useAuth';
@@ -294,18 +293,12 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
               <BrandMark className="h-8 w-8" />
             </div>
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">Sistema</p>
-              <h1 className="text-xl font-bold tracking-tight">Lembreto</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Lembreto</h1>
             </div>
           </div>
 
           {/* Hero Content & Previews */}
           <div className="relative z-10 max-w-lg space-y-6">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3.5 py-1 text-xs font-semibold text-cyan-300 backdrop-blur-md">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
-              Acesso direto ao painel
-            </div>
-
             <h2 className="text-3xl font-bold leading-tight tracking-tight xl:text-4xl 2xl:text-5xl">
               Entre no painel para organizar lembretes, notas e alarmes.
             </h2>
@@ -389,19 +382,13 @@ export function AuthPage({ auth, toastNotify }: AuthPageProps) {
                 <BrandMark className="h-7 w-7" />
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sistema</p>
                 <h1 className="text-xl font-bold">Lembreto</h1>
               </div>
             </div>
 
             {/* Form Title & Context */}
             <div className="text-center sm:text-left">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100/80 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300">
-                <Sparkles size={13} className="text-blue-500 dark:text-blue-400" />
-                {isRecovering ? 'Recuperação de Acesso' : isLogin ? 'Acesso ao Sistema' : 'Nova Conta'}
-              </span>
-
-              <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
+              <h2 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
                 {isRecovering
                   ? recoverSuccess
                     ? 'Verifique seu e-mail'

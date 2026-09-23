@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Lock, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Lock } from 'lucide-react';
 import { apiPost } from '../api/client';
 import { BrandMark } from '../components/BrandLogo';
 
@@ -51,11 +51,7 @@ export function ResetPage({ onBackToLogin }: ResetPageProps) {
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[28px] bg-slate-950 shadow-[0_18px_36px_-22px_rgba(14,165,255,0.72)] ring-1 ring-cyan-300/20">
             <BrandMark className="h-12 w-12" />
           </div>
-          <span className="section-eyebrow mt-6">
-            <ShieldCheck size={14} />
-            Segurança da conta
-          </span>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+          <h1 className="mt-6 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
             {success ? 'Senha redefinida' : 'Criar nova senha'}
           </h1>
           <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">

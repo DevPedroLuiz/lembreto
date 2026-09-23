@@ -124,6 +124,10 @@ function parsePort(): number {
     const val = parseInt(args[portIndex + 1], 10);
     if (!Number.isNaN(val)) return val;
   }
+  if (process.env.PORT) {
+    const envVal = parseInt(process.env.PORT, 10);
+    if (!Number.isNaN(envVal)) return envVal;
+  }
   return 3000;
 }
 
