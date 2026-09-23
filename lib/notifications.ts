@@ -211,16 +211,27 @@ function getPushSubject() {
 }
 
 export function isPushConfigured() {
-  return Boolean(getPushPublicKey() && getPushPrivateKey());
+  const publicKey = getPushPublicKey();
+  const privateKey = getPushPrivateKey();
+  if (!publicKey || !privateKey) return false;
+  if (publicKey.startsWith('your_') || privateKey.startsWith('your_') || publicKey.includes('placeholder')) {
+    return false;
+  }
+  return true;
 }
 
 function getWebPushClient() {
+  if (!isPushConfigured()) return null;
   const publicKey = getPushPublicKey();
   const privateKey = getPushPrivateKey();
   if (!publicKey || !privateKey) return null;
 
-  webpush.setVapidDetails(getPushSubject(), publicKey, privateKey);
-  return webpush;
+  try {
+    webpush.setVapidDetails(getPushSubject(), publicKey, privateKey);
+    return webpush;
+  } catch {
+    return null;
+  }
 }
 
 function buildNotificationNavigationPath(target?: AppNotificationRecord['target']) {

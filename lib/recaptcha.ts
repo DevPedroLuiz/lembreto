@@ -19,13 +19,9 @@ export function isRecaptchaConfigured(): boolean {
 }
 
 export function getRecaptchaSiteKey(): string | null {
-  if (!isRecaptchaConfigured()) return null;
   const siteKey = process.env.VITE_RECAPTCHA_SITE_KEY ?? process.env.RECAPTCHA_SITE_KEY;
   const normalizedSiteKey = siteKey?.trim();
-  if (!normalizedSiteKey || normalizedSiteKey.startsWith('your_') || normalizedSiteKey.includes('placeholder')) {
-    return null;
-  }
-  return normalizedSiteKey;
+  return normalizedSiteKey ? normalizedSiteKey : null;
 }
 
 export function shouldSkipRecaptchaForTest(): boolean {

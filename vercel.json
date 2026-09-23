@@ -1,51 +1,13 @@
 {
-  "version": 2,
-  "buildCommand": "npm run vercel-build",
-  "outputDirectory": "dist",
   "functions": {
-    "api/assistant.ts": {
-      "maxDuration": 45
-    },
     "api/calendar.ts": {
       "maxDuration": 120
     }
   },
   "crons": [
-    { "path": "/api/cron/notifications", "schedule": "0 12 * * *" },
-    { "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }
-  ],
-  "rewrites": [
-    { "source": "/api/tasks/metadata", "destination": "/api/tasks?action=metadata" },
-    { "source": "/api/tasks/calendar.ics", "destination": "/api/tasks?action=calendar-ics" },
-    { "source": "/api/tasks/calendar/feed", "destination": "/api/tasks?action=calendar-feed" },
-    { "source": "/api/tasks/holidays", "destination": "/api/tasks?action=holidays" },
-    { "source": "/api/tasks/holidays/location", "destination": "/api/tasks?action=holidays-location" },
-    { "source": "/api/tasks/categories", "destination": "/api/tasks?action=categories" },
-    { "source": "/api/tasks/tags", "destination": "/api/tasks?action=tags" },
-    { "source": "/api/tasks/notes", "destination": "/api/notes" },
-    { "source": "/api/tasks/notes/:id", "destination": "/api/notes?id=:id" },
-    { "source": "/api/calendar/integrations", "destination": "/api/calendar" },
-    { "source": "/api/calendar/:provider/connect", "destination": "/api/calendar?action=connect&provider=:provider" },
-    { "source": "/api/calendar/:provider/callback", "destination": "/api/calendar?action=callback&provider=:provider" },
-    { "source": "/api/calendar/:provider/sync-all", "destination": "/api/calendar?action=sync-all&provider=:provider" },
-    { "source": "/api/calendar/:provider", "destination": "/api/calendar?action=settings&provider=:provider" },
-    { "source": "/api/calendar/tasks/:taskId/sync", "destination": "/api/calendar?action=sync-task&taskId=:taskId" },
-    { "source": "/api/cron/:job", "destination": "/api/cron?job=:job" },
-    { "source": "/api/auth/google/start", "destination": "/api/auth?action=google-start" },
-    { "source": "/api/auth/google/callback", "destination": "/api/auth?action=google-callback" },
-    { "source": "/api/auth/verify-email/resend", "destination": "/api/auth?action=verify-email-resend" },
-    { "source": "/api/auth/:action", "destination": "/api/auth?action=:action" },
-    { "source": "/api/tasks/:id", "destination": "/api/tasks?id=:id" },
-    { "source": "/api/notes/:id", "destination": "/api/notes?id=:id" },
-    { "source": "/api/notifications/settings", "destination": "/api/notifications?action=settings" },
-    { "source": "/api/notifications/mark-all-read", "destination": "/api/notifications?action=mark-all-read" },
-    { "source": "/api/notifications/schedules", "destination": "/api/notifications?action=schedules" },
-    { "source": "/api/notifications/push-subscriptions", "destination": "/api/notifications?action=push-subscriptions" },
-    { "source": "/api/notifications/alarms/:id/snooze", "destination": "/api/notifications?action=alarm-snooze&id=:id" },
-    { "source": "/api/notifications/alarms/:id/dismiss", "destination": "/api/notifications?action=alarm-dismiss&id=:id" },
-    { "source": "/api/notifications/:id", "destination": "/api/notifications?id=:id" },
-    { "source": "/api/assistant/message", "destination": "/api/assistant?action=message" },
-    { "source": "/api/assistant/screenshot", "destination": "/api/assistant?action=screenshot" },
-    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "0 3 * * *"
+    }
   ]
 }
